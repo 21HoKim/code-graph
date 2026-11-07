@@ -10,6 +10,9 @@
 import type { RelationKind } from '../core/model';
 import type { Pt } from './layout';
 
+/** Must match render.ts BREAK_AT (kept local to avoid a render↔flow import cycle). */
+const BREAK_AT = 0.8;
+
 export type FlowMode = 'all' | 'focus' | 'off';
 
 export interface FlowPath {
@@ -23,6 +26,8 @@ export interface FlowPath {
   dashed: boolean;
   bbox: [number, number, number, number];
   phase: number;
+  /** ok: current flows · cut: it sparks and dies at the break · dead: nothing flows */
+  state: 'ok' | 'cut' | 'dead';
 }
 
 export interface FlowPalette {
@@ -32,6 +37,7 @@ export interface FlowPalette {
   inherit: string;
   include: string;
   ret: string;
+  broken: string;
 }
 
 /** Optional live events (dynamic tracing): bright pulses fired on demand. */
@@ -48,7 +54,15 @@ const SPACING = 60;
 /** ambient (not highlighted) wires carry sparser, dimmer charges */
 const AMBIENT = 2.4;
 
-export function makePath(id: string, kind: RelationKind, pts: Pt[], weight: number, returns: boolean, dashed: boolean): FlowPath {
+export function makePath(
+  id: string,
+  kind: RelationKind,
+  pts: Pt[],
+  weight: number,
+  returns: boolean,
+  dashed: boolean,
+  state: 'ok' | 'cut' | 'dead' = 'ok',
+): FlowPath {
   const n = pts.length;
   const arr = new Float32Array(n * 2);
   const cum = new Float32Array(n);
@@ -68,7 +82,7 @@ export function makePath(id: string, kind: RelationKind, pts: Pt[], weight: numb
   }
   let h = 0;
   for (let i = 0; i < id.length; i++) h = (h * 31 + id.charCodeAt(i)) >>> 0;
-  return { id, kind, pts: arr, cum, len: cum[n - 1] ?? 0, weight, returns, dashed, bbox: [minx, miny, maxx, maxy], phase: (h % 1000) / 1000 };
+  return { id, kind, pts: arr, cum, len: cum[n - 1] ?? 0, weight, returns, dashed, bbox: [minx, miny, maxx, maxy], phase: (h % 1000) / 1000, state };
 }
 
 export class FlowLayer {
@@ -197,7 +211,7 @@ export class FlowLayer {
     const visible: FlowPath[] = [];
     if (this.mode !== 'off') {
       for (const p of this.paths) {
-        if (p.dashed || !SPEED[p.kind]) continue;
+        if (p.state === 'dead' || (p.dashed && p.state !== 'cut') || !SPEED[p.kind]) continue;
         const b = p.bbox;
         if (b[2] < vx0 || b[0] > vx1 || b[3] < vy0 || b[1] > vy1) continue;
         const hot = !this.focus || this.focus.has(p.id);
@@ -210,6 +224,10 @@ export class FlowLayer {
 
     for (const p of visible) {
       const hot = !this.focus || this.focus.has(p.id);
+      if (p.state === 'cut') {
+        this.drawCut(ctx, p, t, size, half, hot);
+        continue;
+      }
       const color = (this.palette as unknown as Record<string, string>)[p.kind] ?? this.palette.call;
       const spr = this.sprite(color, size);
       const lit = hot && !!this.focus;
@@ -245,6 +263,27 @@ export class FlowLayer {
     ctx.globalCompositeOperation = 'source-over';
     this.raf = requestAnimationFrame(this.frame);
   };
+
+  /** Current runs up to the break, then sparks and dies. */
+  private drawCut(ctx: CanvasRenderingContext2D, p: FlowPath, t: number, size: number, half: number, hot: boolean): void {
+    const end = p.len * BREAK_AT;
+    const spr = this.sprite(this.palette.broken, size);
+    ctx.globalAlpha = hot ? 1 : 0.45;
+    const spacing = SPACING * 1.4;
+    const off = (t * 55 + p.phase * spacing) % spacing;
+    for (let s = off; s < end; s += spacing) {
+      ctx.globalAlpha = (hot ? 1 : 0.45) * Math.min(1, (end - s) / 30 + 0.15);
+      this.draw(ctx, p, s, spr, half);
+    }
+    // sparks at the break
+    const spark = this.sprite('#ffffff', Math.round(size * 0.7));
+    for (let i = 0; i < 3; i++) {
+      const j = Math.sin(t * 23 + i * 2.1 + p.phase * 9);
+      if (j < 0.2) continue;
+      ctx.globalAlpha = j * (hot ? 0.9 : 0.4);
+      this.draw(ctx, p, end + (j - 0.6) * 6, spark, half * 0.7);
+    }
+  }
 
   private draw(ctx: CanvasRenderingContext2D, p: FlowPath, s: number, spr: HTMLCanvasElement, half: number): void {
     if (s < 0 || s > p.len) return;

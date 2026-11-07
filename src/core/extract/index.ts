@@ -1,5 +1,6 @@
 import * as path from 'path';
 import { Language, Parser } from 'web-tree-sitter';
+import type { Node } from 'web-tree-sitter';
 import type { FileFacts, Lang } from '../model';
 import { SOURCE_EXTENSIONS } from '../model';
 import { hashText } from './common';
@@ -71,11 +72,15 @@ export function extractFile(parsers: Parsers, relPath: string, text: string): Fi
     return base;
   }
   try {
+    if (tree.rootNode.hasError) base.syntaxErrors = syntaxIssues(tree.rootNode);
     if (lang === 'python') {
       const r = extractPython(tree.rootNode);
       base.entities = r.entities;
       base.calls = r.calls;
       base.imports = r.imports;
+      base.boundNames = r.boundNames;
+      base.wildcardImport = r.wildcardImport || undefined;
+      base.mainGuard = r.mainGuard || undefined;
     } else {
       const r = extractCpp(tree.rootNode);
       base.entities = r.entities;
@@ -90,6 +95,28 @@ export function extractFile(parsers: Parsers, relPath: string, text: string): Fi
   }
   base.parseMs = Date.now() - t0;
   return base;
+}
+
+/** ERROR / MISSING nodes, outermost only. Positions are approximate (error recovery). */
+function syntaxIssues(root: Node, max = 8): { line: number; endLine: number; message: string }[] {
+  const out: { line: number; endLine: number; message: string }[] = [];
+  const visit = (n: Node) => {
+    if (out.length >= max) return;
+    const line = n.startPosition.row + 1;
+    if (n.isMissing) {
+      out.push({ line, endLine: line, message: `missing '${n.type}'` });
+      return;
+    }
+    if (n.isError) {
+      const first = n.text.split('\n')[0].trim().slice(0, 32);
+      out.push({ line, endLine: n.endPosition.row + 1, message: `cannot parse near '${first}'` });
+      return;
+    }
+    if (!n.hasError) return;
+    for (const c of n.children) if (c) visit(c);
+  };
+  visit(root);
+  return out;
 }
 
 function countLines(s: string): number {

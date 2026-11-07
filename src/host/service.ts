@@ -6,8 +6,10 @@ import * as fs from 'fs';
 import * as path from 'path';
 import * as vscode from 'vscode';
 import { AnalysisSession, DEFAULT_EXCLUDE_DIRS, type FileEntry } from '../core/analyze';
-import type { CodeGraph } from '../core/model';
+import type { CodeGraph, Diagnostic } from '../core/model';
 import { ParsePool, defaultWorkerCount } from '../core/pool';
+import { detectToolchain, loadCompileCommands, verifyWorkspace, type Toolchain } from '../core/verify';
+import type { VerifyInfo } from '../shared/protocol';
 
 const SOURCE_GLOB = '**/*.{c,h,cc,cpp,cxx,c++,hpp,hh,hxx,h++,ipp,inl,py,pyi}';
 
@@ -22,7 +24,12 @@ export class AnalysisService implements vscode.Disposable {
   private relOf = new Map<string, string>();
   private running?: Promise<CodeGraph>;
   private rerun = false;
+  private entries: FileEntry[] = [];
+  private unitDiags = new Map<string, Diagnostic[]>();
+  private toolchain?: { key: string; tc: Toolchain };
   graph?: CodeGraph;
+  /** Latest compile-check result (merged over all units). */
+  verified?: { diagnostics: Diagnostic[]; info: VerifyInfo };
   readonly log: vscode.OutputChannel;
 
   constructor(ctx: vscode.ExtensionContext) {
@@ -63,6 +70,138 @@ export class AnalysisService implements vscode.Disposable {
 
   invalidate(): void {
     this.session?.invalidate();
+  }
+
+  get root(): string {
+    return this.session?.root ?? vscode.workspace.workspaceFolders?.[0]?.uri.fsPath ?? process.cwd();
+  }
+
+  get includePaths(): string[] {
+    return this.session?.includePaths ?? [];
+  }
+
+  /** Source files of the last analysis with their language. */
+  sourceFiles(): { abs: string; rel: string; lang: 'c' | 'cpp' | 'python' }[] {
+    const out: { abs: string; rel: string; lang: 'c' | 'cpp' | 'python' }[] = [];
+    for (const e of this.entries) {
+      if (/\.py$/i.test(e.rel)) out.push({ abs: e.abs, rel: e.rel, lang: 'python' });
+      else if (/\.c$/i.test(e.rel)) out.push({ abs: e.abs, rel: e.rel, lang: 'c' });
+      else if (!/\.pyi$/i.test(e.rel)) out.push({ abs: e.abs, rel: e.rel, lang: /\.h$/i.test(e.rel) && !this.cppHeader(e.rel) ? 'c' : 'cpp' });
+    }
+    return out;
+  }
+
+  private cppHeader(rel: string): boolean {
+    return this.graph?.files.find((f) => f.path === rel)?.lang === 'cpp';
+  }
+
+  toolchainFor(): Toolchain {
+    const c = vscode.workspace.getConfiguration('codeCurrent.verify');
+    const pref = { cc: c.get<string>('cc', '') || undefined, cxx: c.get<string>('cxx', '') || undefined, python: c.get<string>('python', '') || undefined };
+    const key = JSON.stringify(pref);
+    if (this.toolchain?.key !== key) {
+      const tc = detectToolchain(pref);
+      this.toolchain = { key, tc };
+      this.log.appendLine(`toolchain: cc=${tc.cc ?? '-'} (${tc.ccKind ?? '?'}), c++=${tc.cxx ?? '-'} (${tc.cxxKind ?? '?'}), python=${tc.python ?? '-'}`);
+    }
+    return this.toolchain.tc;
+  }
+
+  /**
+   * Compile-check the workspace (or only `units`) with the real toolchain. Keeps per-unit results so a
+   * save re-checks just the affected translation units.
+   */
+  async verify(opts: { units?: string[]; signal?: AbortSignal; onProgress?: (done: number, total: number) => void } = {}): Promise<{ diagnostics: Diagnostic[]; info: VerifyInfo }> {
+    const cfg = vscode.workspace.getConfiguration('codeCurrent.verify');
+    const all = this.sourceFiles();
+    const wanted = opts.units ? new Set(opts.units) : undefined;
+    const files = wanted ? all.filter((f) => wanted.has(f.rel)) : all;
+    const root = this.root;
+    const r = await verifyWorkspace({
+      root,
+      files,
+      includePaths: this.includePaths,
+      toolchain: this.toolchainFor(),
+      compileCommands: cfg.get<boolean>('useCompileCommands', true) ? loadCompileCommands(root) : undefined,
+      extraFlags: cfg.get<string[]>('extraFlags', []),
+      timeoutMs: Math.max(5, cfg.get<number>('timeoutSeconds', 60)) * 1000,
+      onProgress: opts.onProgress,
+      signal: opts.signal,
+      relOf: (abs) => this.relOf.get(abs) ?? this.computeRel(vscode.Uri.file(abs)),
+    });
+    if (opts.signal?.aborted) throw new Error('cancelled');
+    const live = new Set(all.map((f) => f.rel));
+    if (!wanted) this.unitDiags.clear();
+    for (const f of files) this.unitDiags.delete(f.rel);
+    for (const [u, d] of r.units) this.unitDiags.set(u, d);
+    for (const u of [...this.unitDiags.keys()]) if (!live.has(u)) this.unitDiags.delete(u);
+    const seen = new Set<string>();
+    const diagnostics: Diagnostic[] = [];
+    for (const list of this.unitDiags.values())
+      for (const d of list) {
+        const k = `${d.file}:${d.line}:${d.col ?? 0}:${d.severity}:${d.message}`;
+        if (!seen.has(k)) {
+          seen.add(k);
+          diagnostics.push(d);
+        }
+      }
+    const prev = this.verified?.info;
+    const info: VerifyInfo = wanted && prev
+      ? { ...prev, cChecked: prev.cChecked || r.cChecked, pyChecked: prev.pyChecked || r.pyChecked, notes: r.notes.length ? r.notes : prev.notes, ms: r.ms }
+      : { cChecked: r.cChecked, pyChecked: r.pyChecked, checkedC: r.checkedC, checkedPython: r.checkedPython, notes: r.notes, ms: r.ms };
+    this.verified = { diagnostics, info };
+    const errs = diagnostics.filter((d) => d.severity === 'error').length;
+    this.log.appendLine(
+      `verify${wanted ? ` (${files.length} units)` : ''}: ${r.checkedC} C/C++ units, ${r.checkedPython} Python files — ${errs} errors, ${diagnostics.length - errs} warnings in ${r.ms} ms`,
+    );
+    for (const n of r.notes) this.log.appendLine('  note: ' + n);
+    return this.verified;
+  }
+
+  /** Translation units / Python files to re-check after `changed` files were saved (headers → every TU including them). */
+  unitsAffectedBy(changed: string[]): string[] {
+    const g = this.graph;
+    const out = new Set<string>();
+    const isUnit = (rel: string) => /\.(c|cc|cpp|cxx|c\+\+|py)$/i.test(rel);
+    const includers = new Map<string, string[]>();
+    for (const r of g?.relations ?? []) {
+      if (r.kind !== 'include' || !r.from.startsWith('f:') || !r.to.startsWith('f:')) continue;
+      const to = r.to.slice(2);
+      (includers.get(to) ?? includers.set(to, []).get(to)!).push(r.from.slice(2));
+    }
+    const seen = new Set<string>();
+    const stack = [...changed];
+    while (stack.length) {
+      const f = stack.pop()!;
+      if (seen.has(f)) continue;
+      seen.add(f);
+      if (isUnit(f)) out.add(f);
+      for (const by of includers.get(f) ?? []) stack.push(by);
+    }
+    return [...out];
+  }
+
+  /** Errors that VS Code's language servers (C/C++, Pylance, clangd…) report for workspace sources. */
+  editorDiagnostics(): Diagnostic[] {
+    const out: Diagnostic[] = [];
+    for (const [uri, list] of vscode.languages.getDiagnostics()) {
+      if (!this.isSupported(uri)) continue;
+      const rel = this.rel(uri);
+      if (!rel) continue;
+      for (const d of list) {
+        if (d.severity !== vscode.DiagnosticSeverity.Error) continue;
+        out.push({
+          file: rel,
+          line: d.range.start.line + 1,
+          col: d.range.start.character + 1,
+          endLine: d.range.end.line + 1,
+          severity: 'error',
+          source: 'editor',
+          message: `${d.message}${d.source ? ` (${d.source})` : ''}`,
+        });
+      }
+    }
+    return out;
   }
 
   /** Analyze (or re-analyze) the workspace. Concurrent calls coalesce. */
@@ -115,6 +254,7 @@ export class AnalysisService implements vscode.Disposable {
         }),
     );
     entries.sort((a, b) => a.rel.localeCompare(b.rel));
+    this.entries = entries;
     if (!this.session || this.session.root !== root) {
       const extra = cfg.get<string[]>('cpp.includePaths', []);
       this.session = new AnalysisSession(root, this.pool);

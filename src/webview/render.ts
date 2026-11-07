@@ -2,6 +2,7 @@
  * SVG renderer: zones (expanded containers), wires, blocks, data labels.
  * Built as strings and swapped in one go — fast for thousands of elements.
  */
+import type { Overlay } from './overlay';
 import type { PEdge, PNode, Projection } from './projection';
 import {
   HEADER_H,
@@ -39,6 +40,7 @@ export class Renderer {
   private gGrid: SVGGElement;
   private gZones: SVGGElement;
   private gEdges: SVGGElement;
+  private gBreaks: SVGGElement;
   private gHits: SVGGElement;
   private gNodes: SVGGElement;
   private gLabels: SVGGElement;
@@ -63,13 +65,14 @@ export class Renderer {
           <path d="M1,1 L11,6 L1,11 z" class="mk mk-inherit"/></marker>
       </defs>
       <g class="world">
-        <g class="grid"></g><g class="zones"></g><g class="edges"></g><g class="hits"></g><g class="nodes"></g><g class="labels"></g>
+        <g class="grid"></g><g class="zones"></g><g class="edges"></g><g class="breaks"></g><g class="hits"></g><g class="nodes"></g><g class="labels"></g>
       </g>`;
     stage.appendChild(this.svg);
     this.world = this.svg.querySelector('.world')!;
     this.gGrid = this.svg.querySelector('.grid')!;
     this.gZones = this.svg.querySelector('.zones')!;
     this.gEdges = this.svg.querySelector('.edges')!;
+    this.gBreaks = this.svg.querySelector('.breaks')!;
     this.gHits = this.svg.querySelector('.hits')!;
     this.gNodes = this.svg.querySelector('.nodes')!;
     this.gLabels = this.svg.querySelector('.labels')!;
@@ -81,7 +84,16 @@ export class Renderer {
     this.svg.classList.toggle('veryfar', k < 0.24);
   }
 
-  draw(proj: Projection, layout: LayoutResult, style: LayoutStyle, dir: FlowDir, measure: Measure, counts: (n: PNode) => string): void {
+  draw(
+    proj: Projection,
+    layout: LayoutResult,
+    style: LayoutStyle,
+    dir: FlowDir,
+    measure: Measure,
+    counts: (n: PNode) => string,
+    overlay?: Overlay,
+    extraClass?: (e: PEdge) => string,
+  ): void {
     this.current = { proj, layout, style };
     const zones: string[] = [];
     const nodes: string[] = [];
@@ -89,25 +101,37 @@ export class Renderer {
     for (const n of ordered) {
       const b = layout.boxes.get(n.id);
       if (!b) continue;
-      if (n.container) zones.push(this.zone(n, b, measure));
-      else nodes.push(this.block(n, b, dir, measure, counts));
+      if (n.container) zones.push(this.zone(n, b, measure, overlay));
+      else nodes.push(this.block(n, b, dir, measure, counts, overlay));
     }
     const edges: string[] = [];
     const hits: string[] = [];
+    const breaks: string[] = [];
     for (const e of proj.edges) {
       const pts = layout.routes.get(e.id);
       if (!pts || pts.length < 2) continue;
       const d = edgePath(pts, style);
       const w = Math.min(4.5, 1.25 + Math.log2(1 + e.count) * 0.55);
+      const st = overlay?.wires.get(e.id);
+      const extra = extraClass?.(e) ?? '';
       edges.push(
-        `<path class="e k-${e.kind} c-${e.conf}" data-id="${e.id}" d="${d}" style="stroke-width:${w.toFixed(2)}" marker-end="url(#cc-a-${e.kind})"/>`,
+        `<path class="e k-${e.kind} c-${e.conf}${st ? ' ' + st : ''}${extra ? ' ' + extra : ''}" data-id="${e.id}" d="${d}" style="stroke-width:${w.toFixed(2)}" marker-end="url(#cc-a-${e.kind})"/>`,
       );
       hits.push(`<path class="eh" data-id="${e.id}" data-edge="1" d="${d}"/>`);
+      if (st === 'cut') {
+        // the wire is severed just before it reaches the broken block
+        const { p, angle } = pointAlong(pts, BREAK_AT);
+        breaks.push(
+          `<g class="brk" data-id="${e.id}" transform="translate(${p.x.toFixed(1)},${p.y.toFixed(1)}) rotate(${angle.toFixed(1)})">` +
+            `<circle r="7"/><line x1="-3" y1="-6" x2="-1" y2="6"/><line x1="2" y1="-6" x2="4" y2="6"/></g>`,
+        );
+      }
     }
     const m = 2000;
     this.gGrid.innerHTML = `<rect x="${-m}" y="${-m}" width="${layout.width + 2 * m}" height="${layout.height + 2 * m}" fill="url(#cc-grid)"/>`;
     this.gZones.innerHTML = zones.join('');
     this.gEdges.innerHTML = edges.join('');
+    this.gBreaks.innerHTML = breaks.join('');
     this.gHits.innerHTML = hits.join('');
     this.gNodes.innerHTML = nodes.join('');
     this.gLabels.innerHTML = '';
@@ -120,12 +144,19 @@ export class Renderer {
     }
   }
 
-  private zone(n: PNode, b: { x: number; y: number; w: number; h: number }, measure: Measure): string {
+  private zone(n: PNode, b: { x: number; y: number; w: number; h: number }, measure: Measure, overlay?: Overlay): string {
     const t = n.t;
     const tw = tagWidth(t.tag, measure);
-    const cls = `z k-${t.kind}${t.fragment ? ' fragment' : ''}`;
-    const title = truncate(t.label, Math.max(8, Math.floor((b.w - tw - 50) / 7)));
-    const badge = n.internal ? `<text class="zi" x="${b.x + b.w - 30}" y="${b.y + 18.5}" text-anchor="end">↻${n.internal}</text>` : '';
+    const zs = overlay?.zones.get(n.id);
+    const cls = `z k-${t.kind}${t.fragment ? ' fragment' : ''}${zs?.self ? ' zs-broken' : ''}`;
+    const internalW = n.internal ? 9 * String(n.internal).length + 14 : 0;
+    let errW = zs?.errors ? 7 * (2 + String(zs.errors).length) + 8 : 0;
+    const room = (w: number) => Math.floor((b.w - tw - 50 - internalW - w) / 7);
+    // narrow container: the title wins, the blocks inside carry their own error badges
+    if (errW && room(errW) < 6) errW = 0;
+    const title = truncate(t.label, Math.max(3, room(errW)));
+    let badge = n.internal ? `<text class="zi" x="${b.x + b.w - 30}" y="${b.y + 18.5}" text-anchor="end">↻${n.internal}</text>` : '';
+    if (errW) badge += `<text class="ze" x="${b.x + b.w - 30 - internalW}" y="${b.y + 18.5}" text-anchor="end">✕ ${zs!.errors}</text>`;
     return (
       `<g class="${cls}" data-id="${esc(n.id)}">` +
       `<rect class="zb" x="${b.x}" y="${b.y}" width="${b.w}" height="${b.h}" rx="10"/>` +
@@ -139,15 +170,25 @@ export class Renderer {
     );
   }
 
-  private block(n: PNode, b: { x: number; y: number; w: number; h: number }, dir: FlowDir, measure: Measure, counts: (n: PNode) => string): string {
+  private block(
+    n: PNode,
+    b: { x: number; y: number; w: number; h: number },
+    dir: FlowDir,
+    measure: Measure,
+    counts: (n: PNode) => string,
+    overlay?: Overlay,
+  ): string {
     const t = n.t;
     const lab = labelOf(n, counts);
     const tw = tagWidth(t.tag, measure);
     const flags = t.entity?.flags ?? [];
     const thread = flags.includes('threadEntry');
+    const st = overlay?.blocks.get(n.id);
     const cls = [
       'n',
       `k-${t.kind}`,
+      st ? 'st-' + st.state : '',
+      flags.includes('entry') ? 'entry' : '',
       thread ? 'thread' : '',
       flags.includes('decl') ? 'decl' : '',
       flags.includes('abstract') ? 'abstract' : '',
@@ -171,6 +212,8 @@ export class Renderer {
       badges += `<g class="bd ${c}"><rect x="${bx}" y="-7" width="${bw}" height="13" rx="6.5"/><text x="${bx + bw / 2}" y="2.6" text-anchor="middle">${esc(txt)}</text></g>`;
       bx -= 3;
     };
+    if (st?.state === 'broken') badge(`✕ ${st.errors}`, 'bd-err');
+    else if (st?.state === 'affected') badge(`⚠ +${st.dist}`, 'bd-imp');
     if (thread) badge('⚡ thread', 'bd-thread');
     if (t.children.length) badge(`+${n.t.children.length}`, 'bd-more');
     if (n.internal) badge(`↻${n.internal}`, 'bd-int');
@@ -222,6 +265,26 @@ export class Renderer {
   elementsOf(id: string): Element[] {
     return this.els.get(id) ?? [];
   }
+}
+
+/** Where along a cut wire the break is drawn (and where its current dies). */
+export const BREAK_AT = 0.8;
+
+export function pointAlong(pts: Pt[], frac: number): { p: Pt; angle: number } {
+  let total = 0;
+  for (let i = 1; i < pts.length; i++) total += Math.hypot(pts[i].x - pts[i - 1].x, pts[i].y - pts[i - 1].y);
+  let acc = 0;
+  for (let i = 1; i < pts.length; i++) {
+    const dx = pts[i].x - pts[i - 1].x;
+    const dy = pts[i].y - pts[i - 1].y;
+    const l = Math.hypot(dx, dy);
+    if (acc + l >= total * frac) {
+      const u = (total * frac - acc) / (l || 1);
+      return { p: { x: pts[i - 1].x + dx * u, y: pts[i - 1].y + dy * u }, angle: (Math.atan2(dy, dx) * 180) / Math.PI };
+    }
+    acc += l;
+  }
+  return { p: pts[pts.length - 1], angle: 0 };
 }
 
 export function midpoint(pts: Pt[]): Pt {

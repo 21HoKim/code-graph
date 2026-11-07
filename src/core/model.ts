@@ -103,7 +103,49 @@ export interface CodeGraph {
   entities: Entity[];
   relations: Relation[];
   stats: GraphStats;
+  /** Problems found without running a compiler: parse failures, missing implementations, undefined names. */
+  diagnostics?: Diagnostic[];
+  /** Result of a real compile check, when the producer ran one (CLI `--verify`, exported graphs). */
+  compile?: { diagnostics: Diagnostic[]; info: VerifyInfo };
   warnings?: string[];
+}
+
+export interface VerifyInfo {
+  cChecked: boolean;
+  pyChecked: boolean;
+  checkedC: number;
+  checkedPython: number;
+  notes: string[];
+  ms: number;
+}
+
+// ---------------------------------------------------------------------------
+// Problems (static checks, compiler, editor, runtime)
+// ---------------------------------------------------------------------------
+
+export type Severity = 'error' | 'warning';
+
+/**
+ * syntax     tree-sitter could not parse (coarse, file level)
+ * compiler   gcc / clang -fsyntax-only, or a real build
+ * linker     undefined references from a real build
+ * python     compile() / undefined names / unresolvable relative imports
+ * incomplete declared-but-never-defined, or raises NotImplementedError and is called
+ * editor     diagnostics from the user's language servers (clangd, Pylance, …)
+ * runtime    uncaught exception or crash during Run & Trace
+ */
+export type DiagSource = 'syntax' | 'compiler' | 'linker' | 'python' | 'incomplete' | 'editor' | 'runtime';
+
+export interface Diagnostic {
+  file: string;
+  line: number;
+  col?: number;
+  endLine?: number;
+  severity: Severity;
+  source: DiagSource;
+  message: string;
+  /** Entity id or file id ('f:...') the problem belongs to — filled by attachDiagnostics(). */
+  target?: string;
 }
 
 // ---------------------------------------------------------------------------
@@ -190,6 +232,14 @@ export interface FileFacts {
   usingNamespaces: string[];
   parseMs: number;
   error?: string;
+  /** Regions tree-sitter could not parse (imprecise: error recovery can swallow neighbouring code). */
+  syntaxErrors?: { line: number; endLine: number; message: string }[];
+  /** Python: every name bound anywhere in the module (defs, assignments, params, imports, …). */
+  boundNames?: string[];
+  /** Python: `from x import *` present, so unbound names cannot be judged. */
+  wildcardImport?: boolean;
+  /** Python: has `if __name__ == "__main__":` — a program entry point. */
+  mainGuard?: boolean;
 }
 
 export const SOURCE_EXTENSIONS: Record<string, Lang | 'header'> = {

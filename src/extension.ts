@@ -3,7 +3,7 @@
  */
 import * as fs from 'fs';
 import * as vscode from 'vscode';
-import { CircuitPanel, VIEW_TYPE, viewSettings } from './host/panel';
+import { CircuitPanel, VIEW_TYPE, verifyMode, viewSettings } from './host/panel';
 import { AnalysisService } from './host/service';
 
 let service: AnalysisService | undefined;
@@ -23,6 +23,10 @@ export function activate(ctx: vscode.ExtensionContext): void {
     vscode.commands.registerCommand('codeCurrent.reanalyze', async () => {
       const p = CircuitPanel.show(ctx, svc);
       await p.refresh('update', true);
+    }),
+    vscode.commands.registerCommand('codeCurrent.verify', async () => {
+      const p = CircuitPanel.show(ctx, svc);
+      await p.verify();
     }),
     vscode.commands.registerCommand('codeCurrent.exportGraph', async () => {
       const g = svc.graph ?? (await svc.analyze());
@@ -44,6 +48,8 @@ export function activate(ctx: vscode.ExtensionContext): void {
   let timer: NodeJS.Timeout | undefined;
   const schedule = (uri: vscode.Uri) => {
     if (!svc.isSupported(uri) || !CircuitPanel.current) return;
+    const rel = svc.rel(uri);
+    if (rel) CircuitPanel.current.noteSaved(rel);
     clearTimeout(timer);
     timer = setTimeout(() => void CircuitPanel.current?.refresh('update'), 400);
   };
@@ -57,9 +63,29 @@ export function activate(ctx: vscode.ExtensionContext): void {
       if (!e.affectsConfiguration('codeCurrent') || !CircuitPanel.current) return;
       if (e.affectsConfiguration('codeCurrent.exclude') || e.affectsConfiguration('codeCurrent.maxFiles') || e.affectsConfiguration('codeCurrent.cpp')) {
         void CircuitPanel.current.refresh('update', true);
+      } else if (e.affectsConfiguration('codeCurrent.verify.editorDiagnostics')) {
+        CircuitPanel.current.postEditorDiagnostics();
+      } else if (e.affectsConfiguration('codeCurrent.verify')) {
+        if (verifyMode() !== 'manual') void CircuitPanel.current.verify();
       } else if (svc.graph) {
         CircuitPanel.current.post({ type: 'graph', graph: svc.graph, settings: viewSettings(), reason: 'update' });
       }
+    }),
+  );
+
+  // language-server errors (opt-in) join the overlay
+  let diagTimer: NodeJS.Timeout | undefined;
+  ctx.subscriptions.push(
+    vscode.languages.onDidChangeDiagnostics(() => {
+      if (!CircuitPanel.current || vscode.workspace.getConfiguration('codeCurrent.verify').get<string>('editorDiagnostics', 'off') !== 'errors') return;
+      clearTimeout(diagTimer);
+      diagTimer = setTimeout(() => CircuitPanel.current?.postEditorDiagnostics(), 600);
+    }),
+    vscode.workspace.onDidGrantWorkspaceTrust(() => {
+      const p = CircuitPanel.current;
+      if (!p || !svc.graph) return;
+      p.post({ type: 'graph', graph: svc.graph, settings: viewSettings(), reason: 'update' });
+      if (verifyMode() !== 'manual') void p.verify();
     }),
   );
 

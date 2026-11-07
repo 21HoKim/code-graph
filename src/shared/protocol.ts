@@ -1,5 +1,7 @@
 /** Messages between the extension host and the webview. */
-import type { CodeGraph } from '../core/model';
+import type { CodeGraph, Diagnostic, VerifyInfo } from '../core/model';
+
+export type { VerifyInfo };
 
 export type LevelSetting = 'auto' | 'dir' | 'file' | 'namespace' | 'class' | 'function';
 
@@ -12,17 +14,27 @@ export interface ViewSettings {
   lang: string;
   /** Running inside VS Code (false = standalone demo page). */
   host: boolean;
+  /** Workspace trust: compile checks and Run & Trace execute tools, so they need a trusted workspace. */
+  trusted?: boolean;
 }
+
+/** compile = syntax-only check · editor = language servers · build = real build for Run & Trace · runtime = exceptions/crashes */
+export type DiagSet = 'compile' | 'editor' | 'build' | 'runtime';
 
 export type HostMessage =
   | { type: 'graph'; graph: CodeGraph; settings: ViewSettings; reason: 'initial' | 'update' }
   | { type: 'progress'; done: number; total: number }
   | { type: 'cursor'; file: string; line: number }
   | { type: 'focusFile'; file: string }
+  | { type: 'diagnostics'; set: DiagSet; diagnostics: Diagnostic[]; info?: VerifyInfo }
+  | { type: 'task'; task: 'verify' | 'build' | 'run'; state: 'start' | 'progress' | 'done' | 'error'; message?: string; done?: number; total?: number }
   | { type: 'error'; message: string };
 
 export type WebviewMessage =
   | { type: 'ready' }
   | { type: 'open'; file: string; line: number }
   | { type: 'reanalyze' }
-  | { type: 'exportGraph' };
+  | { type: 'exportGraph' }
+  | { type: 'verify' }
+  | { type: 'runTrace' }
+  | { type: 'loadTrace' };

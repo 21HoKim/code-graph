@@ -24,8 +24,12 @@
   --cc-include: #7d8a9c;
   --cc-import: #7d8a9c;
   --cc-ret: #ffb347;
+  --cc-broken: #ff4d5e;
+  --cc-affected: #ffa94d;
 }
 body.vscode-light {
+  --cc-broken: #d92d3f;
+  --cc-affected: #d9480f;
   --cc-dir: #5a6b85;
   --cc-file: #1f6feb;
   --cc-namespace: #0d9488;
@@ -216,6 +220,28 @@ button, input { font: inherit; color: inherit; }
 .mk-include, .mk-import { fill: var(--cc-include); }
 .mk-inherit { fill: var(--cc-bg); stroke: var(--cc-inherit); stroke-width: 1.4; }
 
+/* problems overlay: broken (red) · affected (orange) · unpowered (grey) */
+.n.st-broken .nb { stroke: var(--cc-broken); stroke-width: 2.2; fill: color-mix(in srgb, var(--cc-broken) 16%, var(--cc-block)); stroke-dasharray: none; }
+.n.st-broken .na { fill: var(--cc-broken); }
+.n.st-broken .t1 { fill: color-mix(in srgb, var(--cc-broken) 35%, var(--cc-fg)); }
+.n.st-affected .nb { stroke: var(--cc-affected); stroke-width: 1.8; stroke-dasharray: 5 3; }
+.n.st-affected .na { fill: var(--cc-affected); }
+.n.st-unpowered { opacity: 0.32; }
+.n.st-unpowered .na, .n.st-unpowered .pin { fill: var(--cc-muted); stroke: var(--cc-muted); }
+.z.zs-broken .zb { stroke: var(--cc-broken); stroke-width: 2; fill: color-mix(in srgb, var(--cc-broken) 7%, transparent); }
+.z.zs-broken .zh { fill: color-mix(in srgb, var(--cc-broken) 30%, transparent); }
+.z .ze { fill: var(--cc-broken); font: 700 11px var(--cc-font); }
+.bd-err rect { fill: var(--cc-broken); stroke: none; }
+.bd-err text { fill: #fff; }
+.bd-imp rect { stroke: var(--cc-affected); }
+.bd-imp text { fill: var(--cc-affected); }
+.e.cut { stroke: var(--cc-broken); opacity: 0.95; stroke-dasharray: none; }
+.e.dead { opacity: 0.12; }
+.brk circle { fill: var(--cc-broken); opacity: 0.28; }
+.brk line { stroke: var(--cc-broken); stroke-width: 2.4; stroke-linecap: round; }
+.has-sel .brk { opacity: 0.25; }
+.n.entry .na { fill: var(--cc-instantiate); }
+
 /* selection dimming */
 .has-sel .n:not(.hl), .has-sel .e:not(.hl) { opacity: 0.18; }
 .has-sel .z:not(.hl) .zb { opacity: 0.6; }
@@ -263,6 +289,22 @@ button, input { font: inherit; color: inherit; }
 .lst .args { grid-column: 2 / 4; font-family: var(--cc-mono); font-size: 10.5px; color: var(--cc-muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .lst .cnt { color: var(--cc-muted); font-size: 10.5px; }
 .conf-guess { opacity: 0.6; font-style: italic; }
+.bad { color: var(--cc-broken) !important; }
+.warn { color: var(--cc-affected) !important; }
+.flag.bad { border-color: var(--cc-broken); }
+.flag.warn { border-color: var(--cc-affected); }
+.pill.bad { --k: var(--cc-broken); }
+.pill.src { --k: var(--cc-fg); font-size: 9px; }
+.diag.sev-error .dot { background: var(--cc-broken); }
+.diag.sev-warning .dot { background: var(--cc-affected); }
+.q { color: var(--cc-muted); }
+h3 a.bad, h3 .nocase { text-transform: none; letter-spacing: 0; font-size: 12px; }
+.btn.health.bad { border-color: var(--cc-broken); color: var(--cc-broken); font-weight: 600; }
+.btn.health.good { border-color: var(--cc-instantiate); color: var(--cc-instantiate); }
+.btn.health.busy { display: inline-flex; gap: 6px; align-items: center; }
+.btn:disabled { opacity: 0.45; cursor: default; }
+.tip-bad { color: var(--cc-broken); margin-top: 3px; }
+.tip-warn { color: var(--cc-affected); margin-top: 3px; }
 
 /* ---------- overlays ---------- */
 .status {
@@ -292,6 +334,10 @@ button, input { font: inherit; color: inherit; }
   z-index: 3;
 }
 .legend div { display: flex; align-items: center; gap: 6px; white-space: nowrap; }
+.legend .sw-b { width: 14px; height: 9px; border-radius: 3px; border: 1.6px solid; box-sizing: border-box; }
+.legend .sw-b.bad { border-color: var(--cc-broken); background: color-mix(in srgb, var(--cc-broken) 25%, transparent); }
+.legend .sw-b.warn { border-color: var(--cc-affected); border-style: dashed; }
+.legend .sw-b.off { border-color: var(--cc-muted); opacity: 0.5; }
 .tooltip {
   position: absolute;
   pointer-events: none;

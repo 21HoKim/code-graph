@@ -24,6 +24,9 @@ export interface PyFacts {
   entities: RawEntity[];
   calls: RawCall[];
   imports: RawImport[];
+  boundNames: string[];
+  wildcardImport: boolean;
+  mainGuard: boolean;
 }
 
 const MAX_DEPTH = 600;
@@ -34,7 +37,83 @@ export function extractPython(root: Node): PyFacts {
   const x = new PyExtractor();
   const moduleCtx: FnCtx = { key: '', locals: new Map() };
   x.block(named(root), { names: [], kinds: [] }, moduleCtx, 0);
-  return { entities: x.entities, calls: x.calls, imports: x.imports };
+  const b = collectBindings(root);
+  return { entities: x.entities, calls: x.calls, imports: x.imports, boundNames: [...b.names], wildcardImport: b.wildcard, mainGuard: b.mainGuard };
+}
+
+/**
+ * Every name the module binds anywhere (any scope). Deliberately over-approximate: a call to a name that is
+ * not in this set, not a builtin and not star-imported is a guaranteed NameError when it runs.
+ */
+function collectBindings(root: Node): { names: Set<string>; wildcard: boolean; mainGuard: boolean } {
+  const names = new Set<string>();
+  let wildcard = false;
+  let mainGuard = false;
+  const targets = (n: Node | null): void => {
+    if (!n) return;
+    if (n.type === 'identifier') names.add(n.text);
+    else if (n.type !== 'attribute' && n.type !== 'subscript') for (const c of named(n)) targets(c);
+  };
+  const walk = (n: Node, depth: number): void => {
+    if (depth > MAX_DEPTH) return;
+    switch (n.type) {
+      case 'function_definition':
+      case 'class_definition':
+        targets(n.childForFieldName('name'));
+        break;
+      case 'parameters':
+      case 'lambda_parameters':
+        for (const p of named(n)) {
+          if (p.type === 'identifier') names.add(p.text);
+          else {
+            targets(p.childForFieldName('name'));
+            for (const c of named(p)) if (c.type === 'identifier' || c.type.endsWith('splat_pattern')) targets(c);
+          }
+        }
+        break;
+      case 'assignment':
+      case 'augmented_assignment':
+      case 'for_statement':
+      case 'for_in_clause':
+        targets(n.childForFieldName('left'));
+        break;
+      case 'named_expression':
+        targets(n.childForFieldName('name'));
+        break;
+      case 'as_pattern':
+        targets(n.childForFieldName('alias'));
+        break;
+      case 'except_clause':
+        for (let i = 0; i < n.childCount - 1; i++) if (n.child(i)?.type === 'as') targets(n.child(i + 1));
+        break;
+      case 'import_statement':
+        for (const c of named(n)) {
+          if (c.type === 'dotted_name') names.add(c.text.split('.')[0]);
+          else if (c.type === 'aliased_import') targets(c.childForFieldName('alias'));
+        }
+        break;
+      case 'import_from_statement':
+        for (const c of n.childrenForFieldName('name')) {
+          if (!c) continue;
+          if (c.type === 'dotted_name') names.add(c.text.split('.')[0]);
+          else if (c.type === 'aliased_import') targets(c.childForFieldName('alias') ?? c.childForFieldName('name'));
+        }
+        if (named(n).some((c) => c.type === 'wildcard_import')) wildcard = true;
+        break;
+      case 'global_statement':
+      case 'nonlocal_statement':
+        for (const c of named(n)) if (c.type === 'identifier') names.add(c.text);
+        break;
+      case 'if_statement':
+        if (n.parent?.type === 'module' && /__name__\s*==\s*['"]__main__['"]|['"]__main__['"]\s*==\s*__name__/.test(n.childForFieldName('condition')?.text ?? '')) {
+          mainGuard = true;
+        }
+        break;
+    }
+    for (const c of named(n)) walk(c, depth + 1);
+  };
+  walk(root, 0);
+  return { names, wildcard, mainGuard };
 }
 
 /** a.b.c as a list of names, or undefined if the expression is not a plain dotted path. */
@@ -231,6 +310,10 @@ class PyExtractor {
         flags.add(d.replace(/^.*\./, ''));
       } else flags.add('@' + d);
     }
+    // a body that only raises NotImplementedError (after an optional docstring) is a stub
+    const stmts = named(n.childForFieldName('body')).filter((c) => c.type !== 'comment');
+    const real = stmts.filter((c, i) => !(i === 0 && c.type === 'expression_statement' && named(c)[0]?.type === 'string'));
+    if (real.length === 1 && real[0].type === 'raise_statement' && /\bNotImplementedError\b/.test(real[0].text)) flags.add('notImplemented');
     const key = this.keys.unique([...scope.names, name].join('.'));
     const ent: RawEntity = {
       key,
@@ -302,7 +385,8 @@ class PyExtractor {
       const attr = fn.childForFieldName('attribute')?.text ?? '';
       const path = dotted(obj);
       const recvName = path?.[path.length - 1] ?? '';
-      const recvType = path && path.length === 1 ? f.locals.get(path[0]) : undefined;
+      // Foo().method(): the receiver is a fresh Foo
+      const recvType = path && path.length === 1 ? f.locals.get(path[0]) : !path && obj?.type === 'call' ? constructedType(obj) : undefined;
       const isExecutor = EXECUTOR_TYPES.test(recvType ?? '') || EXECUTOR_NAMES.test(recvName);
       if ((attr === 'Thread' || attr === 'Process') && kw.has('target')) spawn(kw.get('target'), `${path?.join('.') ?? ''}.${attr}`);
       else if (attr === 'Timer' && (path?.[0] === 'threading' || pos.length >= 2)) spawn(kw.get('function') ?? pos[1], 'threading.Timer');
@@ -317,7 +401,7 @@ class PyExtractor {
       } else if (obj?.type === 'call' && obj.childForFieldName('function')?.text === 'super') {
         this.calls.push({ caller: f.key, form: 'super', name: attr, line, args });
       } else {
-        this.calls.push({ caller: f.key, form: 'member', name: attr, qualifier: path ?? ['?'], receiverType: recvType, line, args });
+        this.calls.push({ caller: f.key, form: 'member', name: attr, qualifier: path ?? (recvType ? ['()'] : ['?']), receiverType: recvType, line, args });
       }
       if (obj && obj.type !== 'identifier') this.visit(obj, scope, f, depth + 1);
     } else if (fn) {

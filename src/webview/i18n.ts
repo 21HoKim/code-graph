@@ -20,6 +20,17 @@ const en = {
   fns: '{n} fn', methods: '{n} methods', filesN: '{n} files', lines: '{n} lines',
   hint: 'Click a block to trace its wires · double-click to open/close · drag to pan · wheel to zoom',
   noResults: 'No matches', decl: 'declaration only', fragmentNote: 'Part of a class implemented in this file',
+  verify: 'Verify', verifyHint: 'Compile-check the workspace (gcc/clang -fsyntax-only, Python compile)',
+  verifying: 'Verifying', building: 'Building', running: 'Running',
+  problemsHint: 'errors · affected blocks · unpowered blocks — click for the list',
+  noErrors: 'No errors', showProblems: 'Show problems overlay', problems: 'Problems',
+  errorsN: '{n} errors', affectedN: '{n} affected', unpoweredN: '{n} unpowered', warningsN: '{n} warnings',
+  brokenHere: 'Broken here', impact: 'Impact', impactText: '{n} blocks depend on this break', dependsOn: 'Affected through',
+  unpoweredText: 'Only reachable through a broken block — current never arrives here.',
+  verifyAgain: 'Verify again', notes: 'Notes', untrusted: 'Workspace is not trusted: compile checks and runs are disabled.',
+  checkedWith: 'Checked {c} C/C++ units and {p} Python files in {ms} ms', notVerified: 'Not compile-checked yet — showing problems found by static analysis.',
+  syntax: 'parse', compiler: 'compiler', linker: 'linker', python: 'python', incomplete: 'incomplete', editor: 'editor', runtime: 'runtime',
+  legendBroken: 'broken', legendAffected: 'affected', legendUnpowered: 'no current',
 };
 export type Strings = typeof en;
 
@@ -45,6 +56,17 @@ const ko: Strings = {
   fns: '함수 {n}', methods: '메서드 {n}', filesN: '파일 {n}', lines: '{n}줄',
   hint: '블록 클릭: 전선 추적 · 더블클릭: 펼치기/접기 · 드래그: 이동 · 휠: 확대/축소',
   noResults: '결과 없음', decl: '선언만 있음', fragmentNote: '이 파일에서 구현된 클래스의 일부',
+  verify: '검증', verifyHint: '워크스페이스 컴파일 검사 (gcc/clang -fsyntax-only, Python compile)',
+  verifying: '검증 중', building: '빌드 중', running: '실행 중',
+  problemsHint: '오류 · 영향받는 블록 · 전류가 끊긴 블록 — 클릭하면 목록',
+  noErrors: '오류 없음', showProblems: '문제 표시(빨강/주황/회색)', problems: '문제',
+  errorsN: '오류 {n}', affectedN: '영향 {n}', unpoweredN: '전류 끊김 {n}', warningsN: '경고 {n}',
+  brokenHere: '여기서 끊김', impact: '영향 범위', impactText: '이 끊김에 의존하는 블록 {n}개', dependsOn: '영향 경로',
+  unpoweredText: '끊긴 블록을 거쳐야만 닿는 곳이라 전류가 오지 않아요.',
+  verifyAgain: '다시 검증', notes: '참고', untrusted: '신뢰하지 않는 워크스페이스라 컴파일 검사와 실행이 꺼져 있어요.',
+  checkedWith: 'C/C++ {c}개 단위, Python {p}개 파일 검사 ({ms}ms)', notVerified: '아직 컴파일 검사 전이라 정적 분석으로 찾은 문제만 보여요.',
+  syntax: '파싱', compiler: '컴파일러', linker: '링커', python: 'python', incomplete: '미구현', editor: '에디터', runtime: '런타임',
+  legendBroken: '끊김', legendAffected: '영향', legendUnpowered: '전류 없음',
 };
 
 let dict: Strings = en;

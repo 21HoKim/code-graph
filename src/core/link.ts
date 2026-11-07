@@ -13,6 +13,7 @@ import type {
   CallSite,
   CodeGraph,
   Confidence,
+  Diagnostic,
   Entity,
   FileFacts,
   FileInfo,
@@ -39,6 +40,27 @@ const PY_BUILTINS = new Set(
     'bytes bytearray memoryview object property staticmethod classmethod input ord chr divmod pow reversed slice ' +
     'frozenset complex bool exec eval compile globals locals breakpoint help NotImplementedError ValueError TypeError ' +
     'KeyError IndexError RuntimeError Exception OSError IOError StopIteration AttributeError AssertionError TimeoutError'
+  ).split(' '),
+);
+
+/** Names that exist without being bound in the module (for the undefined-name check). */
+const PY_BUILTIN_NAMES = new Set(
+  (
+    'abs aiter all anext any ascii bin bool breakpoint bytearray bytes callable chr classmethod compile complex copyright ' +
+    'credits delattr dict dir divmod enumerate eval exec exit filter float format frozenset getattr globals hasattr hash help ' +
+    'hex id input int isinstance issubclass iter len license list locals map max memoryview min next object oct open ord pow ' +
+    'print property quit range repr reversed round set setattr slice sorted staticmethod str sum super tuple type vars zip ' +
+    '__import__ __build_class__ NotImplemented Ellipsis _ ' +
+    'BaseException BaseExceptionGroup Exception ExceptionGroup ArithmeticError AssertionError AttributeError BlockingIOError ' +
+    'BrokenPipeError BufferError BytesWarning ChildProcessError ConnectionAbortedError ConnectionError ConnectionRefusedError ' +
+    'ConnectionResetError DeprecationWarning EOFError EncodingWarning EnvironmentError FileExistsError FileNotFoundError ' +
+    'FloatingPointError FutureWarning GeneratorExit IOError ImportError ImportWarning IndentationError IndexError ' +
+    'InterruptedError IsADirectoryError KeyError KeyboardInterrupt LookupError MemoryError ModuleNotFoundError NameError ' +
+    'NotADirectoryError NotImplementedError OSError OverflowError PendingDeprecationWarning PermissionError ProcessLookupError ' +
+    'PythonFinalizationError RecursionError ReferenceError ResourceWarning RuntimeError RuntimeWarning StopAsyncIteration ' +
+    'StopIteration SyntaxError SyntaxWarning SystemError SystemExit TabError TimeoutError TypeError UnboundLocalError ' +
+    'UnicodeDecodeError UnicodeEncodeError UnicodeError UnicodeTranslateError UnicodeWarning UserWarning ValueError Warning ' +
+    'ZeroDivisionError WindowsError reveal_type reveal_locals'
   ).split(' '),
 );
 
@@ -110,6 +132,8 @@ class Linker {
   private cc: FileFacts[] = [];
   private py: FileFacts[] = [];
   private warnings: string[] = [];
+  private diags: Diagnostic[] = [];
+  private factsByPath = new Map<string, FileFacts>();
   private callSites = 0;
   private resolved = 0;
   private unresolved = 0;
@@ -150,7 +174,20 @@ class Linker {
       parseMs += f.parseMs;
       this.files.push({ id: 'f:' + f.path, path: f.path, lang: f.lang, lines: f.lines });
       this.filePaths.add(f.path);
+      this.factsByPath.set(f.path, f);
       if (f.error) this.warnings.push(`${f.path}: ${f.error.split('\n')[0]}`);
+      for (const se of f.syntaxErrors ?? []) {
+        // tree-sitter positions are approximate, so these stay at file level; the compiler/python check is authoritative
+        this.diags.push({
+          file: f.path,
+          line: se.line,
+          endLine: se.endLine,
+          severity: f.lang === 'python' ? 'error' : 'warning',
+          source: 'syntax',
+          message: `${se.message} (lines ${se.line}–${se.endLine})`,
+          target: 'f:' + f.path,
+        });
+      }
       (f.lang === 'python' ? this.py : this.cc).push(f);
     }
     this.ccEntities();
@@ -159,6 +196,8 @@ class Linker {
     this.pyImportTables();
     this.inheritance();
     this.calls();
+    this.markEntries();
+    this.incomplete();
 
     const entities = [...this.entities.values()];
     const relations = [...this.relations.values()];
@@ -182,8 +221,70 @@ class Linker {
         parseMs,
         linkMs: Date.now() - this.t0,
       },
+      diagnostics: this.diags.length ? this.diags : undefined,
       warnings: this.warnings.length ? this.warnings.slice(0, 200) : undefined,
     };
+  }
+
+  /** Program entry points: C/C++ main(), Python modules with a __main__ guard (or __main__.py). */
+  private markEntries(): void {
+    const flag = (e: Entity) => (e.flags = [...new Set([...(e.flags ?? []), 'entry'])]);
+    for (const e of this.entities.values()) {
+      if (e.kind === 'function' && e.lang !== 'python' && e.def && !this.parentOf(e) && /^(main|wmain|WinMain|wWinMain)$/.test(e.name)) flag(e);
+      if (e.kind === 'namespace' && e.sub === 'module' && e.def) {
+        const f = this.factsByPath.get(e.def.file);
+        if (f?.mainGuard || e.def.file.endsWith('__main__.py')) flag(e);
+      }
+    }
+  }
+
+  /** Called code that cannot run: declared-never-defined (C/C++), NotImplementedError stubs (Python). */
+  private incomplete(): void {
+    const callers = new Map<string, Relation[]>();
+    for (const r of this.relations.values()) {
+      if ((r.kind === 'call' || r.kind === 'spawn') && r.conf !== 'guess') push(callers, r.to, r);
+    }
+    const subclasses = new Map<string, string[]>();
+    for (const [cls, bases] of this.basesOf) for (const b of bases) push(subclasses, b, cls);
+    const overridden = (cls: Entity, name: string): boolean => {
+      const seen = new Set<string>();
+      const queue = [...(subclasses.get(cls.id) ?? [])];
+      while (queue.length) {
+        const id = queue.shift()!;
+        if (seen.has(id)) continue;
+        seen.add(id);
+        if (this.members.get(id)?.get(name)?.some((m) => m.kind === 'function')) return true;
+        queue.push(...(subclasses.get(id) ?? []));
+      }
+      return false;
+    };
+    for (const e of this.entities.values()) {
+      if (e.kind !== 'function') continue;
+      const inc = callers.get(e.id);
+      if (!inc?.length) continue;
+      const by = this.entities.get(inc[0].from)?.qname ?? inc[0].from;
+      if (e.lang !== 'python' && e.flags?.includes('decl') && !e.flags.includes('abstract') && e.decl) {
+        this.diags.push({
+          file: e.decl.file,
+          line: e.decl.line,
+          severity: 'error',
+          source: 'incomplete',
+          message: `'${e.qname}' is declared but never defined in the workspace (link error unless a library provides it) — called by ${by}`,
+          target: e.id,
+        });
+      } else if (e.lang === 'python' && e.flags?.includes('notImplemented') && !e.flags.includes('abstractmethod') && e.def) {
+        const cls = this.parentOf(e);
+        if (cls?.kind === 'class' && overridden(cls, e.name)) continue;
+        this.diags.push({
+          file: e.def.file,
+          line: e.def.line,
+          severity: 'error',
+          source: 'incomplete',
+          message: `'${e.qname}' is not implemented (raises NotImplementedError) but is called by ${by}`,
+          target: e.id,
+        });
+      }
+    }
   }
 
   // -------------------------------------------------------------------------
@@ -475,7 +576,12 @@ class Linker {
       const set = new Set<string>();
       for (const inc of f.includes) {
         const target = this.resolveInclude(f.path, inc.path, inc.system, incDirs, byBase);
-        if (!target) continue;
+        if (!target) {
+          if (!inc.system) {
+            this.diags.push({ file: f.path, line: inc.line, severity: 'warning', source: 'compiler', message: `#include "${inc.path}" not found in the workspace` });
+          }
+          continue;
+        }
         set.add(target);
         this.addRelation('include', 'f:' + f.path, 'f:' + target, 'exact', { file: f.path, line: inc.line });
       }
@@ -782,6 +888,15 @@ class Linker {
           continue;
         }
         const m = imp.module || imp.level ? this.resolvePyModule(f.path, imp.module, imp.level) : undefined;
+        if (imp.level > 0 && imp.module && !m) {
+          this.diags.push({
+            file: f.path,
+            line: imp.line,
+            severity: 'error',
+            source: 'python',
+            message: `cannot resolve relative import '${'.'.repeat(imp.level)}${imp.module}'`,
+          });
+        }
         for (const { name, alias } of imp.names) {
           if (name === '*') {
             if (m) wild.push(m.id);
@@ -981,6 +1096,9 @@ class Linker {
         const t = isPy ? this.resolvePy(caller, c, f) : this.resolveCc(caller, c, f);
         if (!t) {
           this.unresolved++;
+          if (isPy && c.form === 'plain' && !f.wildcardImport && f.boundNames && !PY_BUILTIN_NAMES.has(c.name) && !f.boundNames.includes(c.name)) {
+            this.diags.push({ file: f.path, line: c.line, severity: 'error', source: 'python', message: `name '${c.name}' is not defined` });
+          }
           continue;
         }
         let conf = t.conf;

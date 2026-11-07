@@ -335,6 +335,8 @@ export interface Projection {
   roots: string[];
   edges: PEdge[];
   leaves: number;
+  /** Visible block that stands for an entity id or file id ('f:…'), if any. */
+  repOf(id: string): string | undefined;
 }
 
 /**
@@ -522,7 +524,12 @@ export function project(tree: ViewTree, g: CodeGraph, o: ProjectOptions): Projec
   }
   let leaves = 0;
   for (const n of nodes.values()) if (!n.container) leaves++;
-  return { nodes, roots, edges, leaves };
+  const repOf = (id: string): string | undefined => {
+    const t = endpoint(id);
+    const r = t ? rep(t) : undefined;
+    return r && nodes.has(r) ? r : undefined;
+  };
+  return { nodes, roots, edges, leaves, repOf };
 }
 
 /** Count visible blocks at each level (used to pick a readable starting level). */

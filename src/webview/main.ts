@@ -4,8 +4,9 @@
  */
 import ELK from 'elkjs/lib/elk-api.js';
 import './style.css';
-import type { CodeGraph, Confidence, Entity, Relation, RelationKind } from '../core/model';
-import type { HostMessage, ViewSettings, WebviewMessage } from '../shared/protocol';
+import { attachDiagnostics, computeHealth, impactPath, type Health } from '../core/health';
+import type { CodeGraph, Confidence, Diagnostic, Entity, Relation, RelationKind } from '../core/model';
+import type { DiagSet, HostMessage, VerifyInfo, ViewSettings, WebviewMessage } from '../shared/protocol';
 import { FlowLayer, makePath, type FlowMode, type FlowPalette } from './flow';
 import { setLang, t } from './i18n';
 import { runLayout, samplePath, signature, type ElkLike, type FlowDir, type LayoutResult, type LayoutStyle, type Measure } from './layout';
@@ -27,6 +28,7 @@ import {
   type ViewKind,
   type ViewTree,
 } from './projection';
+import { buildOverlay, type Overlay } from './overlay';
 import { Renderer, esc } from './render';
 import { Viewport } from './viewport';
 
@@ -75,6 +77,8 @@ interface UIState {
   flow: FlowMode;
   focus: { id: string; hops: number } | null;
   selected: string | null;
+  /** Show the problems overlay (red / orange / grey). */
+  health: boolean;
 }
 
 const DEFAULT_STATE: UIState = {
@@ -89,6 +93,7 @@ const DEFAULT_STATE: UIState = {
   flow: 'all',
   focus: null,
   selected: null,
+  health: true,
 };
 
 const KIND_ICON: Record<RelationKind, string> = { call: '→', spawn: '⚡', instantiate: '✚', inherit: '△', include: '#', import: '⇣' };
@@ -188,6 +193,7 @@ function readPalette(): FlowPalette {
     inherit: v('--cc-inherit', '#c792ea'),
     include: v('--cc-include', '#7d8a9c'),
     ret: v('--cc-ret', '#ffb347'),
+    broken: v('--cc-broken', '#ff4d5e'),
   };
 }
 
@@ -220,6 +226,10 @@ class App {
   private fitPending = true;
   private selectedEdge: string | null = null;
   private dir: FlowDir = 'RIGHT';
+  private diagSets = new Map<DiagSet, { diags: Diagnostic[]; info?: VerifyInfo }>();
+  private health?: Health;
+  private overlay?: Overlay;
+  private task?: { task: string; state: string; message?: string; done?: number; total?: number };
 
   // DOM
   private root = document.getElementById('app') ?? document.body.appendChild(h('div', { id: 'app' }));
@@ -298,6 +308,17 @@ class App {
       case 'focusFile':
         this.focusFile(m.file);
         break;
+      case 'diagnostics':
+        this.diagSets.set(m.set, { diags: m.diagnostics, info: m.info });
+        this.recomputeHealth();
+        this.redraw();
+        this.updateToolbarState();
+        break;
+      case 'task':
+        this.task = m.state === 'done' || m.state === 'error' ? undefined : m;
+        if (m.state === 'error' && m.message) this.showNotice(m.message, 8000);
+        this.updateToolbarState();
+        break;
       case 'error':
         this.showNotice(m.message, 8000);
         break;
@@ -308,6 +329,7 @@ class App {
   loadDemo(g: CodeGraph, settings: ViewSettings): void {
     this.state = { ...DEFAULT_STATE, style: this.state.style, flow: this.state.flow };
     this.graph = undefined;
+    this.diagSets.clear();
     this.fitPending = true;
     this.setGraph(g, settings, 'initial');
   }
@@ -319,6 +341,7 @@ class App {
     setLang(settings.lang);
     this.flow.maxParticles = settings.maxParticles;
     this.entities = new Map(g.entities.map((e) => [e.id, e]));
+    if (g.compile && !this.diagSets.has('compile')) this.diagSets.set('compile', { diags: g.compile.diagnostics, info: g.compile.info });
     this.empty.hidden = g.files.length > 0;
     if (!g.files.length) this.empty.innerHTML = `<div>${esc(t('empty'))}</div>`;
     if (first && !(api.getState() as UIState | undefined)) {
@@ -328,6 +351,7 @@ class App {
       this.flow.setMode(this.state.flow);
     }
     this.rebuildTree();
+    this.recomputeHealth();
     if (!this.state.levelChosen && (first || reason === 'initial')) {
       this.state.level = settings.defaultLevel === 'auto' ? pickLevel(this.tree!, this.blockBudget()) : settings.defaultLevel;
     }
@@ -428,17 +452,7 @@ class App {
     this.proj = proj;
     this.layout = layout;
     this.dir = dir;
-    this.renderer.draw(proj, layout, s.style, dir, this.measure, this.counts);
-    this.flow.setPaths(
-      proj.edges
-        .map((e) => {
-          const pts = layout.routes.get(e.id);
-          if (!pts || pts.length < 2) return undefined;
-          const structural = e.kind === 'include' || e.kind === 'import' || e.kind === 'inherit';
-          return makePath(e.id, e.kind, samplePath(pts, s.style === 'network'), e.count, e.returns, structural || e.conf === 'guess');
-        })
-        .filter((p): p is NonNullable<typeof p> => !!p),
-    );
+    this.paint();
     if (anchor) {
       const b = layout.boxes.get(anchor.id);
       if (b) this.vp.set(anchor.sx - b.x * this.vp.k, anchor.sy - b.y * this.vp.k, this.vp.k);
@@ -453,6 +467,66 @@ class App {
     else if (layout.fallback) this.showNotice(t('fallback'), 5000);
     this.updateStatus();
     this.updateToolbarState();
+  }
+
+  /** Merge problem sets: the compiler / interpreter verdict replaces tree-sitter's coarse parse errors. */
+  private mergedDiagnostics(): Diagnostic[] {
+    const info = this.diagSets.get('compile')?.info;
+    const out: Diagnostic[] = [];
+    for (const d of this.graph?.diagnostics ?? []) {
+      if (d.source === 'syntax' && (/\.pyi?$/.test(d.file) ? info?.pyChecked : info?.cChecked)) continue;
+      out.push(d);
+    }
+    for (const set of this.diagSets.values()) out.push(...set.diags);
+    const seen = new Set<string>();
+    return out.filter((d) => {
+      const k = `${d.file}:${d.line}:${d.severity}:${d.message}`;
+      if (seen.has(k)) return false;
+      seen.add(k);
+      return true;
+    });
+  }
+
+  private recomputeHealth(): void {
+    if (!this.graph) return;
+    this.health = computeHealth(this.graph, attachDiagnostics(this.graph, this.mergedDiagnostics()));
+  }
+
+  /** Draw the current layout (no ELK run): blocks, wires, overlay, flow. */
+  private paint(): void {
+    const proj = this.proj;
+    const layout = this.layout;
+    if (!proj || !layout || !this.graph) return;
+    const s = this.state;
+    const had = !!this.overlay;
+    this.overlay = s.health && this.health && (this.health.broken.size || this.health.affected.size) ? buildOverlay(proj, this.graph, this.health) : undefined;
+    if (had !== !!this.overlay) this.buildLegend();
+    this.renderer.draw(proj, layout, s.style, this.dir, this.measure, this.counts, this.overlay, (e) => this.wireClass(e));
+    this.flow.setPaths(
+      proj.edges
+        .map((e) => {
+          const pts = layout.routes.get(e.id);
+          if (!pts || pts.length < 2) return undefined;
+          const structural = e.kind === 'include' || e.kind === 'import' || e.kind === 'inherit';
+          const st = this.overlay?.wires.get(e.id) ?? 'ok';
+          return makePath(e.id, e.kind, samplePath(pts, s.style === 'network'), e.count, e.returns, structural || e.conf === 'guess', st);
+        })
+        .filter((p): p is NonNullable<typeof p> => !!p),
+    );
+  }
+
+  /** Extra classes for a wire (hooks for runtime-observed wires). */
+  private wireClass(_e: PEdge): string {
+    return '';
+  }
+
+  /** Re-render without a new layout (diagnostics changed). */
+  private redraw(): void {
+    if (!this.proj || !this.layout) return;
+    this.paint();
+    this.renderer.setTransform(this.vp.x, this.vp.y, this.vp.k);
+    if (this.selectedEdge && this.proj.edges.some((e) => e.id === this.selectedEdge)) this.selectEdge(this.selectedEdge);
+    else this.select(this.state.selected && this.proj.nodes.has(this.state.selected) ? this.state.selected : null, !this.details.hidden);
   }
 
   private fit(animate = true): void {
@@ -583,7 +657,15 @@ class App {
     tb.append(flowBtn, wires, fit);
     const focusChip = h('span', { class: 'chip', 'data-role': 'focus', hidden: '' });
     tb.append(focusChip);
+    const healthBtn = h('button', { class: 'btn health', 'data-role': 'health', hidden: '' });
+    healthBtn.onclick = () => this.showProblems();
+    tb.append(healthBtn);
     tb.append(h('span', { class: 'spacer' }));
+    if (this.settings?.host !== false) {
+      const verify = h('button', { class: 'btn', 'data-role': 'verify', title: t('verifyHint') }, `✓ ${esc(t('verify'))}`);
+      verify.onclick = () => api.postMessage({ type: 'verify' });
+      tb.append(verify);
+    }
     if (this.settings?.host !== false) {
       const re = h('button', { class: 'btn', title: t('reanalyze') }, '↻');
       re.onclick = () => api.postMessage({ type: 'reanalyze' });
@@ -612,6 +694,29 @@ class App {
     if (fb) {
       fb.textContent = '⚡ ' + t(s.flow === 'all' ? 'flowAll' : s.flow === 'focus' ? 'flowFocus' : 'flowOff');
       fb.classList.toggle('on', s.flow !== 'off');
+    }
+    const hb = this.toolbar.querySelector<HTMLButtonElement>('[data-role=health]');
+    if (hb) {
+      const hl = this.health;
+      const ran = this.diagSets.has('compile') || this.diagSets.has('build');
+      hb.classList.remove('bad', 'good', 'busy');
+      if (this.task) {
+        hb.hidden = false;
+        hb.classList.add('busy');
+        const prog = this.task.total ? ` ${this.task.done ?? 0}/${this.task.total}` : '';
+        hb.innerHTML = `<span class="spin"></span>${esc(t(this.task.task === 'run' ? 'running' : this.task.task === 'build' ? 'building' : 'verifying'))}${prog}`;
+      } else if (hl && hl.errors) {
+        hb.hidden = false;
+        hb.classList.add('bad');
+        hb.textContent = `✕ ${hl.errors}` + (hl.affected.size ? `  ⚠ ${hl.affected.size}` : '') + (hl.unpowered.size ? `  ○ ${hl.unpowered.size}` : '');
+        hb.title = t('problemsHint');
+      } else if (ran) {
+        hb.hidden = false;
+        hb.classList.add('good');
+        hb.textContent = '✓ ' + t('noErrors');
+      } else hb.hidden = true;
+      const vb = this.toolbar.querySelector<HTMLButtonElement>('[data-role=verify]');
+      if (vb) vb.disabled = !!this.task || this.settings?.trusted === false;
     }
     const chip = this.toolbar.querySelector<HTMLElement>('[data-role=focus]');
     if (chip) {
@@ -655,7 +760,16 @@ class App {
       void this.refresh();
     };
     g.append(cb, document.createTextNode(t('guesses')));
-    pop.append(h('hr', { style: 'border:0;border-top:1px solid var(--cc-border);margin:6px 0' }), g);
+    const hl = h('label');
+    const hcb = h('input', { type: 'checkbox' });
+    hcb.checked = this.state.health;
+    hcb.onchange = () => {
+      this.state.health = hcb.checked;
+      this.save();
+      this.redraw();
+    };
+    hl.append(hcb, document.createTextNode(t('showProblems')));
+    pop.append(h('hr', { style: 'border:0;border-top:1px solid var(--cc-border);margin:6px 0' }), g, hl);
     document.body.append(pop);
     setTimeout(() => {
       const close = (e: MouseEvent) => {
@@ -677,7 +791,12 @@ class App {
       item('spawn', `${KIND_ICON.spawn} ${t('spawn')}`, true) +
       item('instantiate', `${KIND_ICON.instantiate} ${t('instantiate')}`) +
       item('inherit', `${KIND_ICON.inherit} ${t('inherit')}`) +
-      item('include', `${t('include')} / ${t('import')}`, true);
+      item('include', `${t('include')} / ${t('import')}`, true) +
+      (this.overlay
+        ? `<div class="lg-x"><span class="sw-b bad"></span>✕ ${esc(t('legendBroken'))}</div>` +
+          `<div class="lg-x"><span class="sw-b warn"></span>⚠ ${esc(t('legendAffected'))}</div>` +
+          `<div class="lg-x"><span class="sw-b off"></span>○ ${esc(t('legendUnpowered'))}</div>`
+        : '');
   }
 
   // -------------------------------------------------------------------------
@@ -945,6 +1064,92 @@ class App {
     return `<a data-open="${esc(file)}" data-line="${line}">${esc(file)}:${line}</a>`;
   }
 
+  private diagItem(d: Diagnostic): string {
+    return (
+      `<li class="diag sev-${d.severity}"><span class="dot"></span><span><span class="pill src">${esc(t(d.source))}</span> ${esc(d.message)}</span>` +
+      `<span class="args">${this.locLink(d.file, d.line)}</span></li>`
+    );
+  }
+
+  /** Problems section for a block: its errors, or the path to the break that affects it. */
+  private problemsSection(n: PNode): string {
+    const st = this.overlay?.blocks.get(n.id);
+    const h = this.health;
+    if (!st || !h || !this.graph) return '';
+    if (st.state === 'broken') {
+      const ids = this.idsUnder(n.id);
+      const dependents = [...h.affected.values()].filter((a) => ids.has(a.cause)).length;
+      return (
+        `<h3 class="bad">✕ ${esc(t('brokenHere'))} (${st.errors})</h3><ul class="lst">${st.diags.slice(0, 30).map((d) => this.diagItem(d)).join('')}</ul>` +
+        (dependents ? `<div class="row"><span class="flag bad">${esc(t('impactText', { n: dependents }))}</span></div>` : '')
+      );
+    }
+    if (st.state === 'affected') {
+      const id = [...this.idsUnder(n.id)].find((x) => h.affected.get(x)?.dist === st.dist);
+      if (!id) return '';
+      const path = impactPath(h, this.graph, id);
+      const chain = path
+        .map((p, i) => {
+          const name = this.nameOf(p.node);
+          const last = i === path.length - 1;
+          return `<a data-entity="${esc(p.node)}" class="${last ? 'bad' : ''}">${esc(name)}</a>` + (p.rel ? ` <span class="q">${esc(KIND_ICON[p.rel.kind])}</span> ` : '');
+        })
+        .join('');
+      return `<h3 class="warn">⚠ ${esc(t('dependsOn'))}</h3><div class="sig">${chain}</div>`;
+    }
+    return `<h3>○ ${esc(t('legendUnpowered'))}</h3><div class="row q">${esc(t('unpoweredText'))}</div>`;
+  }
+
+  /** Entity / file ids represented by a visible node (itself and everything collapsed into it). */
+  private idsUnder(nodeId: string): Set<string> {
+    const out = new Set<string>();
+    if (!this.tree) return out;
+    const walk = (id: string) => {
+      const tn = this.tree!.nodes.get(id);
+      if (!tn) return;
+      if (tn.entity) out.add(tn.entity.id);
+      if (tn.file) out.add(tn.file.id);
+      tn.children.forEach(walk);
+    };
+    walk(nodeId);
+    return out;
+  }
+
+  showProblems(): void {
+    const h = this.health;
+    if (!h || !this.graph) return;
+    const info = this.diagSets.get('compile')?.info ?? this.diagSets.get('build')?.info;
+    let html = `<h2><span class="pill bad">✕</span>${esc(t('problems'))}<button class="close">✕</button></h2>`;
+    html += `<div class="row"><span class="flag bad">${esc(t('errorsN', { n: h.errors }))}</span><span class="flag warn">${esc(t('affectedN', { n: h.affected.size }))}</span>`;
+    html += `<span class="flag">${esc(t('unpoweredN', { n: h.unpowered.size }))}</span>${h.warningCount ? `<span class="flag">${esc(t('warningsN', { n: h.warningCount }))}</span>` : ''}</div>`;
+    html += `<div class="row q">${esc(info ? t('checkedWith', { c: info.checkedC, p: info.checkedPython, ms: info.ms }) : t('notVerified'))}</div>`;
+    if (this.settings?.trusted === false) html += `<div class="row q">${esc(t('untrusted'))}</div>`;
+    if (this.settings?.host !== false) html += `<div class="row"><button class="btn" data-act="verify">✓ ${esc(t('verifyAgain'))}</button></div>`;
+    const impactOf = new Map<string, number>();
+    for (const a of h.affected.values()) impactOf.set(a.cause, (impactOf.get(a.cause) ?? 0) + 1);
+    for (const [target, diags] of h.broken) {
+      if (target.startsWith('py:mod:') && h.broken.get('f:' + target.slice(7)) === diags) continue;
+      const n = impactOf.get(target) ?? 0;
+      html +=
+        `<h3><a data-entity="${esc(target)}" class="bad">✕ ${esc(this.nameOf(target))}</a>${n ? ` <span class="nocase warn">→ ${esc(t('affectedN', { n }))}</span>` : ''}</h3>` +
+        `<ul class="lst">${diags.slice(0, 12).map((d) => this.diagItem(d)).join('')}</ul>`;
+    }
+    const aff = [...h.affected.entries()].filter(([id]) => this.entities.get(id)?.kind === 'function').sort((a, b) => a[1].dist - b[1].dist);
+    if (aff.length) {
+      html += `<h3 class="warn">⚠ ${esc(t('impact'))}</h3><ul class="lst">`;
+      for (const [id, a] of aff.slice(0, 30))
+        html += `<li><span class="dot" style="background:var(--cc-affected)"></span><a data-entity="${esc(id)}">${esc(this.nameOf(id))}</a><span class="args">+${a.dist} · ${esc(this.nameOf(a.cause))}</span></li>`;
+      html += '</ul>';
+    }
+    const warn = [...h.warnings.values()].flat();
+    if (warn.length) html += `<h3>${esc(t('warningsN', { n: warn.length }))}</h3><ul class="lst">${warn.slice(0, 40).map((d) => this.diagItem(d)).join('')}</ul>`;
+    if (info?.notes.length) html += `<h3>${esc(t('notes'))}</h3>${info.notes.map((x) => `<div class="row q">${esc(x)}</div>`).join('')}`;
+    this.details.innerHTML = html;
+    this.details.hidden = false;
+    this.details.querySelector<HTMLElement>('[data-act=verify]')?.addEventListener('click', () => api.postMessage({ type: 'verify' }));
+    this.wireDetails(null);
+  }
+
   private renderNodeDetails(n: PNode, touching: PEdge[]): void {
     const tn = n.t;
     const e = tn.entity;
@@ -967,6 +1172,7 @@ class App {
       const ps = (e.params ?? []).map((p) => `${p.type ?? ''}${p.name ? ' ' + p.name : ''}`.trim()).join(',\n  ');
       html += `<h3>${esc(t('params'))} → ${esc(t('returns'))}</h3><div class="sig">${esc(`${e.name}(${ps ? '\n  ' + ps + '\n' : ''})${e.returns ? ' → ' + e.returns : ''}`)}</div>`;
     }
+    html += this.problemsSection(n);
     html += '<div class="row">';
     if (tn.loc) html += `<button class="btn" data-act="open">${esc(t('openSource'))}</button>`;
     html += `<button class="btn" data-act="focus">${esc(t('focus'))}</button>`;
@@ -1125,6 +1331,10 @@ class App {
       const sig = signature(n);
       html = `<b>${esc(e?.qname ?? n.t.file?.path ?? n.t.label)}</b>${sig ? `<div class="mono">${esc(sig)}</div>` : ''}`;
       if (n.t.loc) html += `<div class="mono">${esc(n.t.loc.file)}:${n.t.loc.line}</div>`;
+      const st = this.overlay?.blocks.get(id);
+      if (st?.state === 'broken' && st.diags[0]) html += `<div class="tip-bad">✕ ${esc(st.diags[0].message)}</div>`;
+      else if (st?.state === 'affected') html += `<div class="tip-warn">⚠ ${esc(t('dependsOn'))} +${st.dist}</div>`;
+      else if (st?.state === 'unpowered') html += `<div class="mono">○ ${esc(t('legendUnpowered'))}</div>`;
     }
     const r = this.stage.getBoundingClientRect();
     this.tooltip.innerHTML = html;

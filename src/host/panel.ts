@@ -22,8 +22,12 @@ export function viewSettings(): ViewSettings {
     showGuesses: c.get<boolean>('showGuessedLinks', true),
     lang: vscode.env.language,
     host: true,
+    trusted: vscode.workspace.isTrusted,
   };
 }
+
+export type VerifyMode = 'onOpenAndSave' | 'onOpen' | 'manual';
+export const verifyMode = (): VerifyMode => vscode.workspace.getConfiguration('codeCurrent.verify').get<VerifyMode>('mode', 'onOpenAndSave');
 
 export class CircuitPanel implements vscode.Disposable {
   static current?: CircuitPanel;
@@ -31,6 +35,8 @@ export class CircuitPanel implements vscode.Disposable {
   private ready = false;
   private queue: HostMessage[] = [];
   private pendingFocus?: string;
+  private saved = new Set<string>();
+  private verifyAbort?: AbortController;
 
   static show(ctx: vscode.ExtensionContext, service: AnalysisService, focusFile?: string): CircuitPanel {
     if (CircuitPanel.current) {
@@ -71,6 +77,7 @@ export class CircuitPanel implements vscode.Disposable {
   }
 
   dispose(): void {
+    this.verifyAbort?.abort();
     if (CircuitPanel.current === this) CircuitPanel.current = undefined;
     for (const d of this.disposables) d.dispose();
     this.disposables = [];
@@ -82,12 +89,67 @@ export class CircuitPanel implements vscode.Disposable {
 
   post(m: HostMessage): void {
     if (!this.ready) {
-      // keep only the latest graph/progress while the webview boots
-      this.queue = this.queue.filter((q) => q.type !== m.type || m.type === 'error');
+      // keep only the latest message of each kind while the webview boots
+      const key = (x: HostMessage) => (x.type === 'diagnostics' ? 'diagnostics:' + x.set : x.type === 'task' ? 'task:' + x.task : x.type);
+      this.queue = this.queue.filter((q) => key(q) !== key(m) || m.type === 'error');
       this.queue.push(m);
       return;
     }
     void this.panel.webview.postMessage(m);
+  }
+
+  /** Remember a saved file so the next refresh re-checks only the units it affects. */
+  noteSaved(rel: string): void {
+    this.saved.add(rel);
+  }
+
+  /** Compile-check everything (or `units`) and push the result to the webview. */
+  async verify(units?: string[]): Promise<void> {
+    if (!vscode.workspace.isTrusted) {
+      this.post({ type: 'task', task: 'verify', state: 'error', message: vscode.l10n.t('Compile checks are disabled in untrusted workspaces.') });
+      return;
+    }
+    if (!this.service.graph) await this.service.analyze();
+    this.verifyAbort?.abort();
+    const ctl = (this.verifyAbort = new AbortController());
+    this.post({ type: 'task', task: 'verify', state: 'start' });
+    try {
+      const r = await this.service.verify({
+        units,
+        signal: ctl.signal,
+        onProgress: (done, total) => this.post({ type: 'task', task: 'verify', state: 'progress', done, total }),
+      });
+      if (ctl.signal.aborted) return;
+      this.post({ type: 'diagnostics', set: 'compile', diagnostics: r.diagnostics, info: r.info });
+      const errors = r.diagnostics.filter((d) => d.severity === 'error').length;
+      this.post({ type: 'task', task: 'verify', state: 'done', message: String(errors) });
+    } catch (e) {
+      if (ctl.signal.aborted) return;
+      const msg = String((e as Error)?.message ?? e);
+      this.service.log.appendLine('verify failed: ' + ((e as Error)?.stack ?? msg));
+      this.post({ type: 'task', task: 'verify', state: 'error', message: msg });
+    } finally {
+      if (this.verifyAbort === ctl) this.verifyAbort = undefined;
+    }
+  }
+
+  postEditorDiagnostics(): void {
+    const on = vscode.workspace.getConfiguration('codeCurrent.verify').get<string>('editorDiagnostics', 'off') === 'errors';
+    this.post({ type: 'diagnostics', set: 'editor', diagnostics: on ? this.service.editorDiagnostics() : [] });
+  }
+
+  private afterGraph(reason: 'initial' | 'update'): void {
+    const mode = verifyMode();
+    if (mode === 'manual' || !vscode.workspace.isTrusted) {
+      this.saved.clear();
+      return;
+    }
+    if (reason === 'initial' || !this.service.verified) void this.verify();
+    else if (mode === 'onOpenAndSave' && this.saved.size) {
+      const units = this.service.unitsAffectedBy([...this.saved]);
+      if (units.length) void this.verify(units);
+    }
+    this.saved.clear();
   }
 
   focusFile(rel: string): void {
@@ -113,6 +175,7 @@ export class CircuitPanel implements vscode.Disposable {
         this.post({ type: 'focusFile', file: this.pendingFocus });
         this.pendingFocus = undefined;
       }
+      this.afterGraph(reason);
     } catch (e) {
       const msg = String((e as Error)?.message ?? e);
       this.service.log.appendLine('analysis failed: ' + ((e as Error)?.stack ?? msg));
@@ -133,9 +196,22 @@ export class CircuitPanel implements vscode.Disposable {
             this.post({ type: 'focusFile', file: this.pendingFocus });
             this.pendingFocus = undefined;
           }
+          const v = this.service.verified;
+          if (v) this.post({ type: 'diagnostics', set: 'compile', diagnostics: v.diagnostics, info: v.info });
+          else this.afterGraph('initial');
         } else await this.refresh('initial');
+        this.postEditorDiagnostics();
         break;
       }
+      case 'verify':
+        await this.verify();
+        break;
+      case 'runTrace':
+        await vscode.commands.executeCommand('codeCurrent.runTrace');
+        break;
+      case 'loadTrace':
+        await vscode.commands.executeCommand('codeCurrent.loadTrace');
+        break;
       case 'open': {
         const abs = this.service.abs(m.file);
         if (!abs) return;

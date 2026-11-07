@@ -2,7 +2,7 @@
   "name": "code-current",
   "displayName": "%displayName%",
   "description": "%description%",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "publisher": "21hokim",
   "license": "MIT",
   "author": {
@@ -50,7 +50,20 @@
   ],
   "capabilities": {
     "untrustedWorkspaces": {
-      "supported": true
+      "supported": "limited",
+      "description": "%trust.description%",
+      "restrictedConfigurations": [
+        "codeCurrent.verify.cc",
+        "codeCurrent.verify.cxx",
+        "codeCurrent.verify.python",
+        "codeCurrent.verify.extraFlags",
+        "codeCurrent.run.entry",
+        "codeCurrent.run.args",
+        "codeCurrent.run.cwd",
+        "codeCurrent.run.env",
+        "codeCurrent.run.buildFlags",
+        "codeCurrent.run.linkFlags"
+      ]
     },
     "virtualWorkspaces": false
   },
@@ -71,6 +84,30 @@
       {
         "command": "codeCurrent.reanalyze",
         "title": "%cmd.reanalyze%",
+        "category": "CodeCurrent"
+      },
+      {
+        "command": "codeCurrent.verify",
+        "title": "%cmd.verify%",
+        "category": "CodeCurrent",
+        "icon": "$(check-all)",
+        "enablement": "isWorkspaceTrusted"
+      },
+      {
+        "command": "codeCurrent.runTrace",
+        "title": "%cmd.runTrace%",
+        "category": "CodeCurrent",
+        "icon": "$(debug-start)",
+        "enablement": "isWorkspaceTrusted"
+      },
+      {
+        "command": "codeCurrent.loadTrace",
+        "title": "%cmd.loadTrace%",
+        "category": "CodeCurrent"
+      },
+      {
+        "command": "codeCurrent.clearTrace",
+        "title": "%cmd.clearTrace%",
         "category": "CodeCurrent"
       },
       {
@@ -192,6 +229,123 @@
           "minimum": 0,
           "maximum": 16,
           "markdownDescription": "%cfg.workers%"
+        },
+        "codeCurrent.verify.mode": {
+          "type": "string",
+          "enum": [
+            "onOpenAndSave",
+            "onOpen",
+            "manual"
+          ],
+          "enumDescriptions": [
+            "%cfg.verifyMode.onOpenAndSave%",
+            "%cfg.verifyMode.onOpen%",
+            "%cfg.verifyMode.manual%"
+          ],
+          "default": "onOpenAndSave",
+          "markdownDescription": "%cfg.verifyMode%"
+        },
+        "codeCurrent.verify.cc": {
+          "type": "string",
+          "default": "",
+          "markdownDescription": "%cfg.verifyCc%"
+        },
+        "codeCurrent.verify.cxx": {
+          "type": "string",
+          "default": "",
+          "markdownDescription": "%cfg.verifyCxx%"
+        },
+        "codeCurrent.verify.python": {
+          "type": "string",
+          "default": "",
+          "markdownDescription": "%cfg.verifyPython%"
+        },
+        "codeCurrent.verify.extraFlags": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "default": [],
+          "markdownDescription": "%cfg.verifyFlags%"
+        },
+        "codeCurrent.verify.useCompileCommands": {
+          "type": "boolean",
+          "default": true,
+          "markdownDescription": "%cfg.verifyCcdb%"
+        },
+        "codeCurrent.verify.editorDiagnostics": {
+          "type": "string",
+          "enum": [
+            "off",
+            "errors"
+          ],
+          "default": "off",
+          "markdownDescription": "%cfg.verifyEditor%"
+        },
+        "codeCurrent.verify.timeoutSeconds": {
+          "type": "number",
+          "default": 60,
+          "minimum": 5,
+          "markdownDescription": "%cfg.verifyTimeout%"
+        },
+        "codeCurrent.run.entry": {
+          "type": "string",
+          "default": "",
+          "markdownDescription": "%cfg.runEntry%"
+        },
+        "codeCurrent.run.args": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "default": [],
+          "markdownDescription": "%cfg.runArgs%"
+        },
+        "codeCurrent.run.cwd": {
+          "type": "string",
+          "default": "",
+          "markdownDescription": "%cfg.runCwd%"
+        },
+        "codeCurrent.run.env": {
+          "type": "object",
+          "additionalProperties": {
+            "type": "string"
+          },
+          "default": {},
+          "markdownDescription": "%cfg.runEnv%"
+        },
+        "codeCurrent.run.buildFlags": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "default": [],
+          "markdownDescription": "%cfg.runBuildFlags%"
+        },
+        "codeCurrent.run.linkFlags": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "default": [],
+          "markdownDescription": "%cfg.runLinkFlags%"
+        },
+        "codeCurrent.run.timeoutSeconds": {
+          "type": "number",
+          "default": 20,
+          "minimum": 1,
+          "markdownDescription": "%cfg.runTimeout%"
+        },
+        "codeCurrent.run.maxEvents": {
+          "type": "number",
+          "default": 200000,
+          "minimum": 1000,
+          "markdownDescription": "%cfg.runMaxEvents%"
+        },
+        "codeCurrent.run.captureValues": {
+          "type": "boolean",
+          "default": true,
+          "markdownDescription": "%cfg.runValues%"
         }
       }
     }
