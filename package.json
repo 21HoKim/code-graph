@@ -1,0 +1,223 @@
+{
+  "name": "code-current",
+  "displayName": "%displayName%",
+  "description": "%description%",
+  "version": "0.1.0",
+  "publisher": "21hokim",
+  "license": "MIT",
+  "author": {
+    "name": "김호 (21HoKim)"
+  },
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/21HoKim/code-current"
+  },
+  "bugs": {
+    "url": "https://github.com/21HoKim/code-current/issues"
+  },
+  "homepage": "https://github.com/21HoKim/code-current#readme",
+  "engines": {
+    "vscode": "^1.85.0"
+  },
+  "categories": [
+    "Visualization",
+    "Programming Languages",
+    "Other"
+  ],
+  "keywords": [
+    "visualization",
+    "call graph",
+    "architecture",
+    "c++",
+    "python",
+    "threads",
+    "dataflow",
+    "topology",
+    "circuit"
+  ],
+  "icon": "media/icon.png",
+  "galleryBanner": {
+    "color": "#0b0f14",
+    "theme": "dark"
+  },
+  "main": "./dist/extension.js",
+  "l10n": "./l10n",
+  "extensionKind": [
+    "workspace"
+  ],
+  "activationEvents": [
+    "onWebviewPanel:codeCurrent.circuit"
+  ],
+  "capabilities": {
+    "untrustedWorkspaces": {
+      "supported": true
+    },
+    "virtualWorkspaces": false
+  },
+  "contributes": {
+    "commands": [
+      {
+        "command": "codeCurrent.open",
+        "title": "%cmd.open%",
+        "category": "CodeCurrent",
+        "icon": "$(circuit-board)"
+      },
+      {
+        "command": "codeCurrent.showFile",
+        "title": "%cmd.showFile%",
+        "category": "CodeCurrent",
+        "icon": "$(circuit-board)"
+      },
+      {
+        "command": "codeCurrent.reanalyze",
+        "title": "%cmd.reanalyze%",
+        "category": "CodeCurrent"
+      },
+      {
+        "command": "codeCurrent.exportGraph",
+        "title": "%cmd.export%",
+        "category": "CodeCurrent"
+      }
+    ],
+    "menus": {
+      "explorer/context": [
+        {
+          "command": "codeCurrent.showFile",
+          "when": "resourceExtname =~ /^\\.(c|h|cc|cpp|cxx|hpp|hh|hxx|py)$/",
+          "group": "navigation@90"
+        }
+      ],
+      "editor/title": [
+        {
+          "command": "codeCurrent.showFile",
+          "when": "editorLangId =~ /^(c|cpp|python)$/",
+          "group": "navigation@90"
+        }
+      ],
+      "editor/context": [
+        {
+          "command": "codeCurrent.showFile",
+          "when": "editorLangId =~ /^(c|cpp|python)$/",
+          "group": "navigation@90"
+        }
+      ]
+    },
+    "configuration": {
+      "title": "CodeCurrent",
+      "properties": {
+        "codeCurrent.defaultLevel": {
+          "type": "string",
+          "enum": [
+            "auto",
+            "dir",
+            "file",
+            "namespace",
+            "class",
+            "function"
+          ],
+          "default": "auto",
+          "markdownDescription": "%cfg.defaultLevel%"
+        },
+        "codeCurrent.layout": {
+          "type": "string",
+          "enum": [
+            "circuit",
+            "network"
+          ],
+          "default": "circuit",
+          "markdownDescription": "%cfg.layout%"
+        },
+        "codeCurrent.flow.mode": {
+          "type": "string",
+          "enum": [
+            "all",
+            "focus",
+            "off"
+          ],
+          "default": "all",
+          "markdownDescription": "%cfg.flowMode%"
+        },
+        "codeCurrent.flow.maxParticles": {
+          "type": "number",
+          "default": 2500,
+          "minimum": 0,
+          "markdownDescription": "%cfg.maxParticles%"
+        },
+        "codeCurrent.showGuessedLinks": {
+          "type": "boolean",
+          "default": true,
+          "markdownDescription": "%cfg.guesses%"
+        },
+        "codeCurrent.followCursor": {
+          "type": "boolean",
+          "default": true,
+          "markdownDescription": "%cfg.followCursor%"
+        },
+        "codeCurrent.exclude": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "default": [
+            "**/node_modules/**",
+            "**/.git/**",
+            "**/build/**",
+            "**/out/**",
+            "**/dist/**",
+            "**/.venv/**",
+            "**/venv/**",
+            "**/__pycache__/**",
+            "**/third_party/**",
+            "**/site-packages/**"
+          ],
+          "markdownDescription": "%cfg.exclude%"
+        },
+        "codeCurrent.maxFiles": {
+          "type": "number",
+          "default": 3000,
+          "minimum": 1,
+          "markdownDescription": "%cfg.maxFiles%"
+        },
+        "codeCurrent.cpp.includePaths": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "default": [],
+          "markdownDescription": "%cfg.includePaths%"
+        },
+        "codeCurrent.analysis.workers": {
+          "type": "number",
+          "default": 0,
+          "minimum": 0,
+          "maximum": 16,
+          "markdownDescription": "%cfg.workers%"
+        }
+      }
+    }
+  },
+  "scripts": {
+    "build": "node scripts/build.mjs",
+    "watch": "node scripts/build.mjs --watch",
+    "typecheck": "tsc --noEmit -p .",
+    "test": "node scripts/build.mjs --tests && node --test out-test/*.test.js",
+    "analyze": "node dist/cli.js",
+    "demo": "node scripts/build.mjs && node dist/cli.js samples/cpp-router -o out/cpp.json --quiet && node dist/cli.js samples/py-pipeline -o out/py.json --quiet && node dist/cli.js samples/c-ringbuf -o out/c.json --quiet && node scripts/build-demo.mjs out/demo.html en out/cpp.json:C++ out/py.json:Python out/c.json:C",
+    "vscode:prepublish": "node scripts/build.mjs --production",
+    "package": "vsce package --no-dependencies"
+  },
+  "devDependencies": {
+    "@types/node": "^26.6.6",
+    "@types/vscode": "~1.85.0",
+    "@vscode/vsce": "^4.1.0",
+    "esbuild": "^0.28.2",
+    "tree-sitter-c": "^0.24.1",
+    "tree-sitter-cpp": "^0.23.4",
+    "tree-sitter-python": "^0.25.0",
+    "typescript": "^7.0.2"
+  },
+  "dependencies": {
+    "elkjs": "^0.12.1",
+    "web-tree-sitter": "^0.27.2"
+  }
+}

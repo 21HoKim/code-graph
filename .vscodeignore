@@ -1,0 +1,17 @@
+**
+!dist/extension.js
+!dist/parseWorker.js
+!dist/cli.js
+!dist/wasm/**
+!dist/webview/**
+!media/icon.png
+!l10n/**
+!package.json
+!package.nls.json
+!package.nls.ko.json
+!README.md
+!README.ko.md
+!CHANGELOG.md
+!LICENSE
+!THIRD_PARTY_NOTICES.md
+**/*.map
