@@ -4,6 +4,7 @@
  */
 import type { Overlay } from './overlay';
 import type { PEdge, PNode, Projection } from './projection';
+import { threadColor, type RuntimeOverlay } from './traceview';
 import {
   HEADER_H,
   labelOf,
@@ -44,7 +45,9 @@ export class Renderer {
   private gHits: SVGGElement;
   private gNodes: SVGGElement;
   private gLabels: SVGGElement;
+  private gLive: SVGGElement;
   private els = new Map<string, Element[]>();
+  private activeIds: string[] = [];
   private current?: { proj: Projection; layout: LayoutResult; style: LayoutStyle };
 
   constructor(stage: HTMLElement) {
@@ -65,7 +68,7 @@ export class Renderer {
           <path d="M1,1 L11,6 L1,11 z" class="mk mk-inherit"/></marker>
       </defs>
       <g class="world">
-        <g class="grid"></g><g class="zones"></g><g class="edges"></g><g class="breaks"></g><g class="hits"></g><g class="nodes"></g><g class="labels"></g>
+        <g class="grid"></g><g class="zones"></g><g class="edges"></g><g class="breaks"></g><g class="hits"></g><g class="nodes"></g><g class="labels"></g><g class="live"></g>
       </g>`;
     stage.appendChild(this.svg);
     this.world = this.svg.querySelector('.world')!;
@@ -76,6 +79,7 @@ export class Renderer {
     this.gHits = this.svg.querySelector('.hits')!;
     this.gNodes = this.svg.querySelector('.nodes')!;
     this.gLabels = this.svg.querySelector('.labels')!;
+    this.gLive = this.svg.querySelector('.live')!;
   }
 
   setTransform(x: number, y: number, k: number): void {
@@ -93,8 +97,11 @@ export class Renderer {
     counts: (n: PNode) => string,
     overlay?: Overlay,
     extraClass?: (e: PEdge) => string,
+    runtime?: RuntimeOverlay,
   ): void {
     this.current = { proj, layout, style };
+    this.activeIds = [];
+    this.gLive.innerHTML = '';
     const zones: string[] = [];
     const nodes: string[] = [];
     const ordered = [...proj.nodes.values()].sort((a, b) => a.t.depth - b.t.depth);
@@ -102,7 +109,7 @@ export class Renderer {
       const b = layout.boxes.get(n.id);
       if (!b) continue;
       if (n.container) zones.push(this.zone(n, b, measure, overlay));
-      else nodes.push(this.block(n, b, dir, measure, counts, overlay));
+      else nodes.push(this.block(n, b, dir, measure, counts, overlay, runtime));
     }
     const edges: string[] = [];
     const hits: string[] = [];
@@ -111,9 +118,11 @@ export class Renderer {
       const pts = layout.routes.get(e.id);
       if (!pts || pts.length < 2) continue;
       const d = edgePath(pts, style);
-      const w = Math.min(4.5, 1.25 + Math.log2(1 + e.count) * 0.55);
+      const rw = runtime?.wires.get(e.id);
+      const w = rw ? Math.min(6, 1.6 + Math.log2(1 + rw.n) * 0.6) : Math.min(4.5, 1.25 + Math.log2(1 + e.count) * 0.55);
       const st = overlay?.wires.get(e.id);
-      const extra = extraClass?.(e) ?? '';
+      let extra = extraClass?.(e) ?? '';
+      if (runtime) extra += rw ? (rw.observed ? ' ran observed' : ' ran') : ' cold';
       edges.push(
         `<path class="e k-${e.kind} c-${e.conf}${st ? ' ' + st : ''}${extra ? ' ' + extra : ''}" data-id="${e.id}" d="${d}" style="stroke-width:${w.toFixed(2)}" marker-end="url(#cc-a-${e.kind})"/>`,
       );
@@ -177,9 +186,11 @@ export class Renderer {
     measure: Measure,
     counts: (n: PNode) => string,
     overlay?: Overlay,
+    runtime?: RuntimeOverlay,
   ): string {
     const t = n.t;
     const lab = labelOf(n, counts);
+    const rb = runtime?.blocks.get(n.id);
     const tw = tagWidth(t.tag, measure);
     const flags = t.entity?.flags ?? [];
     const thread = flags.includes('threadEntry');
@@ -194,6 +205,7 @@ export class Renderer {
       flags.includes('abstract') ? 'abstract' : '',
       t.children.length ? 'collapsed' : '',
       t.fragment ? 'fragment' : '',
+      runtime ? (rb ? 'ran' : 'cold') : '',
     ]
       .filter(Boolean)
       .join(' ');
@@ -214,6 +226,13 @@ export class Renderer {
     };
     if (st?.state === 'broken') badge(`✕ ${st.errors}`, 'bd-err');
     else if (st?.state === 'affected') badge(`⚠ +${st.dist}`, 'bd-imp');
+    if (rb) badge(`×${rb.n > 9999 ? Math.round(rb.n / 1000) + 'k' : rb.n}`, 'bd-run');
+    // which threads ran this block: one colour stripe each along the bottom edge
+    let strip = '';
+    if (rb?.threads.length) {
+      const sw = (w - 12) / rb.threads.length;
+      strip = rb.threads.map((th, i) => `<rect class="ts" x="${6 + i * sw}" y="${h - 3.2}" width="${Math.max(1, sw - 1)}" height="2.4" rx="1.2" fill="${threadColor(th)}"/>`).join('');
+    }
     if (thread) badge('⚡ thread', 'bd-thread');
     if (t.children.length) badge(`+${n.t.children.length}`, 'bd-more');
     if (n.internal) badge(`↻${n.internal}`, 'bd-int');
@@ -227,6 +246,7 @@ export class Renderer {
       `<text class="t1" x="${16 + tw}" y="${y1}">${esc(truncate(lab.title, 34))}</text>` +
       (lab.sub ? `<text class="t2" x="10" y="${h - 9}">${esc(lab.sub)}</text>` : '') +
       badges +
+      strip +
       `</g>`
     );
   }
@@ -255,6 +275,43 @@ export class Renderer {
       );
     }
     this.gLabels.innerHTML = out.join('');
+  }
+
+  /** Replay: blocks on some thread's call stack glow in that thread's colour (top of stack brightest). */
+  setActive(active: Map<string, { color: string; top: boolean }>): void {
+    for (const id of this.activeIds) for (const el of this.els.get(id) ?? []) el.classList.remove('live', 'live-top');
+    this.activeIds = [];
+    for (const [id, a] of active) {
+      for (const el of this.els.get(id) ?? []) {
+        if (!el.classList.contains('n')) continue;
+        el.classList.add('live');
+        if (a.top) el.classList.add('live-top');
+        (el as SVGElement).style.setProperty('--live', a.color);
+        this.activeIds.push(id);
+      }
+    }
+  }
+
+  /** Replay: values riding into blocks (arguments in, return values out). */
+  liveLabels(items: { node: string; text: string; color: string; age: number; up?: boolean }[], measure: Measure): void {
+    if (!this.current) return;
+    const out: string[] = [];
+    const stack = new Map<string, number>();
+    for (const it of items) {
+      const b = this.current.layout.boxes.get(it.node);
+      if (!b) continue;
+      const k = stack.get(it.node) ?? 0;
+      stack.set(it.node, k + 1);
+      if (k > 2) continue;
+      const w = Math.ceil(measure(it.text, '10px var(--cc-mono)')) + 12;
+      const x = b.x + b.w / 2 - w / 2;
+      const y = b.y - 20 - k * 17 - (it.up ? it.age * 8 : 0);
+      out.push(
+        `<g class="lv" style="opacity:${Math.max(0, 1 - it.age).toFixed(2)}" transform="translate(${x.toFixed(1)},${y.toFixed(1)})">` +
+          `<rect width="${w}" height="15" rx="7.5" style="stroke:${it.color}"/><text x="${w / 2}" y="10.8" text-anchor="middle">${esc(it.text)}</text></g>`,
+      );
+    }
+    this.gLive.innerHTML = out.join('');
   }
 
   pulseNode(id: string | null): void {

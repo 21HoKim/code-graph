@@ -136,6 +136,11 @@
           "command": "codeCurrent.showFile",
           "when": "editorLangId =~ /^(c|cpp|python)$/",
           "group": "navigation@90"
+        },
+        {
+          "command": "codeCurrent.runTrace",
+          "when": "editorLangId =~ /^(c|cpp|python)$/ && isWorkspaceTrusted",
+          "group": "navigation@91"
         }
       ]
     },

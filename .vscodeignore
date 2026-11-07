@@ -4,6 +4,7 @@
 !dist/cli.js
 !dist/wasm/**
 !dist/webview/**
+!dist/runtime/**
 !media/icon.png
 !l10n/**
 !package.json

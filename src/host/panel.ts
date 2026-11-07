@@ -199,6 +199,8 @@ export class CircuitPanel implements vscode.Disposable {
           const v = this.service.verified;
           if (v) this.post({ type: 'diagnostics', set: 'compile', diagnostics: v.diagnostics, info: v.info });
           else this.afterGraph('initial');
+          const tr = this.service.lastTrace;
+          if (tr) this.post({ type: 'trace', trace: tr.trace, notes: tr.notes });
         } else await this.refresh('initial');
         this.postEditorDiagnostics();
         break;
@@ -211,6 +213,9 @@ export class CircuitPanel implements vscode.Disposable {
         break;
       case 'loadTrace':
         await vscode.commands.executeCommand('codeCurrent.loadTrace');
+        break;
+      case 'clearTrace':
+        await vscode.commands.executeCommand('codeCurrent.clearTrace');
         break;
       case 'open': {
         const abs = this.service.abs(m.file);

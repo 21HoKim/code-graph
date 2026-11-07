@@ -31,6 +31,12 @@ const en = {
   checkedWith: 'Checked {c} C/C++ units and {p} Python files in {ms} ms', notVerified: 'Not compile-checked yet — showing problems found by static analysis.',
   syntax: 'parse', compiler: 'compiler', linker: 'linker', python: 'python', incomplete: 'incomplete', editor: 'editor', runtime: 'runtime',
   legendBroken: 'broken', legendAffected: 'affected', legendUnpowered: 'no current',
+  run: 'Run', runHint: 'Build, run and trace the program (calls per thread, values, crashes)', traceChip: 'trace · {n} threads', traceHint: 'Run summary: threads, failures, shared data',
+  coldCode: 'did not run', runTitle: 'Runtime', notExecuted: 'never ran in this trace', ranOnThreads: 'ran on {n} threads', recentCalls: 'Recent calls',
+  exceptions: 'Failures', stopped: 'stopped at the time limit', exitCode: 'exit code {n}', exitOk: 'exited normally', callsN: '{n} calls', runAgain: 'Run again',
+  threads: 'Threads', startsIn: 'starts in', sharedData: 'Shared between threads', sharedHint: 'The same object used by several threads — where races and locks matter.',
+  dataFlow: 'Data passed along', dataTrail: 'Data trail', sightings: 'seen {n}×', sharedAcross: 'used by {n} threads', returned: 'returned',
+  traceCapped: 'Detailed events stop after {n}; call counts cover the whole run.', output: 'Program output', speed: 'Replay speed', closeTrace: 'Close the trace',
 };
 export type Strings = typeof en;
 
@@ -67,6 +73,12 @@ const ko: Strings = {
   checkedWith: 'C/C++ {c}개 단위, Python {p}개 파일 검사 ({ms}ms)', notVerified: '아직 컴파일 검사 전이라 정적 분석으로 찾은 문제만 보여요.',
   syntax: '파싱', compiler: '컴파일러', linker: '링커', python: 'python', incomplete: '미구현', editor: '에디터', runtime: '런타임',
   legendBroken: '끊김', legendAffected: '영향', legendUnpowered: '전류 없음',
+  run: '실행', runHint: '프로그램을 빌드·실행하며 추적 (스레드별 호출, 값, 크래시)', traceChip: '추적 · 스레드 {n}', traceHint: '실행 요약: 스레드, 실패, 공유 데이터',
+  coldCode: '실행 안 됨', runTitle: '실행 결과', notExecuted: '이번 실행에서 한 번도 안 불림', ranOnThreads: '스레드 {n}개에서 실행', recentCalls: '최근 호출',
+  exceptions: '실패', stopped: '제한 시간에 멈춤', exitCode: '종료 코드 {n}', exitOk: '정상 종료', callsN: '호출 {n}', runAgain: '다시 실행',
+  threads: '스레드', startsIn: '시작 함수', sharedData: '스레드 간 공유 데이터', sharedHint: '여러 스레드가 같은 객체를 씀 — 경쟁 상태와 락을 볼 곳이에요.',
+  dataFlow: '전달된 데이터', dataTrail: '데이터 경로', sightings: '{n}번 등장', sharedAcross: '스레드 {n}개가 사용', returned: '반환',
+  traceCapped: '자세한 이벤트는 {n}개까지만 기록, 호출 횟수는 전체 실행 기준이에요.', output: '프로그램 출력', speed: '재생 속도', closeTrace: '추적 닫기',
 };
 
 let dict: Strings = en;

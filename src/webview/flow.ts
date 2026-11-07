@@ -249,13 +249,15 @@ export class FlowLayer {
       const nowMs = performance.now();
       this.bursts = this.bursts.filter((b) => nowMs - b.t0 < b.dur);
       ctx.globalAlpha = 1;
+      // many simultaneous pulses would add up to white: dim them as they crowd
+      const crowd = Math.min(1, 14 / Math.max(14, this.bursts.length));
       for (const b of this.bursts) {
         const u = (nowMs - b.t0) / b.dur;
         const s = (b.reverse ? 1 - u : u) * b.path.len;
-        const spr = this.sprite(b.color, Math.round(size * 1.5));
+        const spr = this.sprite(b.color, Math.round(size * 1.4));
         for (let tail = 0; tail < 4; tail++) {
-          ctx.globalAlpha = 1 - tail * 0.22;
-          this.draw(ctx, b.path, s - (b.reverse ? -1 : 1) * tail * 7, spr, half * 1.5);
+          ctx.globalAlpha = (1 - tail * 0.24) * (0.35 + 0.65 * crowd);
+          this.draw(ctx, b.path, s - (b.reverse ? -1 : 1) * tail * 7, spr, half * 1.4);
         }
       }
     }

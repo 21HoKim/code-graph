@@ -79,7 +79,7 @@ export function qualifiedParts(n: Node): string[] {
   }
 }
 
-function innerDeclarator(n: Node): Node | null {
+export function innerDeclarator(n: Node): Node | null {
   return (
     n.childForFieldName('declarator') ??
     named(n).find((c) => c.type.endsWith('declarator') || c.type === 'identifier' || c.type === 'field_identifier') ??
@@ -88,7 +88,7 @@ function innerDeclarator(n: Node): Node | null {
 }
 
 /** Walk through pointer/reference/attributed declarators to the function_declarator. */
-function findFnDeclarator(d: Node | null): Node | null {
+export function findFnDeclarator(d: Node | null): Node | null {
   let cur = d;
   for (let guard = 0; cur && guard < 8; guard++) {
     if (cur.type === 'function_declarator') {

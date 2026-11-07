@@ -1,5 +1,20 @@
 {
   "CodeCurrent: graph exported to {0}": "CodeCurrent: 그래프를 {0}에 저장했어요",
   "Show this file in the CodeCurrent circuit view": "이 파일을 CodeCurrent 회로도에서 보기",
-  "Compile checks are disabled in untrusted workspaces.": "신뢰하지 않는 워크스페이스에서는 컴파일 검사가 꺼져 있어요."
+  "Compile checks are disabled in untrusted workspaces.": "신뢰하지 않는 워크스페이스에서는 컴파일 검사가 꺼져 있어요.",
+  "codeCurrent.run.entry \"{0}\" is not an entry point; pick one.": "codeCurrent.run.entry \"{0}\"는 진입점이 아니에요. 목록에서 골라 주세요.",
+  "CodeCurrent: what should run?": "CodeCurrent: 무엇을 실행할까요?",
+  "Entry point": "진입점",
+  "Run & Trace is disabled in untrusted workspaces.": "신뢰하지 않는 워크스페이스에서는 실행 & 추적이 꺼져 있어요.",
+  "No entry point found: a C/C++ main() or a Python file with if __name__ == \"__main__\".": "진입점이 없어요: C/C++ main() 또는 if __name__ == \"__main__\"이 있는 Python 파일이 필요해요.",
+  "Run anyway": "그래도 실행",
+  "{0} compile errors (shown in red on the circuit). Run anyway?": "컴파일 오류 {0}개 (회로도에 빨간색으로 표시). 그래도 실행할까요?",
+  "Show problems": "문제 보기",
+  "Build failed: {0} errors (shown in red).": "빌드 실패: 오류 {0}개 (빨간색으로 표시).",
+  "Run failed.": "실행 실패.",
+  "{0}: {1} threads, {2} calls traced": "{0}: 스레드 {1}개, 호출 {2}개 추적",
+  "{0} runtime failures (shown in red).": "런타임 실패 {0}개 (빨간색으로 표시).",
+  "Trace": "추적",
+  "Open a CodeCurrent trace": "CodeCurrent 추적 파일 열기",
+  "Not a CodeCurrent trace: {0}": "CodeCurrent 추적 파일이 아니에요: {0}"
 }

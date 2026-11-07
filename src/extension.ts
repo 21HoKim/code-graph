@@ -4,6 +4,7 @@
 import * as fs from 'fs';
 import * as vscode from 'vscode';
 import { CircuitPanel, VIEW_TYPE, verifyMode, viewSettings } from './host/panel';
+import { clearTraceCommand, loadTraceCommand, runTraceCommand, stopRun } from './host/run';
 import { AnalysisService } from './host/service';
 
 let service: AnalysisService | undefined;
@@ -28,6 +29,9 @@ export function activate(ctx: vscode.ExtensionContext): void {
       const p = CircuitPanel.show(ctx, svc);
       await p.verify();
     }),
+    vscode.commands.registerCommand('codeCurrent.runTrace', () => runTraceCommand(ctx, svc)),
+    vscode.commands.registerCommand('codeCurrent.loadTrace', () => loadTraceCommand(ctx, svc)),
+    vscode.commands.registerCommand('codeCurrent.clearTrace', () => clearTraceCommand(svc)),
     vscode.commands.registerCommand('codeCurrent.exportGraph', async () => {
       const g = svc.graph ?? (await svc.analyze());
       const folder = vscode.workspace.workspaceFolders?.[0]?.uri;
@@ -117,6 +121,7 @@ export function activate(ctx: vscode.ExtensionContext): void {
 }
 
 export function deactivate(): void {
+  stopRun();
   service?.dispose();
   service = undefined;
 }

@@ -9,6 +9,7 @@ import { AnalysisSession, DEFAULT_EXCLUDE_DIRS, type FileEntry } from '../core/a
 import type { CodeGraph, Diagnostic } from '../core/model';
 import { ParsePool, defaultWorkerCount } from '../core/pool';
 import { detectToolchain, loadCompileCommands, verifyWorkspace, type Toolchain } from '../core/verify';
+import type { RunTrace } from '../core/trace';
 import type { VerifyInfo } from '../shared/protocol';
 
 const SOURCE_GLOB = '**/*.{c,h,cc,cpp,cxx,c++,hpp,hh,hxx,h++,ipp,inl,py,pyi}';
@@ -30,6 +31,8 @@ export class AnalysisService implements vscode.Disposable {
   graph?: CodeGraph;
   /** Latest compile-check result (merged over all units). */
   verified?: { diagnostics: Diagnostic[]; info: VerifyInfo };
+  /** Latest runtime trace (survives closing the panel). */
+  lastTrace?: { trace: RunTrace; notes: string[] };
   readonly log: vscode.OutputChannel;
 
   constructor(ctx: vscode.ExtensionContext) {

@@ -1,5 +1,6 @@
 /** Messages between the extension host and the webview. */
 import type { CodeGraph, Diagnostic, VerifyInfo } from '../core/model';
+import type { RunTrace } from '../core/trace';
 
 export type { VerifyInfo };
 
@@ -28,6 +29,8 @@ export type HostMessage =
   | { type: 'focusFile'; file: string }
   | { type: 'diagnostics'; set: DiagSet; diagnostics: Diagnostic[]; info?: VerifyInfo }
   | { type: 'task'; task: 'verify' | 'build' | 'run'; state: 'start' | 'progress' | 'done' | 'error'; message?: string; done?: number; total?: number }
+  | { type: 'trace'; trace: RunTrace | null; notes?: string[] }
+  | { type: 'showProblems' }
   | { type: 'error'; message: string };
 
 export type WebviewMessage =
@@ -37,4 +40,5 @@ export type WebviewMessage =
   | { type: 'exportGraph' }
   | { type: 'verify' }
   | { type: 'runTrace' }
-  | { type: 'loadTrace' };
+  | { type: 'loadTrace' }
+  | { type: 'clearTrace' };

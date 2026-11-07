@@ -30,6 +30,9 @@ import {
 } from './projection';
 import { buildOverlay, type Overlay } from './overlay';
 import { Renderer, esc } from './render';
+import { Timeline } from './timeline';
+import { RuntimeMap, TraceModel, argsText, augmentGraph, fmtNs, retText, threadColor, valText } from './traceview';
+import type { RunTrace } from '../core/trace';
 import { Viewport } from './viewport';
 
 interface VsApi {
@@ -40,7 +43,7 @@ interface VsApi {
 declare function acquireVsCodeApi(): VsApi;
 declare global {
   interface Window {
-    __CODE_CURRENT_DEMO__?: { graph: CodeGraph; settings: ViewSettings };
+    __CODE_CURRENT_DEMO__?: { graph: CodeGraph; settings: ViewSettings; trace?: RunTrace };
   }
 }
 
@@ -97,6 +100,11 @@ const DEFAULT_STATE: UIState = {
 };
 
 const KIND_ICON: Record<RelationKind, string> = { call: '→', spawn: '⚡', instantiate: '✚', inherit: '△', include: '#', import: '⇣' };
+
+/** Thread of every recorded call. */
+function s_th(tr: RunTrace): number[] {
+  return tr.spans.th;
+}
 
 // ---------------------------------------------------------------------------
 
@@ -230,6 +238,16 @@ class App {
   private health?: Health;
   private overlay?: Overlay;
   private task?: { task: string; state: string; message?: string; done?: number; total?: number };
+  /** Graph as analysed; `graph` adds the calls only a run revealed. */
+  private staticGraph?: CodeGraph;
+  private trace?: TraceModel;
+  private rtmap?: RuntimeMap;
+  private timeline?: Timeline;
+  private traceNotes: string[] = [];
+  private replay = { t: 0, playing: false, speed: 1, raf: 0, wall: 0 };
+  private live: { node: string; text: string; color: string; born: number; up?: boolean }[] = [];
+  private follow: string | null = null;
+  private soloThread: number | null = null;
 
   // DOM
   private root = document.getElementById('app') ?? document.body.appendChild(h('div', { id: 'app' }));
@@ -317,7 +335,14 @@ class App {
       case 'task':
         this.task = m.state === 'done' || m.state === 'error' ? undefined : m;
         if (m.state === 'error' && m.message) this.showNotice(m.message, 8000);
+        else if (m.state === 'progress' && m.message && m.task !== 'verify') this.status.dataset.task = m.message;
         this.updateToolbarState();
+        break;
+      case 'trace':
+        this.setTrace(m.trace, m.notes ?? []);
+        break;
+      case 'showProblems':
+        this.showProblems();
         break;
       case 'error':
         this.showNotice(m.message, 8000);
@@ -326,17 +351,27 @@ class App {
   }
 
   /** Standalone demo: swap the whole dataset and reset the view. */
-  loadDemo(g: CodeGraph, settings: ViewSettings): void {
+  loadDemo(g: CodeGraph, settings: ViewSettings, trace?: RunTrace): void {
     this.state = { ...DEFAULT_STATE, style: this.state.style, flow: this.state.flow };
     this.graph = undefined;
+    this.staticGraph = undefined;
     this.diagSets.clear();
     this.fitPending = true;
+    this.clearTraceState();
     this.setGraph(g, settings, 'initial');
+    if (trace) {
+      // CLI runs carry their build / runtime problems and notes along
+      const extra = trace as RunTrace & { diagnostics?: Diagnostic[]; notes?: string[] };
+      if (extra.diagnostics?.length) this.diagSets.set('runtime', { diags: extra.diagnostics });
+      this.recomputeHealth();
+      this.setTrace(trace, extra.notes ?? []);
+    }
   }
 
   private setGraph(g: CodeGraph, settings: ViewSettings, reason: 'initial' | 'update'): void {
     const first = !this.graph;
-    this.graph = g;
+    this.staticGraph = g;
+    this.graph = this.trace ? augmentGraph(g, this.trace.tr) : g;
     this.settings = settings;
     setLang(settings.lang);
     this.flow.maxParticles = settings.maxParticles;
@@ -501,18 +536,24 @@ class App {
     const had = !!this.overlay;
     this.overlay = s.health && this.health && (this.health.broken.size || this.health.affected.size) ? buildOverlay(proj, this.graph, this.health) : undefined;
     if (had !== !!this.overlay) this.buildLegend();
-    this.renderer.draw(proj, layout, s.style, this.dir, this.measure, this.counts, this.overlay, (e) => this.wireClass(e));
+    this.rtmap = this.trace ? new RuntimeMap(this.trace, proj) : undefined;
+    const rt = this.rtmap?.overlay;
+    this.renderer.draw(proj, layout, s.style, this.dir, this.measure, this.counts, this.overlay, (e) => this.wireClass(e), rt);
     this.flow.setPaths(
       proj.edges
         .map((e) => {
           const pts = layout.routes.get(e.id);
           if (!pts || pts.length < 2) return undefined;
           const structural = e.kind === 'include' || e.kind === 'import' || e.kind === 'inherit';
-          const st = this.overlay?.wires.get(e.id) ?? 'ok';
-          return makePath(e.id, e.kind, samplePath(pts, s.style === 'network'), e.count, e.returns, structural || e.conf === 'guess', st);
+          let st: 'ok' | 'cut' | 'dead' = this.overlay?.wires.get(e.id) ?? 'ok';
+          // with a trace, current only flows where the program actually went
+          const ran = rt?.wires.get(e.id);
+          if (rt && !ran && st === 'ok') st = 'dead';
+          return makePath(e.id, e.kind, samplePath(pts, s.style === 'network'), ran ? ran.n : e.count, e.returns, structural || e.conf === 'guess', st);
         })
         .filter((p): p is NonNullable<typeof p> => !!p),
     );
+    if (this.trace) this.applyReplay();
   }
 
   /** Extra classes for a wire (hooks for runtime-observed wires). */
@@ -661,10 +702,18 @@ class App {
     healthBtn.onclick = () => this.showProblems();
     tb.append(healthBtn);
     tb.append(h('span', { class: 'spacer' }));
+    if (this.trace) {
+      const tr = this.trace.tr;
+      const chip = h('button', { class: 'btn trace-chip', title: t('traceHint') }, `◉ ${esc(t('traceChip', { n: tr.threads.length }))}`);
+      chip.onclick = () => this.showTraceSummary();
+      tb.append(chip);
+    }
     if (this.settings?.host !== false) {
       const verify = h('button', { class: 'btn', 'data-role': 'verify', title: t('verifyHint') }, `✓ ${esc(t('verify'))}`);
       verify.onclick = () => api.postMessage({ type: 'verify' });
-      tb.append(verify);
+      const run = h('button', { class: 'btn run', 'data-role': 'run', title: t('runHint') }, `▶ ${esc(t('run'))}`);
+      run.onclick = () => api.postMessage({ type: 'runTrace' });
+      tb.append(verify, run);
     }
     if (this.settings?.host !== false) {
       const re = h('button', { class: 'btn', title: t('reanalyze') }, '↻');
@@ -717,6 +766,8 @@ class App {
       } else hb.hidden = true;
       const vb = this.toolbar.querySelector<HTMLButtonElement>('[data-role=verify]');
       if (vb) vb.disabled = !!this.task || this.settings?.trusted === false;
+      const rb = this.toolbar.querySelector<HTMLButtonElement>('[data-role=run]');
+      if (rb) rb.disabled = !!this.task || this.settings?.trusted === false;
     }
     const chip = this.toolbar.querySelector<HTMLElement>('[data-role=focus]');
     if (chip) {
@@ -792,6 +843,12 @@ class App {
       item('instantiate', `${KIND_ICON.instantiate} ${t('instantiate')}`) +
       item('inherit', `${KIND_ICON.inherit} ${t('inherit')}`) +
       item('include', `${t('include')} / ${t('import')}`, true) +
+      (this.trace
+        ? this.trace.tr.threads
+            .slice(0, 8)
+            .map((th) => `<div class="lg-x"><span class="sw" style="background:${threadColor(th.id)}"></span>${esc(th.name)}</div>`)
+            .join('') + `<div class="lg-x"><span class="sw" style="background:var(--cc-muted);opacity:.35"></span>${esc(t('coldCode'))}</div>`
+        : '') +
       (this.overlay
         ? `<div class="lg-x"><span class="sw-b bad"></span>✕ ${esc(t('legendBroken'))}</div>` +
           `<div class="lg-x"><span class="sw-b warn"></span>⚠ ${esc(t('legendAffected'))}</div>` +
@@ -976,6 +1033,8 @@ class App {
       this.renderer.highlight(null);
       this.flow.setFocus(null);
       this.details.hidden = true;
+      this.timeline?.setHighlight(new Set());
+      if (this.follow) this.setFollow(null);
       return;
     }
     const inside = (nid: string) => {
@@ -1009,6 +1068,7 @@ class App {
       this.measure,
     );
     this.flow.setFocus(edges);
+    this.timeline?.setHighlight(this.fnsOfNode(id));
     if (showPanel) this.renderNodeDetails(p.nodes.get(id)!, touching);
   }
 
@@ -1173,6 +1233,7 @@ class App {
       html += `<h3>${esc(t('params'))} → ${esc(t('returns'))}</h3><div class="sig">${esc(`${e.name}(${ps ? '\n  ' + ps + '\n' : ''})${e.returns ? ' → ' + e.returns : ''}`)}</div>`;
     }
     html += this.problemsSection(n);
+    html += this.runtimeSection(n);
     html += '<div class="row">';
     if (tn.loc) html += `<button class="btn" data-act="open">${esc(t('openSource'))}</button>`;
     html += `<button class="btn" data-act="focus">${esc(t('focus'))}</button>`;
@@ -1290,11 +1351,456 @@ class App {
       };
     }
     for (const a of d.querySelectorAll<HTMLElement>('[data-node]')) a.onclick = () => this.select(a.dataset.node!);
+    for (const a of d.querySelectorAll<HTMLElement>('[data-follow]')) a.onclick = () => this.setFollow(a.dataset.follow!);
+    for (const a of d.querySelectorAll<HTMLElement>('[data-span]')) a.onclick = () => this.seek(this.trace!.tr.spans.t[Number(a.dataset.span)]);
+    for (const a of d.querySelectorAll<HTMLElement>('[data-th]')) a.onclick = () => this.setSolo(Number(a.dataset.th) === this.soloThread ? null : Number(a.dataset.th));
     if (nodeId && tn) {
       d.querySelector<HTMLElement>('[data-act=open]')?.addEventListener('click', () => tn.loc && this.openLoc(tn.loc.file, tn.loc.line));
       d.querySelector<HTMLElement>('[data-act=focus]')?.addEventListener('click', () => this.setFocus({ id: nodeId, hops: 1 }));
       d.querySelector<HTMLElement>('[data-act=toggle]')?.addEventListener('click', () => this.toggle(nodeId));
     }
+  }
+
+  // -------------------------------------------------------------------------
+  // runtime trace: replay, threads, data tracking
+  // -------------------------------------------------------------------------
+
+  private clearTraceState(): void {
+    this.stopPlay();
+    this.timeline?.el.remove();
+    this.timeline = undefined;
+    this.trace = undefined;
+    this.rtmap = undefined;
+    this.follow = null;
+    this.soloThread = null;
+    this.live = [];
+    this.replay.t = 0;
+  }
+
+  private setTrace(tr: RunTrace | null, notes: string[]): void {
+    this.clearTraceState();
+    this.traceNotes = notes;
+    if (tr) {
+      this.trace = new TraceModel(tr);
+      this.timeline = new Timeline(this.trace, {
+        seek: (x) => this.seek(x),
+        togglePlay: () => this.togglePlay(),
+        step: (d) => this.step(d),
+        setSpeed: (x) => {
+          this.replay.speed = x;
+          this.timeline?.setSpeed(x);
+        },
+        selectSpan: (sp) => this.selectSpan(sp),
+        soloThread: (th) => this.setSolo(th, false),
+        close: () => {
+          this.setTrace(null, []);
+          if (this.settings?.host !== false) api.postMessage({ type: 'clearTrace' });
+        },
+        fnName: (f) => this.fnName(f),
+        t: (k, v) => t(k as never, v),
+      });
+      this.root.insertBefore(this.timeline.el, this.status);
+      this.timeline.setTime(0);
+    }
+    if (this.staticGraph) this.graph = tr ? augmentGraph(this.staticGraph, tr) : this.staticGraph;
+    this.buildToolbar();
+    this.buildLegend();
+    // the dock takes room from the stage: fit the circuit again
+    this.fitPending = true;
+    void this.refresh();
+  }
+
+  private fnName(f: number): string {
+    const fn = this.trace?.tr.fns[f];
+    if (!fn) return '?';
+    return (fn.id && this.entities.get(fn.id)?.qname) || fn.name;
+  }
+
+  /** Trace functions shown by a visible block. */
+  private fnsOfNode(id: string): Set<number> {
+    const out = new Set<number>();
+    this.rtmap?.fnNode.forEach((n, f) => {
+      if (n === id) out.add(f);
+    });
+    return out;
+  }
+
+  private togglePlay(): void {
+    if (this.replay.playing) this.stopPlay();
+    else this.startPlay();
+  }
+
+  private startPlay(): void {
+    if (!this.trace) return;
+    if (this.replay.t >= this.trace.duration) this.replay.t = 0;
+    this.replay.playing = true;
+    this.replay.wall = performance.now();
+    this.flow.setMode('off');
+    this.timeline?.setPlaying(true);
+    this.replay.raf = requestAnimationFrame(this.tick);
+  }
+
+  private stopPlay(): void {
+    cancelAnimationFrame(this.replay.raf);
+    if (!this.replay.playing) return;
+    this.replay.playing = false;
+    this.timeline?.setPlaying(false);
+    this.flow.setMode(this.state.flow);
+  }
+
+  /** ns of program time per ms of replay: the whole run takes ~15 s at 1×. */
+  private rate(): number {
+    return ((this.trace?.duration ?? 1) / 15000) * this.replay.speed;
+  }
+
+  private tick = (now: number): void => {
+    if (!this.replay.playing || !this.trace) return;
+    const dt = Math.min(100, now - this.replay.wall);
+    this.replay.wall = now;
+    const t0 = this.replay.t;
+    const t1 = Math.min(this.trace.duration, t0 + dt * this.rate());
+    this.replay.t = t1;
+    this.fire(t0, t1);
+    this.applyReplay();
+    this.timeline?.setTime(t1);
+    if (t1 >= this.trace.duration) {
+      this.stopPlay();
+      return;
+    }
+    this.replay.raf = requestAnimationFrame(this.tick);
+  };
+
+  /** Calls / returns / exceptions in (t0, t1]: pulses on wires, values on blocks. */
+  private fire(t0: number, t1: number): void {
+    const m = this.trace;
+    const rt = this.rtmap;
+    if (!m || !rt) return;
+    const tr = m.tr;
+    const s = tr.spans;
+    const solo = this.soloThread;
+    const now = performance.now();
+    const starts = m.startedIn(t0, t1, 600).filter((i) => solo === null || s.th[i] === solo);
+    const readable = starts.length <= 6;
+    const seen = new Set<string>();
+    for (const i of starts) {
+      const f = s.fn[i];
+      const p = s.parent[i];
+      let edge: string | undefined;
+      if (p >= 0) edge = rt.edgeOf(s.fn[p], f);
+      else {
+        const th = tr.threads.find((x) => x.id === s.th[i]);
+        if (th?.parent !== undefined) edge = rt.spawnEdge(th.parent, f, s.t[i]);
+      }
+      const color = threadColor(s.th[i]);
+      if (edge && !seen.has(edge) && seen.size < 40) {
+        seen.add(edge);
+        this.flow.pulse(edge, color, false, readable ? 700 : 450);
+      }
+      if (readable) {
+        const node = rt.fnNode[f];
+        const txt = argsText(tr.args[i], tr.lang);
+        if (node && txt) this.live.push({ node, text: txt, color, born: now });
+      }
+    }
+    const ends = m.endedIn(t0, t1, 600).filter((i) => solo === null || s.th[i] === solo);
+    if (ends.length <= 6) {
+      const ret = readPalette().ret;
+      for (const i of ends) {
+        const v = retText(tr.rets[i], tr.lang);
+        if (!v) continue;
+        const p = s.parent[i];
+        const edge = p >= 0 ? rt.edgeOf(s.fn[p], s.fn[i]) : undefined;
+        if (edge) this.flow.pulse(edge, ret, true, 650);
+        const node = rt.fnNode[s.fn[i]];
+        if (node) this.live.push({ node, text: '⟲ ' + v, color: ret, born: now, up: true });
+      }
+    }
+    for (const x of tr.exceptions) {
+      if (x.t <= t0 || x.t > t1 || x.fn < 0) continue;
+      const node = rt.fnNode[x.fn];
+      if (node) this.live.push({ node, text: `✕ ${x.type}`, color: '#ff4d5e', born: now });
+    }
+  }
+
+  /** Blocks on the call stacks at the replay time glow in their thread's colour. */
+  private applyReplay(): void {
+    const m = this.trace;
+    const rt = this.rtmap;
+    if (!m || !rt) return;
+    const s = m.tr.spans;
+    const active = new Map<string, { color: string; top: boolean }>();
+    const showStacks = this.replay.playing || this.replay.t > 0;
+    if (showStacks) {
+      for (const [th, span] of m.activeAt(this.replay.t)) {
+        if (this.soloThread !== null && th !== this.soloThread) continue;
+        const color = threadColor(th);
+        let top = true;
+        for (let i = span; i >= 0; i = s.parent[i]) {
+          const node = rt.fnNode[s.fn[i]];
+          if (node && !active.has(node)) active.set(node, { color, top });
+          top = false;
+        }
+      }
+    }
+    this.renderer.setActive(active);
+    const now = performance.now();
+    const life = 1500;
+    this.live = this.live.filter((x) => now - x.born < life).slice(-30);
+    this.renderer.liveLabels(
+      this.live.map((x) => ({ node: x.node, text: x.text, color: x.color, age: (now - x.born) / life, up: x.up })),
+      this.measure,
+    );
+  }
+
+  private seek(t: number): void {
+    if (!this.trace) return;
+    this.replay.t = Math.max(0, Math.min(this.trace.duration, t));
+    this.live = [];
+    this.applyReplay();
+    this.timeline?.setTime(this.replay.t);
+  }
+
+  /** Jump to the next / previous call (of the soloed thread) and show it. */
+  private step(dir: 1 | -1): void {
+    const m = this.trace;
+    if (!m) return;
+    this.stopPlay();
+    const s = m.tr.spans;
+    const ok = (i: number) => this.soloThread === null || s.th[i] === this.soloThread;
+    let target = -1;
+    if (dir > 0) target = m.startedIn(this.replay.t, Infinity, 5000).find(ok) ?? -1;
+    else {
+      const list = m.startedIn(-1, this.replay.t - 1, Number.MAX_SAFE_INTEGER);
+      for (let k = list.length - 1; k >= 0; k--)
+        if (ok(list[k])) {
+          target = list[k];
+          break;
+        }
+    }
+    if (target < 0) return;
+    const tt = s.t[target];
+    this.seek(tt);
+    this.fire(tt - 1, tt);
+    this.applyReplay();
+    const node = this.rtmap?.fnNode[s.fn[target]];
+    if (node) this.renderer.pulseNode(node);
+    this.status.dataset.task = '';
+    this.showNotice(`${this.fnName(s.fn[target])}${argsText(m.tr.args[target], m.tr.lang, 3) ? ' (' + argsText(m.tr.args[target], m.tr.lang, 3) + ')' : ''}`, 2500);
+  }
+
+  private selectSpan(span: number): void {
+    const m = this.trace;
+    if (!m) return;
+    const f = m.tr.spans.fn[span];
+    this.seek(m.tr.spans.t[span]);
+    const id = m.tr.fns[f]?.id;
+    if (id) this.revealEntity(id);
+  }
+
+  /** Show only one thread's work: its blocks and wires lit, the others dimmed. */
+  private setSolo(th: number | null, fromPanel = true): void {
+    this.soloThread = th;
+    const rt = this.rtmap;
+    if (th === null || !rt) {
+      this.renderer.highlight(null);
+      this.flow.setFocus(null);
+    } else {
+      const nodes = new Set<string>();
+      const edges = new Set<string>();
+      for (const [id, b] of rt.overlay.blocks) if (b.threads.includes(th)) nodes.add(id);
+      for (const [id, w] of rt.overlay.wires) if (w.threads.includes(th)) edges.add(id);
+      for (const n of [...nodes]) for (const a of this.ancestorsVisible(n)) nodes.add(a);
+      this.renderer.highlight({ nodes, edges });
+      this.flow.setFocus(edges);
+    }
+    this.applyReplay();
+    if (fromPanel) this.showTraceSummary();
+  }
+
+  /** Data tracking: light up every block an object passed through, in order. */
+  private setFollow(id: string | null): void {
+    this.follow = id;
+    const m = this.trace;
+    const rt = this.rtmap;
+    if (!id || !m || !rt) {
+      this.timeline?.setMarks([]);
+      this.renderer.highlight(null);
+      this.flow.setFocus(null);
+      return;
+    }
+    const s = m.tr.spans;
+    const sights = m.sightings(id);
+    const nodes = new Set<string>();
+    const edges = new Set<string>();
+    let prev = -1;
+    for (const x of sights) {
+      const f = s.fn[x.span];
+      const node = rt.fnNode[f];
+      if (node) nodes.add(node);
+      if (prev >= 0) {
+        const e = rt.edgeOf(prev, f) ?? rt.edgeOf(f, prev);
+        if (e) edges.add(e);
+      }
+      prev = f;
+    }
+    for (const n of [...nodes]) for (const a of this.ancestorsVisible(n)) nodes.add(a);
+    this.renderer.highlight({ nodes, edges });
+    this.flow.setFocus(edges);
+    this.timeline?.setMarks(sights.map((x) => ({ t: s.t[x.span], th: s.th[x.span] })));
+    const obj = m.tr.objects.find((o) => o.id === id);
+    const threads = [...new Set(sights.map((x) => s.th[x.span]))];
+    let html = `<h2><span class="pill" style="--k:var(--cc-ret)">◆</span>${esc(t('dataTrail'))}<button class="close">✕</button></h2>`;
+    html += `<div class="qn">${esc(obj?.label ?? '')} ${esc(id)}</div>`;
+    html += `<div class="row">${threads.map((th) => this.threadChip(th)).join('')}<span class="flag">${esc(t('sightings', { n: sights.length }))}</span></div>`;
+    if (threads.length > 1) html += `<div class="row"><span class="flag warn">⚠ ${esc(t('sharedAcross', { n: threads.length }))}</span></div>`;
+    html += `<ul class="lst">`;
+    // consecutive sightings in the same function on the same thread collapse into one row
+    const rows: { x: (typeof sights)[number]; n: number }[] = [];
+    for (const x of sights) {
+      const last = rows[rows.length - 1];
+      if (last && s.fn[last.x.span] === s.fn[x.span] && s.th[last.x.span] === s.th[x.span] && last.x.role === x.role) last.n++;
+      else rows.push({ x, n: 1 });
+    }
+    for (const { x, n } of rows.slice(0, 80)) {
+      const f = s.fn[x.span];
+      const role = x.role === 'ret' ? t('returned') : x.role === 'self' ? 'self' : x.name ?? 'arg';
+      html +=
+        `<li><span class="dot" style="background:${threadColor(s.th[x.span])}"></span><a data-entity="${esc(m.tr.fns[f]?.id ?? '')}">${esc(this.fnName(f))}</a>` +
+        `<span class="cnt">${esc(role)}${n > 1 ? ' ×' + n : ''}</span><span class="args"><a data-span="${x.span}">${fmtNs(s.t[x.span])}</a></span></li>`;
+    }
+    html += '</ul>';
+    this.details.innerHTML = html;
+    this.details.hidden = false;
+    this.wireDetails(null);
+  }
+
+  private threadChip(th: number): string {
+    const name = this.trace?.tr.threads.find((x) => x.id === th)?.name ?? `thread ${th}`;
+    return `<a class="chip th${this.soloThread === th ? ' on' : ''}" data-th="${th}"><i style="background:${threadColor(th)}"></i>${esc(name)}</a>`;
+  }
+
+  /** Details panel: what this block did at runtime. */
+  private runtimeSection(n: PNode): string {
+    const m = this.trace;
+    if (!m || !this.rtmap) return '';
+    const fns = [...this.fnsOfNode(n.id)];
+    const inside = n.container || n.t.children.length > 0;
+    if (!fns.length) return inside ? '' : `<h3>◉ ${esc(t('runTitle'))}</h3><div class="row q">○ ${esc(t('notExecuted'))}</div>`;
+    const tr = m.tr;
+    const s = tr.spans;
+    let calls = 0;
+    let ns = 0;
+    const threads = new Set<number>();
+    for (const f of fns) {
+      calls += m.stats[f].n;
+      ns += m.stats[f].ns;
+      for (const th of m.stats[f].threads) threads.add(th);
+    }
+    let html = `<h3>◉ ${esc(t('runTitle'))}</h3>`;
+    html += `<div class="row"><span class="flag">×${calls}</span><span class="flag">${fmtNs(ns)}</span>${[...threads].map((th) => this.threadChip(th)).join('')}</div>`;
+    if (threads.size > 1) html += `<div class="row"><span class="flag thread">⚡ ${esc(t('ranOnThreads', { n: threads.size }))}</span></div>`;
+    const main = fns.sort((a, b) => m.stats[b].n - m.stats[a].n)[0];
+    const recent = m.recentCalls(main, 8);
+    if (recent.length) {
+      html += `<h3>${esc(t('recentCalls'))}</h3><ul class="lst">`;
+      for (const i of recent) {
+        const args = (tr.args[i] ?? []).filter((a) => a[0] !== 'self');
+        const argHtml = args
+          .slice(0, 4)
+          .map((a) => {
+            const v = esc(valText(a[1], a[2], tr.lang, 28));
+            return `${esc(a[0])}=${a[3] && (a[1] === 'o' || a[1] === 'c') ? `<a data-follow="${esc(a[3])}">${v}</a>` : v}`;
+          })
+          .join(', ');
+        const rv = tr.rets[i];
+        const ret = rv && rv[0] !== 'n' ? ` → ${rv[2] && (rv[0] === 'o' || rv[0] === 'c') ? `<a data-follow="${esc(rv[2])}">${esc(valText(rv[0], rv[1], tr.lang, 28))}</a>` : esc(valText(rv[0], rv[1], tr.lang, 28))}` : '';
+        const self = tr.selfs[i];
+        html +=
+          `<li><span class="dot" style="background:${threadColor(s.th[i])}"></span><span class="mono">(${argHtml || ''})${ret}</span>` +
+          `<span class="cnt"><a data-span="${i}">${fmtNs(s.t[i])}</a></span>` +
+          (self ? `<span class="args">self <a data-follow="${esc(self)}">@${esc(self.slice(-6))}</a> · ${fmtNs(s.end[i] - s.t[i])}</span>` : `<span class="args">${fmtNs(s.end[i] - s.t[i])}</span>`) +
+          `</li>`;
+      }
+      html += '</ul>';
+    }
+    const exc = tr.exceptions.filter((x) => fns.includes(x.fn));
+    if (exc.length) {
+      html += `<h3 class="bad">✕ ${esc(t('exceptions'))}</h3><ul class="lst">`;
+      for (const x of exc.slice(0, 8))
+        html += `<li><span class="dot" style="background:var(--cc-broken)"></span><span>${esc(x.type)}: ${esc(x.msg)}</span><span class="cnt">${fmtNs(x.t)}</span></li>`;
+      html += '</ul>';
+    }
+    return html;
+  }
+
+  /** Run summary: exit, threads (who started whom), failures, data shared between threads. */
+  showTraceSummary(): void {
+    const m = this.trace;
+    if (!m) return;
+    const tr = m.tr;
+    const ex = tr.exit;
+    let html = `<h2><span class="pill" style="--k:var(--cc-call)">◉</span>${esc(t('runTitle'))}<button class="close">✕</button></h2>`;
+    html += `<div class="qn">${esc(tr.command)}</div><div class="row">`;
+    if (ex.crash && ex.crash !== 'SIGTERM') html += `<span class="flag bad">✕ ${esc(ex.crash)}</span>`;
+    else if (ex.timedOut) html += `<span class="flag warn">⏱ ${esc(t('stopped'))}</span>`;
+    else html += `<span class="flag ${ex.code ? 'bad' : ''}">${esc(ex.code ? t('exitCode', { n: ex.code }) : t('exitOk'))}</span>`;
+    html += `<span class="flag">${fmtNs(tr.durationNs)}</span><span class="flag">${esc(t('callsN', { n: tr.spans.t.length }))}</span></div>`;
+    if (this.settings?.host !== false) html += `<div class="row"><button class="btn" data-act="rerun">▶ ${esc(t('runAgain'))}</button></div>`;
+    // thread tree
+    html += `<h3>⚡ ${esc(t('threads'))} (${tr.threads.length})</h3><ul class="lst">`;
+    const kids = new Map<number, number[]>();
+    for (const th of tr.threads) if (th.parent !== undefined) (kids.get(th.parent) ?? kids.set(th.parent, []).get(th.parent)!).push(th.id);
+    const roots = tr.threads.filter((th) => th.parent === undefined || !tr.threads.some((x) => x.id === th.parent));
+    const callsOf = new Map<number, number>();
+    for (const th of s_th(tr)) callsOf.set(th, (callsOf.get(th) ?? 0) + 1);
+    const row = (id: number, depth: number): string => {
+      const th = tr.threads.find((x) => x.id === id)!;
+      const entry = th.entry !== undefined ? this.fnName(th.entry) : '';
+      let r =
+        `<li><span class="dot" style="background:${threadColor(id)}"></span><span style="padding-left:${depth * 12}px">${depth ? '↳ ' : ''}${this.threadChip(id)}</span>` +
+        `<span class="cnt">×${callsOf.get(id) ?? 0}</span>` +
+        (entry ? `<span class="args">${esc(t('startsIn'))} <a data-entity="${esc(tr.fns[th.entry!]?.id ?? '')}">${esc(entry)}</a> · ${fmtNs((th.end ?? tr.durationNs) - th.start)}</span>` : '') +
+        `</li>`;
+      for (const k of kids.get(id) ?? []) r += row(k, depth + 1);
+      return r;
+    };
+    html += roots.map((r) => row(r.id, 0)).join('') + '</ul>';
+    // failures
+    const fails = tr.exceptions.filter((x) => x.uncaught || tr.lang !== 'python');
+    if (fails.length) {
+      html += `<h3 class="bad">✕ ${esc(t('exceptions'))}</h3><ul class="lst">`;
+      for (const x of fails.slice(0, 12)) {
+        const where = x.fn >= 0 ? `<a data-entity="${esc(tr.fns[x.fn]?.id ?? '')}">${esc(this.fnName(x.fn))}</a>` : esc(x.file ?? '');
+        const path = (x.frames ?? []).map(([f]) => this.fnName(f).split(/::|\./).pop()).join(' → ');
+        html +=
+          `<li><span class="dot" style="background:var(--cc-broken)"></span><span><b>${esc(x.type)}</b>: ${esc(x.msg)}</span><span class="cnt"><a data-span-t="${x.t}">${fmtNs(x.t)}</a></span>` +
+          `<span class="args">${where}${path ? ' · ' + esc(path) : ''}</span></li>`;
+      }
+      html += '</ul>';
+    }
+    // shared data
+    const shared = tr.objects.filter((o) => o.threads.length > 1);
+    const travel = tr.objects.filter((o) => o.threads.length <= 1);
+    const objList = (list: typeof tr.objects) =>
+      list
+        .slice(0, 16)
+        .map(
+          (o) =>
+            `<li><span class="dot" style="background:var(--cc-ret)"></span><a data-follow="${esc(o.id)}">◆ ${esc(o.label.length > 30 ? o.label.slice(0, 29) + '…' : o.label)}</a>` +
+            `<span class="cnt">${o.threads.map((th) => `<span style="color:${threadColor(th)}">●</span>`).join('')}</span>` +
+            `<span class="args">${esc(o.fns.slice(0, 4).map((f) => this.fnName(f).split(/::|\./).pop()).join(' → '))}${o.fns.length > 4 ? ' …' : ''} · ×${o.n}</span></li>`,
+        )
+        .join('');
+    if (shared.length) html += `<h3>◆ ${esc(t('sharedData'))} (${shared.length})</h3><div class="row q">${esc(t('sharedHint'))}</div><ul class="lst">${objList(shared)}</ul>`;
+    if (travel.length) html += `<h3>◆ ${esc(t('dataFlow'))} (${travel.length})</h3><ul class="lst">${objList(travel)}</ul>`;
+    const notes = [...this.traceNotes, ...(tr.truncated ? [t('traceCapped', { n: tr.events })] : [])];
+    if (notes.length) html += `<h3>${esc(t('notes'))}</h3>${notes.map((x) => `<div class="row q">${esc(x)}</div>`).join('')}`;
+    if (tr.output.trim()) html += `<h3>${esc(t('output'))}</h3><pre class="sig out">${esc(tr.output.slice(-3000))}</pre>`;
+    this.details.innerHTML = html;
+    this.details.hidden = false;
+    this.wireDetails(null);
+    this.details.querySelector<HTMLElement>('[data-act=rerun]')?.addEventListener('click', () => api.postMessage({ type: 'runTrace' }));
+    for (const a of this.details.querySelectorAll<HTMLElement>('[data-span-t]')) a.onclick = () => this.seek(Number(a.dataset.spanT));
   }
 
   private openLoc(file: string, line: number): void {
@@ -1331,6 +1837,9 @@ class App {
       const sig = signature(n);
       html = `<b>${esc(e?.qname ?? n.t.file?.path ?? n.t.label)}</b>${sig ? `<div class="mono">${esc(sig)}</div>` : ''}`;
       if (n.t.loc) html += `<div class="mono">${esc(n.t.loc.file)}:${n.t.loc.line}</div>`;
+      const rb = this.rtmap?.overlay.blocks.get(id);
+      if (rb) html += `<div class="mono">◉ ×${rb.n} · ${rb.threads.map((th) => `<span style="color:${threadColor(th)}">●</span>`).join('')}</div>`;
+      else if (this.trace && !n.container) html += `<div class="mono q">○ ${esc(t('notExecuted'))}</div>`;
       const st = this.overlay?.blocks.get(id);
       if (st?.state === 'broken' && st.diags[0]) html += `<div class="tip-bad">✕ ${esc(st.diags[0].message)}</div>`;
       else if (st?.state === 'affected') html += `<div class="tip-warn">⚠ ${esc(t('dependsOn'))} +${st.dist}</div>`;
@@ -1346,7 +1855,14 @@ class App {
   }
 
   private onKey(e: KeyboardEvent): void {
-    if ((e.target as Element)?.tagName === 'INPUT') return;
+    const tag = (e.target as Element)?.tagName;
+    if (tag === 'INPUT' || tag === 'SELECT') return;
+    if (this.trace && (e.key === ' ' || e.key === 'ArrowRight' || e.key === 'ArrowLeft')) {
+      e.preventDefault();
+      if (e.key === ' ') this.togglePlay();
+      else this.step(e.key === 'ArrowRight' ? 1 : -1);
+      return;
+    }
     if (e.key === '/') {
       e.preventDefault();
       this.toolbar.querySelector<HTMLInputElement>('.search input')?.focus();
@@ -1369,5 +1885,5 @@ const app = new App();
 (window as unknown as { codeCurrent: App }).codeCurrent = app;
 if (window.__CODE_CURRENT_DEMO__) {
   const d = window.__CODE_CURRENT_DEMO__;
-  setTimeout(() => app.onHost({ type: 'graph', graph: d.graph, settings: d.settings, reason: 'initial' }), 0);
+  setTimeout(() => app.loadDemo(d.graph, d.settings, d.trace), 0);
 }

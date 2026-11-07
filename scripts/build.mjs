@@ -25,6 +25,8 @@ function copyAssets() {
     ['node_modules/elkjs/lib/elk-worker.min.js', 'dist/webview/elk-worker.js'],
   ];
   for (const [from, to] of copies) fs.copyFileSync(from, to);
+  // runtime tracers (Run & Trace) ship as source: python tracer + C/C++ runtime compiled into the traced build
+  fs.cpSync('runtime', 'dist/runtime', { recursive: true, filter: (f) => !/__pycache__|\.pyc$/.test(f) });
 }
 
 const common = { bundle: true, sourcemap: !prod, minify: prod, logLevel: 'warning', target: 'es2022', legalComments: 'linked' };
