@@ -67,7 +67,7 @@
 **.vsix로 설치**
 
 ```bash
-code --install-extension code-graph-0.2.0.vsix
+code --install-extension code-graph-vscode-0.2.0.vsix
 ```
 
 또는 VS Code의 *확장* 뷰 → `…` 메뉴 → *VSIX에서 설치…*

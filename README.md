@@ -70,7 +70,7 @@ their impact spreading along the wires; run it and every thread lights up its ow
 **From a release (.vsix)**
 
 ```bash
-code --install-extension code-graph-0.2.0.vsix
+code --install-extension code-graph-vscode-0.2.0.vsix
 ```
 
 or in VS Code: *Extensions* view → `…` menu → *Install from VSIX…*
