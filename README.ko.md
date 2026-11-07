@@ -75,7 +75,7 @@ code --install-extension code-current-0.2.0.vsix
 **소스에서 빌드**
 
 ```bash
-git clone https://github.com/21HoKim/code-current && cd code-current
+git clone https://github.com/21HoKim/code-graph && cd code-graph
 npm ci
 npm run build          # dist/: 확장, 파서 워커, 웹뷰, WASM 문법, 런타임 트레이서
 npm test               # 분석기·프로젝션·컴파일 검사·실행 추적 테스트

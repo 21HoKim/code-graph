@@ -78,7 +78,7 @@ or in VS Code: *Extensions* view → `…` menu → *Install from VSIX…*
 **From source**
 
 ```bash
-git clone https://github.com/21HoKim/code-current && cd code-current
+git clone https://github.com/21HoKim/code-graph && cd code-graph
 npm ci
 npm run build          # dist/: extension, parse worker, webview, WASM grammars, runtime tracers
 npm test               # analyzer, projection, compile-check and Run & Trace tests
