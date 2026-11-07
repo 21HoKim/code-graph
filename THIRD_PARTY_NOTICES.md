@@ -1,6 +1,6 @@
 # Third-party notices
 
-CodeCurrent bundles the following components, unmodified, in `dist/`:
+CodeGraph bundles the following components, unmodified, in `dist/`:
 
 | component | version | license | source |
 | --- | --- | --- | --- |
@@ -11,4 +11,4 @@ CodeCurrent bundles the following components, unmodified, in `dist/`:
 | elkjs (`elk-api.js` in `main.js`, `elk-worker.js`) | 0.12.1 | EPL-2.0 (or GPL-3.0-or-later as a secondary license) | https://github.com/kieler/elkjs |
 
 ELK (Eclipse Layout Kernel) is made available under the Eclipse Public License 2.0, https://www.eclipse.org/legal/epl-2.0/.
-Its source code is available from the repository above. CodeCurrent's own code is MIT-licensed and does not modify ELK.
+Its source code is available from the repository above. CodeGraph's own code is MIT-licensed and does not modify ELK.

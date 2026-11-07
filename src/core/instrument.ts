@@ -5,10 +5,10 @@
  * inserts one statement right after the `{` of every function body — on the
  * same line, so compiler diagnostics keep their line numbers:
  *
- *   C++   ::cct::scope cct_s_(7u, this); ::cct::arg("cfg", cfg, 1);
- *   C     __attribute__((cleanup(cct_cleanup_), unused)) unsigned cct_f_ = (cct_enter(7u, 0), cct_arg_i("n", (long long)(n)), 7u);
+ *   C++   ::cgt::scope cgt_s_(7u, this); ::cgt::arg("cfg", cfg, 1);
+ *   C     __attribute__((cleanup(cgt_cleanup_), unused)) unsigned cgt_f_ = (cgt_enter(7u, 0), cgt_arg_i("n", (long long)(n)), 7u);
  *
- * The runtime (runtime/c/cc_trace.{h,c}) turns those into per-thread call
+ * The runtime (runtime/c/cg_trace.{h,c}) turns those into per-thread call
  * events. Every inserted id (fid) is recorded with the static entity it belongs
  * to, so the trace needs no symbol lookup. Files are read and written as latin1:
  * byte-exact whatever their encoding.
@@ -47,7 +47,7 @@ const UNSIGNED_TYPEDEF = /^(size_t|uintptr_t|uint\w*|ulong|ushort|uchar|u8|u16|u
 interface ParamProbe {
   name: string;
   ref: boolean;
-  /** C style: the cct_arg_* call, or undefined when the type cannot be summarised safely. */
+  /** C style: the cgt_arg_* call, or undefined when the type cannot be summarised safely. */
   c?: string;
 }
 
@@ -103,10 +103,10 @@ export function instrumentSources(o: InstrumentInput): InstrumentResult {
         let probe: string;
         if (cStyle) {
           const args = params.filter((p) => p.c).map((p) => ', ' + p.c);
-          probe = ` __attribute__((cleanup(cct_cleanup_), unused)) unsigned cct_f_ = (cct_enter(${fid}u, 0)${args.join('')}, ${fid}u);`;
+          probe = ` __attribute__((cleanup(cgt_cleanup_), unused)) unsigned cgt_f_ = (cgt_enter(${fid}u, 0)${args.join('')}, ${fid}u);`;
         } else {
           const self = isMember(fd, head, ent) ? 'this' : 'nullptr';
-          probe = ` ::cct::scope cct_s_(${fid}u, ${self});` + params.map((p) => ` ::cct::arg("${p.name}", ${p.name}, ${p.ref ? 1 : 0});`).join('');
+          probe = ` ::cgt::scope cgt_s_(${fid}u, ${self});` + params.map((p) => ` ::cgt::arg("${p.name}", ${p.name}, ${p.ref ? 1 : 0});`).join('');
         }
         edits.push({ at: body.startIndex + 1, text: probe });
       }
@@ -186,20 +186,20 @@ function paramsOf(list: Node | null): ParamProbe[] {
 function cArg(name: string, type: Node | null, ptr: number, arr: boolean): string | undefined {
   const t = type?.text.trim() ?? '';
   const q = JSON.stringify(name);
-  if (ptr === 1 && !arr && /\bchar\b/.test(t)) return `cct_arg_s(${q}, (const char *)(${name}))`;
-  if (ptr > 0 || arr) return `cct_arg_p(${q}, (const void *)(${name}))`;
+  if (ptr === 1 && !arr && /\bchar\b/.test(t)) return `cgt_arg_s(${q}, (const char *)(${name}))`;
+  if (ptr > 0 || arr) return `cgt_arg_p(${q}, (const void *)(${name}))`;
   if (!type) return undefined;
   if (type.type === 'primitive_type' || type.type === 'sized_type_specifier') {
     if (/\bvoid\b/.test(t)) return undefined;
-    if (/\b(float|double)\b/.test(t)) return `cct_arg_d(${q}, (double)(${name}))`;
-    if (/\b(bool|_Bool)\b/.test(t)) return `cct_arg_b(${q}, (${name}) ? 1 : 0)`;
-    if (/\bunsigned\b/.test(t) || UNSIGNED_TYPEDEF.test(t)) return `cct_arg_u(${q}, (unsigned long long)(${name}))`;
-    return `cct_arg_i(${q}, (long long)(${name}))`;
+    if (/\b(float|double)\b/.test(t)) return `cgt_arg_d(${q}, (double)(${name}))`;
+    if (/\b(bool|_Bool)\b/.test(t)) return `cgt_arg_b(${q}, (${name}) ? 1 : 0)`;
+    if (/\bunsigned\b/.test(t) || UNSIGNED_TYPEDEF.test(t)) return `cgt_arg_u(${q}, (unsigned long long)(${name}))`;
+    return `cgt_arg_i(${q}, (long long)(${name}))`;
   }
   if (type.type === 'type_identifier' && INT_TYPEDEF.test(t)) {
-    return UNSIGNED_TYPEDEF.test(t) ? `cct_arg_u(${q}, (unsigned long long)(${name}))` : `cct_arg_i(${q}, (long long)(${name}))`;
+    return UNSIGNED_TYPEDEF.test(t) ? `cgt_arg_u(${q}, (unsigned long long)(${name}))` : `cgt_arg_i(${q}, (long long)(${name}))`;
   }
-  if (type.type === 'enum_specifier') return `cct_arg_i(${q}, (long long)(${name}))`;
+  if (type.type === 'enum_specifier') return `cgt_arg_i(${q}, (long long)(${name}))`;
   return undefined; // structs by value, unknown typedefs
 }
 

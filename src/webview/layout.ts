@@ -275,7 +275,7 @@ export async function runLayout(
     try {
       out = await elk.layout(buildElkGraph(p, style, dir, measure, counts));
     } catch (err) {
-      console.warn('[CodeCurrent] hierarchical layout failed, falling back', err);
+      console.warn('[CodeGraph] hierarchical layout failed, falling back', err);
       fallback = true;
       out = await separate();
     }

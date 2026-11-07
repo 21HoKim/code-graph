@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 /**
- * CodeCurrent CLI – run the analyzer without VS Code (CI, debugging, tests).
+ * CodeGraph CLI – run the analyzer without VS Code (CI, debugging, tests).
  *
  *   node dist/cli.js <dir> [-o graph.json] [--verify] [--workers N] [--max-files N] [-I include/dir] [--quiet]
  *
@@ -40,7 +40,7 @@ async function main(): Promise<void> {
     else if (a === '--quiet') quiet = true;
     else if (a === '--verify') verify = true;
     else if (a === '-h' || a === '--help') {
-      console.log('usage: code-current <dir> [-o graph.json] [--verify] [--workers N] [--max-files N] [-I dir] [--quiet]');
+      console.log('usage: code-graph <dir> [-o graph.json] [--verify] [--workers N] [--max-files N] [-I dir] [--quiet]');
       return;
     } else dir = a;
   }
@@ -114,7 +114,7 @@ async function traceMain(argv: string[]): Promise<void> {
     else if (a === '--no-values') values = false;
     else dir = a;
   }
-  if (!dir) throw new Error('usage: code-current trace <dir> [--entry FILE] [-o run.json] [-- ARGS…]');
+  if (!dir) throw new Error('usage: code-graph trace <dir> [--entry FILE] [-o run.json] [-- ARGS…]');
   const root = path.resolve(dir);
   const pool = new ParsePool(path.join(__dirname, 'wasm'), path.join(__dirname, 'parseWorker.js'), defaultWorkerCount());
   const { files } = walk(root, { maxFiles: 5000 });
@@ -127,6 +127,7 @@ async function traceMain(argv: string[]): Promise<void> {
     throw new Error(`no entry point${entryArg ? ` matching ${entryArg}` : ''}; found: ${entries.map((e) => e.label).join(', ') || 'none'}`);
   }
   const t0 = Date.now();
+  const workDir = path.join(os.tmpdir(), `code-graph-run-${process.pid}`);
   const r = await runAndTrace({
     root,
     graph,
@@ -141,7 +142,7 @@ async function traceMain(argv: string[]): Promise<void> {
     buildFlags: [],
     linkFlags: [],
     runtimeDir: path.join(__dirname, 'runtime'),
-    workDir: path.join(os.tmpdir(), `code-current-run-${process.pid}`),
+    workDir,
     parsers: () => loadParsers(path.join(__dirname, 'wasm')),
     timeoutMs: timeout * 1000,
     maxEvents,
@@ -149,6 +150,7 @@ async function traceMain(argv: string[]): Promise<void> {
     log: (l) => console.error(l),
   });
   pool.dispose();
+  fs.rmSync(workDir, { recursive: true, force: true });
   for (const n of r.notes) console.error('note:', n);
   for (const d of [...r.buildDiagnostics, ...r.runtimeDiagnostics]) console.error(`  ${d.file}:${d.line}: ${d.source} ${d.severity}: ${d.message}`);
   if (r.trace) {

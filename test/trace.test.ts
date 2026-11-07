@@ -51,7 +51,7 @@ async function trace(dir: string, entryFile?: string, args: string[] = []): Prom
 describe('trace parsing', () => {
   it('builds nested spans from out-of-order per-thread lines', () => {
     const text = [
-      '{"k":"h","schema":"code-current-trace/1","lang":"cpp","clock":"ns"}',
+      '{"k":"h","schema":"code-graph-trace/1","lang":"cpp","clock":"ns"}',
       '{"k":"t","id":2,"t":50,"name":"thread-2"}',
       '["c",60,2,1,null,[["n","i","3"]]]',
       '["r",90,2,1]',
@@ -98,10 +98,10 @@ describe('C/C++ instrumentation', () => {
     const text = fs.readFileSync(path.join(out, 'a.cpp'), 'utf8');
     const lines = text.split('\n');
     assert.equal(lines.length, 10, 'line numbers are preserved');
-    assert.match(lines[1], /cct_s_\(\d+u, nullptr\)/, 'static member: no this');
-    assert.match(lines[2], /cct_s_\(\d+u, this\);.*::cct::arg\("o", o, 1\);.*::cct::arg\("p", p, 0\);.*::cct::arg\("d", d, 0\)/);
-    assert.doesNotMatch(lines[3], /cct/, 'constexpr is left alone');
-    assert.match(lines[6], /cct_s_\(\d+u, nullptr\); ::cct::arg\("n", n, 0\);$/);
+    assert.match(lines[1], /cgt_s_\(\d+u, nullptr\)/, 'static member: no this');
+    assert.match(lines[2], /cgt_s_\(\d+u, this\);.*::cgt::arg\("o", o, 1\);.*::cgt::arg\("p", p, 0\);.*::cgt::arg\("d", d, 0\)/);
+    assert.doesNotMatch(lines[3], /cgt/, 'constexpr is left alone');
+    assert.match(lines[6], /cgt_s_\(\d+u, nullptr\); ::cgt::arg\("n", n, 0\);$/);
     assert.equal(r.fns.length, 4);
     assert.ok(r.skipped.some((s) => s.why === 'constexpr'));
     assert.ok(r.fns.every((f) => f.id), 'every probe maps to an entity');

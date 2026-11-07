@@ -1,5 +1,5 @@
 /**
- * CodeCurrent semantic model.
+ * CodeGraph semantic model.
  *
  * Everything the analyzer knows about a workspace is expressed with these
  * language-agnostic, JSON-serializable types. The webview never sees syntax

@@ -1,5 +1,5 @@
 /*
- * CodeCurrent: C++ part of the runtime tracer. Records the type and what() of
+ * CodeGraph: C++ part of the runtime tracer. Records the type and what() of
  * an uncaught exception before std::terminate aborts, so the crash report says
  * "std::out_of_range: vector::_M_range_check …" instead of just SIGABRT.
  */
@@ -11,7 +11,7 @@
 #include <cxxabi.h>
 #endif
 
-extern "C" void cct_note_exception(const char *what);
+extern "C" void cgt_note_exception(const char *what);
 
 namespace {
 std::terminate_handler g_prev = nullptr;
@@ -31,9 +31,9 @@ void on_terminate() {
 #else
       std::snprintf(msg, sizeof msg, "uncaught %s: %s", type, ex.what());
 #endif
-      cct_note_exception(msg);
+      cgt_note_exception(msg);
     } catch (...) {
-      cct_note_exception("uncaught exception (not derived from std::exception)");
+      cgt_note_exception("uncaught exception (not derived from std::exception)");
     }
   }
   if (g_prev) g_prev();

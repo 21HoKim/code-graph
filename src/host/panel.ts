@@ -3,7 +3,7 @@ import * as vscode from 'vscode';
 import type { HostMessage, LevelSetting, ViewSettings, WebviewMessage } from '../shared/protocol';
 import type { AnalysisService } from './service';
 
-export const VIEW_TYPE = 'codeCurrent.circuit';
+export const VIEW_TYPE = 'codeGraph.circuit';
 
 function nonce(): string {
   const chars = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789';
@@ -13,7 +13,7 @@ function nonce(): string {
 }
 
 export function viewSettings(): ViewSettings {
-  const c = vscode.workspace.getConfiguration('codeCurrent');
+  const c = vscode.workspace.getConfiguration('codeGraph');
   return {
     defaultLevel: c.get<LevelSetting>('defaultLevel', 'auto'),
     layout: c.get<'circuit' | 'network'>('layout', 'circuit'),
@@ -27,7 +27,7 @@ export function viewSettings(): ViewSettings {
 }
 
 export type VerifyMode = 'onOpenAndSave' | 'onOpen' | 'manual';
-export const verifyMode = (): VerifyMode => vscode.workspace.getConfiguration('codeCurrent.verify').get<VerifyMode>('mode', 'onOpenAndSave');
+export const verifyMode = (): VerifyMode => vscode.workspace.getConfiguration('codeGraph.verify').get<VerifyMode>('mode', 'onOpenAndSave');
 
 export class CircuitPanel implements vscode.Disposable {
   static current?: CircuitPanel;
@@ -42,7 +42,7 @@ export class CircuitPanel implements vscode.Disposable {
     if (CircuitPanel.current) {
       CircuitPanel.current.panel.reveal(undefined, true);
     } else {
-      const panel = vscode.window.createWebviewPanel(VIEW_TYPE, 'CodeCurrent', { viewColumn: vscode.ViewColumn.Beside, preserveFocus: true }, CircuitPanel.options(ctx));
+      const panel = vscode.window.createWebviewPanel(VIEW_TYPE, 'CodeGraph', { viewColumn: vscode.ViewColumn.Beside, preserveFocus: true }, CircuitPanel.options(ctx));
       CircuitPanel.current = new CircuitPanel(panel, ctx, service);
     }
     const p = CircuitPanel.current;
@@ -134,7 +134,7 @@ export class CircuitPanel implements vscode.Disposable {
   }
 
   postEditorDiagnostics(): void {
-    const on = vscode.workspace.getConfiguration('codeCurrent.verify').get<string>('editorDiagnostics', 'off') === 'errors';
+    const on = vscode.workspace.getConfiguration('codeGraph.verify').get<string>('editorDiagnostics', 'off') === 'errors';
     this.post({ type: 'diagnostics', set: 'editor', diagnostics: on ? this.service.editorDiagnostics() : [] });
   }
 
@@ -161,7 +161,7 @@ export class CircuitPanel implements vscode.Disposable {
     if (invalidate) this.service.invalidate();
     try {
       const g = await vscode.window.withProgress(
-        { location: vscode.ProgressLocation.Window, title: 'CodeCurrent' },
+        { location: vscode.ProgressLocation.Window, title: 'CodeGraph' },
         (progress) =>
           this.service.analyze({
             onProgress: (done, total) => {
@@ -209,13 +209,13 @@ export class CircuitPanel implements vscode.Disposable {
         await this.verify();
         break;
       case 'runTrace':
-        await vscode.commands.executeCommand('codeCurrent.runTrace');
+        await vscode.commands.executeCommand('codeGraph.runTrace');
         break;
       case 'loadTrace':
-        await vscode.commands.executeCommand('codeCurrent.loadTrace');
+        await vscode.commands.executeCommand('codeGraph.loadTrace');
         break;
       case 'clearTrace':
-        await vscode.commands.executeCommand('codeCurrent.clearTrace');
+        await vscode.commands.executeCommand('codeGraph.clearTrace');
         break;
       case 'open': {
         const abs = this.service.abs(m.file);
@@ -236,7 +236,7 @@ export class CircuitPanel implements vscode.Disposable {
         await this.refresh('update', true);
         break;
       case 'exportGraph':
-        await vscode.commands.executeCommand('codeCurrent.exportGraph');
+        await vscode.commands.executeCommand('codeGraph.exportGraph');
         break;
     }
   }
@@ -264,7 +264,7 @@ export class CircuitPanel implements vscode.Disposable {
 <meta http-equiv="Content-Security-Policy" content="${csp}">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <link rel="stylesheet" href="${css}">
-<title>CodeCurrent</title>
+<title>CodeGraph</title>
 </head>
 <body data-elk-worker="${elk}" data-lang="${vscode.env.language}">
 <div id="app"></div>

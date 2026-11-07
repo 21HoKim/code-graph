@@ -1,4 +1,4 @@
-# CodeCurrent
+# CodeGraph
 
 **C, C++, Python 코드를 살아 있는 회로도로 봅니다.**
 폴더·파일·네임스페이스·클래스·함수는 블록이 되고, 호출·스레드 생성·객체 생성·상속은 전선이 되며, 그 위로
@@ -67,7 +67,7 @@
 **.vsix로 설치**
 
 ```bash
-code --install-extension code-current-0.2.0.vsix
+code --install-extension code-graph-0.2.0.vsix
 ```
 
 또는 VS Code의 *확장* 뷰 → `…` 메뉴 → *VSIX에서 설치…*
@@ -79,7 +79,7 @@ git clone https://github.com/21HoKim/code-graph && cd code-graph
 npm ci
 npm run build          # dist/: 확장, 파서 워커, 웹뷰, WASM 문법, 런타임 트레이서
 npm test               # 분석기·프로젝션·컴파일 검사·실행 추적 테스트
-npx @vscode/vsce package --no-dependencies   # -> code-current-<버전>.vsix
+npx @vscode/vsce package --no-dependencies   # -> code-graph-<버전>.vsix
 ```
 
 VS Code에서 **F5**를 누르면 `samples/cpp-router`를 연 확장 개발 호스트가 떠요.
@@ -92,16 +92,16 @@ Python 3.8 이상. 둘 다 컴파일러와 프로그램을 실제로 실행하�
 
 | | |
 | --- | --- |
-| `CodeCurrent: 회로도 열기` | 워크스페이스를 분석하고 뷰 열기(컴파일 검사도 함께) |
-| `CodeCurrent: 회로도에서 보기` | 현재 파일 중심으로 보기(탐색기/에디터 메뉴, 상태 표시줄) |
-| `CodeCurrent: 검증 (컴파일 검사)` | 지금 다시 검사(툴바 **✓ 검증**) |
-| `CodeCurrent: 실행 & 추적` | 빌드·실행·재생(툴바 **▶ 실행**, `main`/스크립트가 여러 개면 물어봐요) |
-| `CodeCurrent: 추적 파일 불러오기…` | CLI나 트레이서가 쓴 추적 파일 열기 |
+| `CodeGraph: 회로도 열기` | 워크스페이스를 분석하고 뷰 열기(컴파일 검사도 함께) |
+| `CodeGraph: 회로도에서 보기` | 현재 파일 중심으로 보기(탐색기/에디터 메뉴, 상태 표시줄) |
+| `CodeGraph: 검증 (컴파일 검사)` | 지금 다시 검사(툴바 **✓ 검증**) |
+| `CodeGraph: 실행 & 추적` | 빌드·실행·재생(툴바 **▶ 실행**, `main`/스크립트가 여러 개면 물어봐요) |
+| `CodeGraph: 추적 파일 불러오기…` | CLI나 트레이서가 쓴 추적 파일 열기 |
 | 블록 클릭 / 더블클릭 | 전선 추적 · 펼치기/접기, 함수면 소스 열기 |
 | `1`…`5` · `/` · `F` · `Esc` | 단계 · 검색 · 화면 맞춤 · 선택 해제 |
 | `Space` · `←` `→` | (추적이 있을 때) 재생/일시정지 · 이전/다음 호출 |
 
-설정(`codeCurrent.*`):
+설정(`codeGraph.*`):
 
 - 뷰: `defaultLevel`, `layout`, `flow.mode`, `flow.maxParticles`, `showGuessedLinks`, `followCursor`, `exclude`,
   `maxFiles`, `cpp.includePaths`, `analysis.workers`

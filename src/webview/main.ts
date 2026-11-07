@@ -1,5 +1,5 @@
 /**
- * CodeCurrent webview app.
+ * CodeGraph webview app.
  * State → project() → ELK (worker) → SVG blocks/wires + canvas flow.
  */
 import ELK from 'elkjs/lib/elk-api.js';
@@ -43,7 +43,7 @@ interface VsApi {
 declare function acquireVsCodeApi(): VsApi;
 declare global {
   interface Window {
-    __CODE_CURRENT_DEMO__?: { graph: CodeGraph; settings: ViewSettings; trace?: RunTrace };
+    __CODE_GRAPH_DEMO__?: { graph: CodeGraph; settings: ViewSettings; trace?: RunTrace };
   }
 }
 
@@ -54,14 +54,14 @@ const api: VsApi =
         postMessage: () => undefined,
         getState: () => {
           try {
-            return JSON.parse(localStorage.getItem('code-current-state') ?? 'null');
+            return JSON.parse(localStorage.getItem('code-graph-state') ?? 'null');
           } catch {
             return undefined;
           }
         },
         setState: (s) => {
           try {
-            localStorage.setItem('code-current-state', JSON.stringify(s));
+            localStorage.setItem('code-graph-state', JSON.stringify(s));
           } catch {
             /* storage unavailable */
           }
@@ -124,7 +124,7 @@ function loadScript(src: string): Promise<void> {
   });
 }
 
-/** Hosted demo page: ELK comes from a CDN (the page itself only carries CodeCurrent's code). */
+/** Hosted demo page: ELK comes from a CDN (the page itself only carries CodeGraph's code). */
 async function createElkFromCdn(base: string): Promise<ElkLike> {
   try {
     const boot = `importScripts(${JSON.stringify(base + 'elk-worker.min.js')});`;
@@ -133,7 +133,7 @@ async function createElkFromCdn(base: string): Promise<ElkLike> {
     await withTimeout(elk.knownLayoutAlgorithms(), 15000);
     return elk;
   } catch (err) {
-    console.warn('[CodeCurrent] CDN worker unavailable, laying out on the main thread', err);
+    console.warn('[CodeGraph] CDN worker unavailable, laying out on the main thread', err);
     await loadScript(base + 'elk.bundled.js');
     const Global = (window as unknown as { ELK: new () => ElkLike }).ELK;
     return new Global();
@@ -153,7 +153,7 @@ async function createElk(): Promise<ElkLike> {
     await withTimeout(elk.knownLayoutAlgorithms(), 5000);
     return elk;
   } catch (err) {
-    console.warn('[CodeCurrent] ELK web worker unavailable, laying out on the main thread', err);
+    console.warn('[CodeGraph] ELK web worker unavailable, laying out on the main thread', err);
     const shim = window as unknown as { module?: { exports: Record<string, unknown> } };
     shim.module = { exports: {} };
     await new Promise<void>((resolve, reject) => {
@@ -473,7 +473,7 @@ class App {
     let layout: LayoutResult;
     const dir = this.direction();
     try {
-      const routing = (window as unknown as { CODE_CURRENT_ROUTING?: 'auto' | 'full' | 'fast' }).CODE_CURRENT_ROUTING ?? 'auto';
+      const routing = (window as unknown as { CODE_GRAPH_ROUTING?: 'auto' | 'full' | 'fast' }).CODE_GRAPH_ROUTING ?? 'auto';
       layout = await runLayout(await this.elk, proj, s.style, dir, this.measure, this.counts, routing);
     } catch (err) {
       clearTimeout(busyTimer);
@@ -601,7 +601,7 @@ class App {
   private buildToolbar(): void {
     const tb = this.toolbar;
     tb.innerHTML = '';
-    tb.append(h('span', { class: 'brand' }, `${LOGO}<span>CodeCurrent</span>`));
+    tb.append(h('span', { class: 'brand' }, `${LOGO}<span>CodeGraph</span>`));
 
     const levels = h('div', { class: 'seg', role: 'group', 'data-role': 'levels' });
     const avail = this.levels();
@@ -1899,8 +1899,8 @@ class App {
 }
 
 const app = new App();
-(window as unknown as { codeCurrent: App }).codeCurrent = app;
-if (window.__CODE_CURRENT_DEMO__) {
-  const d = window.__CODE_CURRENT_DEMO__;
+(window as unknown as { codeGraph: App }).codeGraph = app;
+if (window.__CODE_GRAPH_DEMO__) {
+  const d = window.__CODE_GRAPH_DEMO__;
   setTimeout(() => app.loadDemo(d.graph, d.settings, d.trace), 0);
 }

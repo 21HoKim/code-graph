@@ -1,9 +1,9 @@
 /**
  * Run & Trace: build (C/C++), run with the runtime tracer, parse the trace.
  *
- *   Python  python cc_tracer.py --root R --out T script.py args…   (no build step)
+ *   Python  python cg_tracer.py --root R --out T script.py args…   (no build step)
  *   C/C++   copy + instrument sources → compile every needed translation unit with
- *           -include cc_trace.h → link with the runtime → run with CODE_CURRENT_TRACE=T
+ *           -include cg_trace.h → link with the runtime → run with CODE_GRAPH_TRACE=T
  *
  * Build errors (compiler, linker) and runtime failures (uncaught exceptions,
  * crashes) come back as diagnostics, so they show up red on the circuit like
@@ -43,7 +43,7 @@ export interface RunInput {
   compileCommands?: CompileCommand[];
   buildFlags: string[];
   linkFlags: string[];
-  /** Directory holding python/cc_tracer.py and c/cc_trace.{h,c} + c/cc_trace_cxx.cpp. */
+  /** Directory holding python/cg_tracer.py and c/cg_trace.{h,c} + c/cg_trace_cxx.cpp. */
   runtimeDir: string;
   /** Scratch directory for the instrumented build and the trace (wiped). */
   workDir: string;
@@ -71,7 +71,7 @@ export interface RunResult {
 const TU = /\.(c|cc|cpp|cxx|c\+\+)$/i;
 const OUTPUT_MAX = 64 * 1024;
 
-/** Programs CodeCurrent can start: C/C++ `main` functions and Python scripts with a __main__ guard. */
+/** Programs CodeGraph can start: C/C++ `main` functions and Python scripts with a __main__ guard. */
 export function findEntries(g: CodeGraph): EntryPoint[] {
   const out: EntryPoint[] = [];
   for (const e of g.entities) {
@@ -103,9 +103,9 @@ export async function runAndTrace(o: RunInput): Promise<RunResult> {
   const env: NodeJS.ProcessEnv = { ...process.env, ...(o.env ?? {}) };
 
   if (o.entry.kind === 'python') {
-    if (!o.toolchain.python) return fail('build', 'No Python 3 interpreter found (set codeCurrent.verify.python).');
+    if (!o.toolchain.python) return fail('build', 'No Python 3 interpreter found (set codeGraph.verify.python).');
     cmd = o.toolchain.python;
-    const tracer = path.join(o.runtimeDir, 'python', 'cc_tracer.py');
+    const tracer = path.join(o.runtimeDir, 'python', 'cg_tracer.py');
     args = ['-X', 'utf8', tracer, '--root', o.root, '--out', traceFile, '--max-events', String(o.maxEvents), '--values', o.values ? '1' : '0'];
     if (o.entry.module) args.push('--module', o.entry.module);
     else args.push(path.join(o.root, ...o.entry.file.split('/')));
@@ -119,9 +119,9 @@ export async function runAndTrace(o: RunInput): Promise<RunResult> {
     fns = b.fns;
     cmd = b.exe;
     args = [...o.args];
-    env.CODE_CURRENT_TRACE = traceFile;
-    env.CODE_CURRENT_MAX_EVENTS = String(o.maxEvents);
-    env.CODE_CURRENT_VALUES = o.values ? '1' : '0';
+    env.CODE_GRAPH_TRACE = traceFile;
+    env.CODE_GRAPH_MAX_EVENTS = String(o.maxEvents);
+    env.CODE_GRAPH_VALUES = o.values ? '1' : '0';
   }
 
   const command = [o.entry.kind === 'python' ? (o.entry.module ? `python -m ${o.entry.module}` : `python ${o.entry.file}`) : `${o.entry.file} ▸ ./${path.basename(cmd)}`, ...o.args].join(' ');
@@ -132,7 +132,7 @@ export async function runAndTrace(o: RunInput): Promise<RunResult> {
   const r = await runProgram(cmd, args, { cwd, env, timeoutMs: o.timeoutMs, signal: o.signal });
   const output = r.output;
   if (r.error) return fail('run', `could not start ${cmd}: ${r.error}`, output);
-  if (r.timedOut) notes.push(`stopped after ${Math.round(o.timeoutMs / 1000)} s (codeCurrent.run.timeoutSeconds)`);
+  if (r.timedOut) notes.push(`stopped after ${Math.round(o.timeoutMs / 1000)} s (codeGraph.run.timeoutSeconds)`);
 
   o.onStage?.('trace');
   let text = '';
@@ -191,7 +191,7 @@ async function buildNative(o: RunInput): Promise<NativeBuild> {
   let units = selectUnits(o.graph, main, native);
   const ccdb = new Map((o.compileCommands ?? []).map((c) => [path.normalize(c.file), c]));
   const rt = path.join(o.runtimeDir, 'c');
-  const hdr = path.join(rt, 'cc_trace.h');
+  const hdr = path.join(rt, 'cg_trace.h');
   const relOf = (abs: string): string | undefined => {
     for (const base of [srcDir, o.root]) {
       const rel = path.relative(base, abs).split(path.sep).join('/');
@@ -230,7 +230,7 @@ async function buildNative(o: RunInput): Promise<NativeBuild> {
       ];
     }
     if (!cmd) {
-      notes.push(`no ${cpp ? 'C++' : 'C'} compiler found (set codeCurrent.verify.${cpp ? 'cxx' : 'cc'})`);
+      notes.push(`no ${cpp ? 'C++' : 'C'} compiler found (set codeGraph.verify.${cpp ? 'cxx' : 'cc'})`);
       return false;
     }
     if (instrumented) args.push('-include', hdr);
@@ -283,17 +283,17 @@ async function buildNative(o: RunInput): Promise<NativeBuild> {
   const rtObjs: string[] = [];
   const cc = tc.cc ?? tc.cxx;
   if (!cc) return { fns: inst.fns, diagnostics, notes: [...notes, 'no C compiler found for the tracer runtime'], log };
-  const rtC = path.join(objDir, 'cc_trace.o');
+  const rtC = path.join(objDir, 'cg_trace.o');
   let r = await run(
     cc,
-    [...(cc === tc.cxx && !tc.cc ? ['-x', 'c'] : []), '-O2', '-c', path.join(rt, 'cc_trace.c'), '-o', rtC, `-DCCT_NFN=${Math.max(1, inst.fns.length)}`, ...(anyCpp ? ['-DCCT_LANG_CPP'] : [])],
+    [...(cc === tc.cxx && !tc.cc ? ['-x', 'c'] : []), '-O2', '-c', path.join(rt, 'cg_trace.c'), '-o', rtC, `-DCGT_NFN=${Math.max(1, inst.fns.length)}`, ...(anyCpp ? ['-DCGT_LANG_CPP'] : [])],
     { cwd: o.workDir, timeoutMs: 120_000, signal: o.signal },
   );
   if (r.code !== 0) return { fns: inst.fns, diagnostics, notes: [...notes, `tracer runtime did not compile: ${r.stderr.split('\n')[0]}`], log: log + r.stderr };
   rtObjs.push(rtC);
   if (anyCpp && tc.cxx) {
-    const rtX = path.join(objDir, 'cc_trace_cxx.o');
-    r = await run(tc.cxx, ['-O2', '-std=c++11', '-c', path.join(rt, 'cc_trace_cxx.cpp'), '-o', rtX], { cwd: o.workDir, timeoutMs: 120_000, signal: o.signal });
+    const rtX = path.join(objDir, 'cg_trace_cxx.o');
+    r = await run(tc.cxx, ['-O2', '-std=c++11', '-c', path.join(rt, 'cg_trace_cxx.cpp'), '-o', rtX], { cwd: o.workDir, timeoutMs: 120_000, signal: o.signal });
     if (r.code === 0) rtObjs.push(rtX);
   }
 

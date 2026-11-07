@@ -1,5 +1,5 @@
 /**
- * CodeCurrent — VS Code extension entry point.
+ * CodeGraph — VS Code extension entry point.
  */
 import * as fs from 'fs';
 import * as vscode from 'vscode';
@@ -19,29 +19,29 @@ export function activate(ctx: vscode.ExtensionContext): void {
   };
 
   ctx.subscriptions.push(
-    vscode.commands.registerCommand('codeCurrent.open', () => CircuitPanel.show(ctx, svc)),
-    vscode.commands.registerCommand('codeCurrent.showFile', (uri?: vscode.Uri) => CircuitPanel.show(ctx, svc, activeRel(uri))),
-    vscode.commands.registerCommand('codeCurrent.reanalyze', async () => {
+    vscode.commands.registerCommand('codeGraph.open', () => CircuitPanel.show(ctx, svc)),
+    vscode.commands.registerCommand('codeGraph.showFile', (uri?: vscode.Uri) => CircuitPanel.show(ctx, svc, activeRel(uri))),
+    vscode.commands.registerCommand('codeGraph.reanalyze', async () => {
       const p = CircuitPanel.show(ctx, svc);
       await p.refresh('update', true);
     }),
-    vscode.commands.registerCommand('codeCurrent.verify', async () => {
+    vscode.commands.registerCommand('codeGraph.verify', async () => {
       const p = CircuitPanel.show(ctx, svc);
       await p.verify();
     }),
-    vscode.commands.registerCommand('codeCurrent.runTrace', () => runTraceCommand(ctx, svc)),
-    vscode.commands.registerCommand('codeCurrent.loadTrace', () => loadTraceCommand(ctx, svc)),
-    vscode.commands.registerCommand('codeCurrent.clearTrace', () => clearTraceCommand(svc)),
-    vscode.commands.registerCommand('codeCurrent.exportGraph', async () => {
+    vscode.commands.registerCommand('codeGraph.runTrace', () => runTraceCommand(ctx, svc)),
+    vscode.commands.registerCommand('codeGraph.loadTrace', () => loadTraceCommand(ctx, svc)),
+    vscode.commands.registerCommand('codeGraph.clearTrace', () => clearTraceCommand(svc)),
+    vscode.commands.registerCommand('codeGraph.exportGraph', async () => {
       const g = svc.graph ?? (await svc.analyze());
       const folder = vscode.workspace.workspaceFolders?.[0]?.uri;
       const target = await vscode.window.showSaveDialog({
-        defaultUri: folder ? vscode.Uri.joinPath(folder, 'code-current.graph.json') : undefined,
+        defaultUri: folder ? vscode.Uri.joinPath(folder, 'code-graph.graph.json') : undefined,
         filters: { JSON: ['json'] },
       });
       if (!target) return;
       await fs.promises.writeFile(target.fsPath, JSON.stringify(g, null, 2));
-      void vscode.window.showInformationMessage(vscode.l10n.t('CodeCurrent: graph exported to {0}', target.fsPath));
+      void vscode.window.showInformationMessage(vscode.l10n.t('CodeGraph: graph exported to {0}', target.fsPath));
     }),
     vscode.window.registerWebviewPanelSerializer(VIEW_TYPE, {
       deserializeWebviewPanel: async (panel) => CircuitPanel.revive(panel, ctx, svc),
@@ -64,12 +64,12 @@ export function activate(ctx: vscode.ExtensionContext): void {
     watcher.onDidDelete(schedule),
     vscode.workspace.onDidSaveTextDocument((d) => schedule(d.uri)),
     vscode.workspace.onDidChangeConfiguration((e) => {
-      if (!e.affectsConfiguration('codeCurrent') || !CircuitPanel.current) return;
-      if (e.affectsConfiguration('codeCurrent.exclude') || e.affectsConfiguration('codeCurrent.maxFiles') || e.affectsConfiguration('codeCurrent.cpp')) {
+      if (!e.affectsConfiguration('codeGraph') || !CircuitPanel.current) return;
+      if (e.affectsConfiguration('codeGraph.exclude') || e.affectsConfiguration('codeGraph.maxFiles') || e.affectsConfiguration('codeGraph.cpp')) {
         void CircuitPanel.current.refresh('update', true);
-      } else if (e.affectsConfiguration('codeCurrent.verify.editorDiagnostics')) {
+      } else if (e.affectsConfiguration('codeGraph.verify.editorDiagnostics')) {
         CircuitPanel.current.postEditorDiagnostics();
-      } else if (e.affectsConfiguration('codeCurrent.verify')) {
+      } else if (e.affectsConfiguration('codeGraph.verify')) {
         if (verifyMode() !== 'manual') void CircuitPanel.current.verify();
       } else if (svc.graph) {
         CircuitPanel.current.post({ type: 'graph', graph: svc.graph, settings: viewSettings(), reason: 'update' });
@@ -81,7 +81,7 @@ export function activate(ctx: vscode.ExtensionContext): void {
   let diagTimer: NodeJS.Timeout | undefined;
   ctx.subscriptions.push(
     vscode.languages.onDidChangeDiagnostics(() => {
-      if (!CircuitPanel.current || vscode.workspace.getConfiguration('codeCurrent.verify').get<string>('editorDiagnostics', 'off') !== 'errors') return;
+      if (!CircuitPanel.current || vscode.workspace.getConfiguration('codeGraph.verify').get<string>('editorDiagnostics', 'off') !== 'errors') return;
       clearTimeout(diagTimer);
       diagTimer = setTimeout(() => CircuitPanel.current?.postEditorDiagnostics(), 600);
     }),
@@ -98,7 +98,7 @@ export function activate(ctx: vscode.ExtensionContext): void {
   ctx.subscriptions.push(
     vscode.window.onDidChangeTextEditorSelection((e) => {
       const p = CircuitPanel.current;
-      if (!p?.visible || !vscode.workspace.getConfiguration('codeCurrent').get<boolean>('followCursor', true)) return;
+      if (!p?.visible || !vscode.workspace.getConfiguration('codeGraph').get<boolean>('followCursor', true)) return;
       const rel = activeRel(e.textEditor.document.uri);
       if (!rel) return;
       clearTimeout(cursorTimer);
@@ -108,9 +108,9 @@ export function activate(ctx: vscode.ExtensionContext): void {
 
   // status bar shortcut for C/C++/Python editors
   const item = vscode.window.createStatusBarItem(vscode.StatusBarAlignment.Right, 90);
-  item.text = '$(circuit-board) CodeCurrent';
-  item.tooltip = vscode.l10n.t('Show this file in the CodeCurrent circuit view');
-  item.command = 'codeCurrent.showFile';
+  item.text = '$(circuit-board) CodeGraph';
+  item.tooltip = vscode.l10n.t('Show this file in the CodeGraph circuit view');
+  item.command = 'codeGraph.showFile';
   const sync = () => {
     const lang = vscode.window.activeTextEditor?.document.languageId;
     if (lang === 'c' || lang === 'cpp' || lang === 'python') item.show();

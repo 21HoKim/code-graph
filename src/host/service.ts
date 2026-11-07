@@ -36,8 +36,8 @@ export class AnalysisService implements vscode.Disposable {
   readonly log: vscode.OutputChannel;
 
   constructor(ctx: vscode.ExtensionContext) {
-    this.log = vscode.window.createOutputChannel('CodeCurrent');
-    const cfg = vscode.workspace.getConfiguration('codeCurrent');
+    this.log = vscode.window.createOutputChannel('CodeGraph');
+    const cfg = vscode.workspace.getConfiguration('codeGraph');
     const dist = vscode.Uri.joinPath(ctx.extensionUri, 'dist');
     this.pool = new ParsePool(
       vscode.Uri.joinPath(dist, 'wasm').fsPath,
@@ -99,7 +99,7 @@ export class AnalysisService implements vscode.Disposable {
   }
 
   toolchainFor(): Toolchain {
-    const c = vscode.workspace.getConfiguration('codeCurrent.verify');
+    const c = vscode.workspace.getConfiguration('codeGraph.verify');
     const pref = { cc: c.get<string>('cc', '') || undefined, cxx: c.get<string>('cxx', '') || undefined, python: c.get<string>('python', '') || undefined };
     const key = JSON.stringify(pref);
     if (this.toolchain?.key !== key) {
@@ -115,7 +115,7 @@ export class AnalysisService implements vscode.Disposable {
    * save re-checks just the affected translation units.
    */
   async verify(opts: { units?: string[]; signal?: AbortSignal; onProgress?: (done: number, total: number) => void } = {}): Promise<{ diagnostics: Diagnostic[]; info: VerifyInfo }> {
-    const cfg = vscode.workspace.getConfiguration('codeCurrent.verify');
+    const cfg = vscode.workspace.getConfiguration('codeGraph.verify');
     const all = this.sourceFiles();
     const wanted = opts.units ? new Set(opts.units) : undefined;
     const files = wanted ? all.filter((f) => wanted.has(f.rel)) : all;
@@ -233,7 +233,7 @@ export class AnalysisService implements vscode.Disposable {
     const t0 = Date.now();
     const folders = vscode.workspace.workspaceFolders ?? [];
     const root = folders[0]?.uri.fsPath ?? process.cwd();
-    const cfg = vscode.workspace.getConfiguration('codeCurrent');
+    const cfg = vscode.workspace.getConfiguration('codeGraph');
     const max = cfg.get<number>('maxFiles', 3000);
     const exclude = cfg.get<string[]>('exclude', DEFAULT_EXCLUDE_DIRS.map((d) => `**/${d}/**`));
     const uris = await vscode.workspace.findFiles(SOURCE_GLOB, exclude.length ? `{${exclude.join(',')}}` : null, max);

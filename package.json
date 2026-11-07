@@ -1,5 +1,5 @@
 {
-  "name": "code-current",
+  "name": "code-graph",
   "displayName": "%displayName%",
   "description": "%description%",
   "version": "0.2.0",
@@ -49,23 +49,23 @@
     "workspace"
   ],
   "activationEvents": [
-    "onWebviewPanel:codeCurrent.circuit"
+    "onWebviewPanel:codeGraph.circuit"
   ],
   "capabilities": {
     "untrustedWorkspaces": {
       "supported": "limited",
       "description": "%trust.description%",
       "restrictedConfigurations": [
-        "codeCurrent.verify.cc",
-        "codeCurrent.verify.cxx",
-        "codeCurrent.verify.python",
-        "codeCurrent.verify.extraFlags",
-        "codeCurrent.run.entry",
-        "codeCurrent.run.args",
-        "codeCurrent.run.cwd",
-        "codeCurrent.run.env",
-        "codeCurrent.run.buildFlags",
-        "codeCurrent.run.linkFlags"
+        "codeGraph.verify.cc",
+        "codeGraph.verify.cxx",
+        "codeGraph.verify.python",
+        "codeGraph.verify.extraFlags",
+        "codeGraph.run.entry",
+        "codeGraph.run.args",
+        "codeGraph.run.cwd",
+        "codeGraph.run.env",
+        "codeGraph.run.buildFlags",
+        "codeGraph.run.linkFlags"
       ]
     },
     "virtualWorkspaces": false
@@ -73,84 +73,84 @@
   "contributes": {
     "commands": [
       {
-        "command": "codeCurrent.open",
+        "command": "codeGraph.open",
         "title": "%cmd.open%",
-        "category": "CodeCurrent",
+        "category": "CodeGraph",
         "icon": "$(circuit-board)"
       },
       {
-        "command": "codeCurrent.showFile",
+        "command": "codeGraph.showFile",
         "title": "%cmd.showFile%",
-        "category": "CodeCurrent",
+        "category": "CodeGraph",
         "icon": "$(circuit-board)"
       },
       {
-        "command": "codeCurrent.reanalyze",
+        "command": "codeGraph.reanalyze",
         "title": "%cmd.reanalyze%",
-        "category": "CodeCurrent"
+        "category": "CodeGraph"
       },
       {
-        "command": "codeCurrent.verify",
+        "command": "codeGraph.verify",
         "title": "%cmd.verify%",
-        "category": "CodeCurrent",
+        "category": "CodeGraph",
         "icon": "$(check-all)",
         "enablement": "isWorkspaceTrusted"
       },
       {
-        "command": "codeCurrent.runTrace",
+        "command": "codeGraph.runTrace",
         "title": "%cmd.runTrace%",
-        "category": "CodeCurrent",
+        "category": "CodeGraph",
         "icon": "$(debug-start)",
         "enablement": "isWorkspaceTrusted"
       },
       {
-        "command": "codeCurrent.loadTrace",
+        "command": "codeGraph.loadTrace",
         "title": "%cmd.loadTrace%",
-        "category": "CodeCurrent"
+        "category": "CodeGraph"
       },
       {
-        "command": "codeCurrent.clearTrace",
+        "command": "codeGraph.clearTrace",
         "title": "%cmd.clearTrace%",
-        "category": "CodeCurrent"
+        "category": "CodeGraph"
       },
       {
-        "command": "codeCurrent.exportGraph",
+        "command": "codeGraph.exportGraph",
         "title": "%cmd.export%",
-        "category": "CodeCurrent"
+        "category": "CodeGraph"
       }
     ],
     "menus": {
       "explorer/context": [
         {
-          "command": "codeCurrent.showFile",
+          "command": "codeGraph.showFile",
           "when": "resourceExtname =~ /^\\.(c|h|cc|cpp|cxx|hpp|hh|hxx|py)$/",
           "group": "navigation@90"
         }
       ],
       "editor/title": [
         {
-          "command": "codeCurrent.showFile",
+          "command": "codeGraph.showFile",
           "when": "editorLangId =~ /^(c|cpp|python)$/",
           "group": "navigation@90"
         }
       ],
       "editor/context": [
         {
-          "command": "codeCurrent.showFile",
+          "command": "codeGraph.showFile",
           "when": "editorLangId =~ /^(c|cpp|python)$/",
           "group": "navigation@90"
         },
         {
-          "command": "codeCurrent.runTrace",
+          "command": "codeGraph.runTrace",
           "when": "editorLangId =~ /^(c|cpp|python)$/ && isWorkspaceTrusted",
           "group": "navigation@91"
         }
       ]
     },
     "configuration": {
-      "title": "CodeCurrent",
+      "title": "CodeGraph",
       "properties": {
-        "codeCurrent.defaultLevel": {
+        "codeGraph.defaultLevel": {
           "type": "string",
           "enum": [
             "auto",
@@ -163,7 +163,7 @@
           "default": "auto",
           "markdownDescription": "%cfg.defaultLevel%"
         },
-        "codeCurrent.layout": {
+        "codeGraph.layout": {
           "type": "string",
           "enum": [
             "circuit",
@@ -172,7 +172,7 @@
           "default": "circuit",
           "markdownDescription": "%cfg.layout%"
         },
-        "codeCurrent.flow.mode": {
+        "codeGraph.flow.mode": {
           "type": "string",
           "enum": [
             "all",
@@ -182,23 +182,23 @@
           "default": "all",
           "markdownDescription": "%cfg.flowMode%"
         },
-        "codeCurrent.flow.maxParticles": {
+        "codeGraph.flow.maxParticles": {
           "type": "number",
           "default": 2500,
           "minimum": 0,
           "markdownDescription": "%cfg.maxParticles%"
         },
-        "codeCurrent.showGuessedLinks": {
+        "codeGraph.showGuessedLinks": {
           "type": "boolean",
           "default": true,
           "markdownDescription": "%cfg.guesses%"
         },
-        "codeCurrent.followCursor": {
+        "codeGraph.followCursor": {
           "type": "boolean",
           "default": true,
           "markdownDescription": "%cfg.followCursor%"
         },
-        "codeCurrent.exclude": {
+        "codeGraph.exclude": {
           "type": "array",
           "items": {
             "type": "string"
@@ -217,13 +217,13 @@
           ],
           "markdownDescription": "%cfg.exclude%"
         },
-        "codeCurrent.maxFiles": {
+        "codeGraph.maxFiles": {
           "type": "number",
           "default": 3000,
           "minimum": 1,
           "markdownDescription": "%cfg.maxFiles%"
         },
-        "codeCurrent.cpp.includePaths": {
+        "codeGraph.cpp.includePaths": {
           "type": "array",
           "items": {
             "type": "string"
@@ -231,14 +231,14 @@
           "default": [],
           "markdownDescription": "%cfg.includePaths%"
         },
-        "codeCurrent.analysis.workers": {
+        "codeGraph.analysis.workers": {
           "type": "number",
           "default": 0,
           "minimum": 0,
           "maximum": 16,
           "markdownDescription": "%cfg.workers%"
         },
-        "codeCurrent.verify.mode": {
+        "codeGraph.verify.mode": {
           "type": "string",
           "enum": [
             "onOpenAndSave",
@@ -253,22 +253,22 @@
           "default": "onOpenAndSave",
           "markdownDescription": "%cfg.verifyMode%"
         },
-        "codeCurrent.verify.cc": {
+        "codeGraph.verify.cc": {
           "type": "string",
           "default": "",
           "markdownDescription": "%cfg.verifyCc%"
         },
-        "codeCurrent.verify.cxx": {
+        "codeGraph.verify.cxx": {
           "type": "string",
           "default": "",
           "markdownDescription": "%cfg.verifyCxx%"
         },
-        "codeCurrent.verify.python": {
+        "codeGraph.verify.python": {
           "type": "string",
           "default": "",
           "markdownDescription": "%cfg.verifyPython%"
         },
-        "codeCurrent.verify.extraFlags": {
+        "codeGraph.verify.extraFlags": {
           "type": "array",
           "items": {
             "type": "string"
@@ -276,12 +276,12 @@
           "default": [],
           "markdownDescription": "%cfg.verifyFlags%"
         },
-        "codeCurrent.verify.useCompileCommands": {
+        "codeGraph.verify.useCompileCommands": {
           "type": "boolean",
           "default": true,
           "markdownDescription": "%cfg.verifyCcdb%"
         },
-        "codeCurrent.verify.editorDiagnostics": {
+        "codeGraph.verify.editorDiagnostics": {
           "type": "string",
           "enum": [
             "off",
@@ -290,18 +290,18 @@
           "default": "off",
           "markdownDescription": "%cfg.verifyEditor%"
         },
-        "codeCurrent.verify.timeoutSeconds": {
+        "codeGraph.verify.timeoutSeconds": {
           "type": "number",
           "default": 60,
           "minimum": 5,
           "markdownDescription": "%cfg.verifyTimeout%"
         },
-        "codeCurrent.run.entry": {
+        "codeGraph.run.entry": {
           "type": "string",
           "default": "",
           "markdownDescription": "%cfg.runEntry%"
         },
-        "codeCurrent.run.args": {
+        "codeGraph.run.args": {
           "type": "array",
           "items": {
             "type": "string"
@@ -309,12 +309,12 @@
           "default": [],
           "markdownDescription": "%cfg.runArgs%"
         },
-        "codeCurrent.run.cwd": {
+        "codeGraph.run.cwd": {
           "type": "string",
           "default": "",
           "markdownDescription": "%cfg.runCwd%"
         },
-        "codeCurrent.run.env": {
+        "codeGraph.run.env": {
           "type": "object",
           "additionalProperties": {
             "type": "string"
@@ -322,7 +322,7 @@
           "default": {},
           "markdownDescription": "%cfg.runEnv%"
         },
-        "codeCurrent.run.buildFlags": {
+        "codeGraph.run.buildFlags": {
           "type": "array",
           "items": {
             "type": "string"
@@ -330,7 +330,7 @@
           "default": [],
           "markdownDescription": "%cfg.runBuildFlags%"
         },
-        "codeCurrent.run.linkFlags": {
+        "codeGraph.run.linkFlags": {
           "type": "array",
           "items": {
             "type": "string"
@@ -338,19 +338,19 @@
           "default": [],
           "markdownDescription": "%cfg.runLinkFlags%"
         },
-        "codeCurrent.run.timeoutSeconds": {
+        "codeGraph.run.timeoutSeconds": {
           "type": "number",
           "default": 20,
           "minimum": 1,
           "markdownDescription": "%cfg.runTimeout%"
         },
-        "codeCurrent.run.maxEvents": {
+        "codeGraph.run.maxEvents": {
           "type": "number",
           "default": 200000,
           "minimum": 1000,
           "markdownDescription": "%cfg.runMaxEvents%"
         },
-        "codeCurrent.run.captureValues": {
+        "codeGraph.run.captureValues": {
           "type": "boolean",
           "default": true,
           "markdownDescription": "%cfg.runValues%"

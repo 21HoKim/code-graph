@@ -21,7 +21,7 @@ const html = `<!DOCTYPE html>
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1">
-<title>CodeCurrent — demo</title>
+<title>CodeGraph — demo</title>
 <style>${css}
 .demo-pick{position:fixed;right:10px;top:46px;z-index:40;background:var(--cc-panel);border:1px solid var(--cc-border);border-radius:8px;padding:4px 8px;font-size:12px;color:var(--cc-fg)}
 .demo-pick select{background:transparent;color:inherit;border:0;font:inherit}
@@ -31,8 +31,8 @@ const html = `<!DOCTYPE html>
 <div id="app"></div>
 <div class="demo-pick ui">◆ <select id="demo-sample">${options}</select></div>
 ${cdn ? '' : `<script type="text/plain" id="elk-worker-src">${safe(elk)}</script>`}
-<script>window.__CODE_CURRENT_DEMO__ = ${safe(JSON.stringify({ graph: graphs[0].graph, settings, trace: graphs[0].trace }))};
-window.__CODE_CURRENT_SAMPLES__ = ${safe(JSON.stringify(graphs.map((g) => ({ graph: g.graph, trace: g.trace }))))};</script>
+<script>window.__CODE_GRAPH_DEMO__ = ${safe(JSON.stringify({ graph: graphs[0].graph, settings, trace: graphs[0].trace }))};
+window.__CODE_GRAPH_SAMPLES__ = ${safe(JSON.stringify(graphs.map((g) => ({ graph: g.graph, trace: g.trace }))))};</script>
 <script>${safe(js)}</script>
 <script>
 // keep the sample picker just below the toolbar (it wraps to several rows on phones)
@@ -48,8 +48,8 @@ window.__CODE_CURRENT_SAMPLES__ = ${safe(JSON.stringify(graphs.map((g) => ({ gra
   place();
 })();
 document.getElementById('demo-sample').addEventListener('change', function (e) {
-  var g = window.__CODE_CURRENT_SAMPLES__[Number(e.target.value)];
-  window.codeCurrent.loadDemo(g.graph, ${JSON.stringify(settings)}, g.trace);
+  var g = window.__CODE_GRAPH_SAMPLES__[Number(e.target.value)];
+  window.codeGraph.loadDemo(g.graph, ${JSON.stringify(settings)}, g.trace);
 });
 </script>
 </body>

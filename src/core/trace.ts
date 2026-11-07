@@ -1,7 +1,7 @@
 /**
- * Runtime traces (schema code-current-trace/1) and the model the viewer replays.
+ * Runtime traces (schema code-graph-trace/1) and the model the viewer replays.
  *
- * Tracers (runtime/python/cc_tracer.py, runtime/c/cc_trace.c) write JSON lines:
+ * Tracers (runtime/python/cg_tracer.py, runtime/c/cg_trace.c) write JSON lines:
  *
  *   {"k":"h", schema, lang, clock:"ns", pid, root?}       header
  *   {"k":"f", id, file, line, name, q}                     function table (Python; C/C++ ids come from the instrumenter)

@@ -1,4 +1,4 @@
-# CodeCurrent
+# CodeGraph
 
 **See your C, C++ and Python code as a live circuit.**
 Folders, files, namespaces, classes and functions become blocks; calls, thread spawns, object creation and
@@ -70,7 +70,7 @@ their impact spreading along the wires; run it and every thread lights up its ow
 **From a release (.vsix)**
 
 ```bash
-code --install-extension code-current-0.2.0.vsix
+code --install-extension code-graph-0.2.0.vsix
 ```
 
 or in VS Code: *Extensions* view → `…` menu → *Install from VSIX…*
@@ -82,7 +82,7 @@ git clone https://github.com/21HoKim/code-graph && cd code-graph
 npm ci
 npm run build          # dist/: extension, parse worker, webview, WASM grammars, runtime tracers
 npm test               # analyzer, projection, compile-check and Run & Trace tests
-npx @vscode/vsce package --no-dependencies   # -> code-current-<version>.vsix
+npx @vscode/vsce package --no-dependencies   # -> code-graph-<version>.vsix
 ```
 
 Press **F5** in VS Code to launch an Extension Development Host on `samples/cpp-router`.
@@ -95,16 +95,16 @@ workspaces. The static view needs nothing.
 
 | | |
 | --- | --- |
-| `CodeCurrent: Open Circuit View` | analyze the workspace and open the view (compile check runs too) |
-| `CodeCurrent: Show in Circuit View` | focus the current file (explorer / editor context menu, status bar) |
-| `CodeCurrent: Verify (compile check)` | check again now (toolbar **✓ Verify**) |
-| `CodeCurrent: Run & Trace` | build, run and replay (toolbar **▶ Run**; asks which `main`/script when there are several) |
-| `CodeCurrent: Load Trace File…` | open a trace written by the CLI or the tracers |
+| `CodeGraph: Open Circuit View` | analyze the workspace and open the view (compile check runs too) |
+| `CodeGraph: Show in Circuit View` | focus the current file (explorer / editor context menu, status bar) |
+| `CodeGraph: Verify (compile check)` | check again now (toolbar **✓ Verify**) |
+| `CodeGraph: Run & Trace` | build, run and replay (toolbar **▶ Run**; asks which `main`/script when there are several) |
+| `CodeGraph: Load Trace File…` | open a trace written by the CLI or the tracers |
 | click a block / double-click | trace its wires · expand, collapse or open source |
 | `1`…`5` · `/` · `F` · `Esc` | levels · search · fit · clear |
 | `Space` · `←` `→` | (with a trace) play / pause · previous / next call |
 
-Settings (`codeCurrent.*`):
+Settings (`codeGraph.*`):
 
 - view: `defaultLevel`, `layout`, `flow.mode`, `flow.maxParticles`, `showGuessedLinks`, `followCursor`,
   `exclude`, `maxFiles`, `cpp.includePaths`, `analysis.workers`

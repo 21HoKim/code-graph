@@ -16,28 +16,28 @@ let running: AbortController | undefined;
 let output: vscode.OutputChannel | undefined;
 
 export function lastRunOutput(): vscode.OutputChannel {
-  output ??= vscode.window.createOutputChannel('CodeCurrent Run');
+  output ??= vscode.window.createOutputChannel('CodeGraph Run');
   return output;
 }
 
 async function pickEntry(ctx: vscode.ExtensionContext, svc: AnalysisService, entries: EntryPoint[]): Promise<EntryPoint | undefined> {
-  const cfg = vscode.workspace.getConfiguration('codeCurrent.run');
+  const cfg = vscode.workspace.getConfiguration('codeGraph.run');
   const want = cfg.get<string>('entry', '').trim();
   if (want) {
     const hit = entries.find((e) => e.file === want || e.label === want || e.module === want || e.file.endsWith('/' + want));
     if (hit) return hit;
-    void vscode.window.showWarningMessage(vscode.l10n.t('codeCurrent.run.entry "{0}" is not an entry point; pick one.', want));
+    void vscode.window.showWarningMessage(vscode.l10n.t('codeGraph.run.entry "{0}" is not an entry point; pick one.', want));
   }
   const active = vscode.window.activeTextEditor?.document.uri;
   const rel = active && svc.isSupported(active) ? svc.rel(active) : undefined;
   const mine = rel ? entries.find((e) => e.file === rel) : undefined;
   if (mine) return mine;
   if (entries.length === 1) return entries[0];
-  const last = ctx.workspaceState.get<string>('codeCurrent.lastEntry');
+  const last = ctx.workspaceState.get<string>('codeGraph.lastEntry');
   const items = entries.map((e) => ({ label: e.label, description: e.kind === 'python' ? 'Python' : 'C/C++', entry: e }));
   items.sort((a, b) => (a.entry.label === last ? -1 : b.entry.label === last ? 1 : 0));
-  const pick = await vscode.window.showQuickPick(items, { title: vscode.l10n.t('CodeCurrent: what should run?'), placeHolder: vscode.l10n.t('Entry point') });
-  if (pick) await ctx.workspaceState.update('codeCurrent.lastEntry', pick.entry.label);
+  const pick = await vscode.window.showQuickPick(items, { title: vscode.l10n.t('CodeGraph: what should run?'), placeHolder: vscode.l10n.t('Entry point') });
+  if (pick) await ctx.workspaceState.update('codeGraph.lastEntry', pick.entry.label);
   return pick?.entry;
 }
 
@@ -73,7 +73,7 @@ export async function runTraceCommand(ctx: vscode.ExtensionContext, svc: Analysi
 
   running?.abort();
   const ctl = (running = new AbortController());
-  const cfg = vscode.workspace.getConfiguration('codeCurrent');
+  const cfg = vscode.workspace.getConfiguration('codeGraph');
   const out = lastRunOutput();
   out.clear();
   const workDir = path.join((ctx.storageUri ?? ctx.globalStorageUri).fsPath, 'run');
@@ -83,7 +83,7 @@ export async function runTraceCommand(ctx: vscode.ExtensionContext, svc: Analysi
   task('start', entry.label, undefined, undefined, entry.kind === 'native' ? 'build' : 'run');
   try {
     const r = await vscode.window.withProgress(
-      { location: vscode.ProgressLocation.Window, title: 'CodeCurrent', cancellable: false },
+      { location: vscode.ProgressLocation.Window, title: 'CodeGraph', cancellable: false },
       (progress) =>
         runAndTrace({
           root: svc.root,
@@ -144,12 +144,12 @@ export async function runTraceCommand(ctx: vscode.ExtensionContext, svc: Analysi
   }
 }
 
-/** Open a trace written by the tracers (.jsonl) or by `code-current trace` (.json). */
+/** Open a trace written by the tracers (.jsonl) or by `code-graph trace` (.json). */
 export async function loadTraceCommand(ctx: vscode.ExtensionContext, svc: AnalysisService): Promise<void> {
   const pick = await vscode.window.showOpenDialog({
     canSelectMany: false,
     filters: { [vscode.l10n.t('Trace')]: ['jsonl', 'json'] },
-    title: vscode.l10n.t('Open a CodeCurrent trace'),
+    title: vscode.l10n.t('Open a CodeGraph trace'),
   });
   if (!pick?.[0]) return;
   const panel = CircuitPanel.show(ctx, svc);
@@ -167,7 +167,7 @@ export async function loadTraceCommand(ctx: vscode.ExtensionContext, svc: Analys
       diagnostics = traceDiagnostics(trace, graph);
     }
   } catch (e) {
-    void vscode.window.showErrorMessage(vscode.l10n.t('Not a CodeCurrent trace: {0}', String((e as Error)?.message ?? e)));
+    void vscode.window.showErrorMessage(vscode.l10n.t('Not a CodeGraph trace: {0}', String((e as Error)?.message ?? e)));
     return;
   }
   svc.lastTrace = { trace, notes: [] };

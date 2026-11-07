@@ -1,5 +1,5 @@
 {
-  "displayName": "CodeCurrent — Code Circuit Visualizer",
+  "displayName": "CodeGraph — Code Circuit Visualizer",
   "description": "See C, C++ and Python code as a live circuit: blocks for folders, files, classes and functions; wires where calls, threads and data flow like current. Compile errors turn red with their impact; Run & Trace replays threads and values.",
   "cmd.open": "Open Circuit View",
   "cmd.showFile": "Show in Circuit View",

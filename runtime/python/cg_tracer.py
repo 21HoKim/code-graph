@@ -1,6 +1,6 @@
-"""CodeCurrent runtime tracer for Python (standard library only).
+"""CodeGraph runtime tracer for Python (standard library only).
 
-    python cc_tracer.py --root ROOT --out TRACE [--max-events N] [--values 0|1]
+    python cg_tracer.py --root ROOT --out TRACE [--max-events N] [--values 0|1]
                         (--module MOD | SCRIPT) [ARGS...]
 
 Runs SCRIPT (or ``-m MOD``) like ``python`` would and records, for code under
@@ -11,7 +11,7 @@ threads. Python 3.12+ uses ``sys.monitoring`` (code outside ROOT is disabled
 after its first call, so libraries cost almost nothing); older versions fall
 back to ``sys.setprofile``.
 
-Output: JSON lines (schema code-current-trace/1), see src/core/trace.ts.
+Output: JSON lines (schema code-graph-trace/1), see src/core/trace.ts.
 """
 import json
 import os
@@ -46,7 +46,7 @@ class Tracer:
         self.calls = {}
         self.edges = {}
         self.done = False
-        self.write({"k": "h", "schema": "code-current-trace/1", "lang": "python", "root": self.root[:-1], "clock": "ns",
+        self.write({"k": "h", "schema": "code-graph-trace/1", "lang": "python", "root": self.root[:-1], "clock": "ns",
                     "pid": os.getpid(), "python": sys.version.split()[0], "argv": sys.argv[1:]})
 
     # -- output ---------------------------------------------------------------
@@ -198,7 +198,7 @@ class Tracer:
         tool = None
         for cand in (mon.PROFILER_ID, 3, 4, 5):
             try:
-                mon.use_tool_id(cand, "code-current")
+                mon.use_tool_id(cand, "code-graph")
                 tool = cand
                 break
             except ValueError:

@@ -2,7 +2,7 @@
  * Build verification with the real toolchain.
  *
  *   C / C++  every translation unit with `cc/c++ -fsyntax-only` — flags from compile_commands.json when the
- *            project has one, otherwise -std defaults + the include paths CodeCurrent discovered
+ *            project has one, otherwise -std defaults + the include paths CodeGraph discovered
  *   Python   compile() of every file in one interpreter (+ pyflakes undefined names, if installed)
  *
  * Diagnostics come back with workspace-relative paths; health.ts turns them into the red overlay.
@@ -309,7 +309,7 @@ export async function verifyWorkspace(o: VerifyInput): Promise<VerifyResult> {
   const needsC = tus.some((f) => f.lang === 'c');
   const needsCxx = tus.some((f) => f.lang === 'cpp');
   if (tus.length && ((needsC && !tc.cc) || (needsCxx && !tc.cxx)) && !ccdb.size) {
-    notes.push(`no ${needsCxx && !tc.cxx ? 'C++' : 'C'} compiler found (set codeCurrent.verify.cc / cxx)`);
+    notes.push(`no ${needsCxx && !tc.cxx ? 'C++' : 'C'} compiler found (set codeGraph.verify.cc / cxx)`);
   }
   const queue = [...tus];
   const workers = Math.max(1, Math.min(o.concurrency ?? Math.max(1, os.cpus().length), 8));
@@ -395,7 +395,7 @@ export async function verifyWorkspace(o: VerifyInput): Promise<VerifyResult> {
       if (r.code !== 0) notes.push(`python check failed: ${r.stderr.split('\n').slice(-3).join(' ').trim()}`);
     }
     tick();
-  } else if (pys.length && !tc.python) notes.push('no Python 3 interpreter found (set codeCurrent.verify.python)');
+  } else if (pys.length && !tc.python) notes.push('no Python 3 interpreter found (set codeGraph.verify.python)');
 
   // the same header error reported by several translation units
   const seen = new Set<string>();

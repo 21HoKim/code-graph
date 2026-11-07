@@ -18,7 +18,7 @@
 │   runner.ts       build (C/C++) or start (Python) with a tracer, collect     │
 │   trace.ts        trace format, parser → RunTrace (spans, threads, objects)  │
 │   model.ts        shared types                                               │
-│ runtime/          python/cc_tracer.py · c/cc_trace.{h,c} · c/cc_trace_cxx.cpp│
+│ runtime/          python/cg_tracer.py · c/cg_trace.{h,c} · c/cg_trace_cxx.cpp│
 └──────────────────────────────────┬───────────────────────────────────────────┘
           postMessage(CodeGraph, diagnostics, trace)  ▲ open / verify / runTrace
 ┌──────────────────────────────────▼──────── webview (browser) ──────┴────────┐
@@ -168,10 +168,10 @@ errors such as a `SyntaxError` attach to the file), then computes:
 
 ## 6. Run & Trace
 
-**Trace format** (`code-current-trace/1`, JSON lines, written by both runtimes):
+**Trace format** (`code-graph-trace/1`, JSON lines, written by both runtimes):
 
 ```jsonc
-{"k":"h","schema":"code-current-trace/1","lang":"cpp","clock":"ns","pid":4242}
+{"k":"h","schema":"code-graph-trace/1","lang":"cpp","clock":"ns","pid":4242}
 {"k":"t","id":2,"t":120934,"name":"thread-2"}                         // thread first seen
 ["c",121003,2,7,"0x7ffd…",[["pkt","o","0x7ffd…","0x7ffd…"]]]       // call: t, thread, fid, this, args
 ["r",121550,2,7]                                                      // return (Python: + value)
@@ -184,7 +184,7 @@ Values are `[kind, repr, identity?, size?]` with kinds `i d b s n c o` (int, flo
 container with size, object/pointer). Identities (`id()` in Python, addresses in C/C++, `this`/`self`) make data
 tracking possible.
 
-**Python** (`runtime/python/cc_tracer.py`, stdlib only): runs the script with `runpy`, registers
+**Python** (`runtime/python/cg_tracer.py`, stdlib only): runs the script with `runpy`, registers
 `sys.monitoring` callbacks for `PY_START/RESUME/RETURN/YIELD/UNWIND/THROW` (3.12+; `sys.setprofile` before).
 Code outside the workspace returns `DISABLE` on its first event, so libraries cost almost nothing afterwards.
 `threading.Thread.start` / `_bootstrap_inner` are wrapped to learn thread names and parents, `threading.excepthook`
@@ -195,15 +195,15 @@ the enclosing function (generator expressions, lambdas).
 storage and every function body gets one statement after its `{`, on the same line:
 
 ```cpp
-int Router::route(const Packet& pkt) { ::cct::scope cct_s_(12u, this); ::cct::arg("pkt", pkt, 1); …
+int Router::route(const Packet& pkt) { ::cgt::scope cgt_s_(12u, this); ::cgt::arg("pkt", pkt, 1); …
 ```
 
 C uses `__attribute__((cleanup))` for the exit event; headers included by C files keep the C form. constexpr
-functions, coroutines and function-try-blocks are skipped. `cc_trace.h` is force-included (`-include`), so no
-`#include` is added. `cct::arg` classifies a value with templates: numbers and strings by value, containers by
-size, references, pointers and `this` by address. The runtime (`cc_trace.c`) keeps a buffer and a shadow stack
+functions, coroutines and function-try-blocks are skipped. `cg_trace.h` is force-included (`-include`), so no
+`#include` is added. `cgt::arg` classifies a value with templates: numbers and strings by value, containers by
+size, references, pointers and `this` by address. The runtime (`cg_trace.c`) keeps a buffer and a shadow stack
 per thread, appends to the trace under one mutex, and on `SIGSEGV`/`SIGABRT`/… writes every thread's stack before
-re-raising; `cc_trace_cxx.cpp` records the type and `what()` of an uncaught exception.
+re-raising; `cg_trace_cxx.cpp` records the type and `what()` of an uncaught exception.
 
 `runner.ts` builds only the translation units `main` needs (file-level closure over call / spawn / instantiate /
 inherit relations, methods of used classes, excluding units with another `main`), with `compile_commands.json`

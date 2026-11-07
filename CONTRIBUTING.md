@@ -11,7 +11,7 @@ npm test
 ```
 
 Open the folder in VS Code and press **F5** ("Run Extension (C++ sample)"). The extension host opens
-`samples/cpp-router`; run **CodeCurrent: Open Circuit View**. Reload the host window (`Ctrl+R`) after rebuilding.
+`samples/cpp-router`; run **CodeGraph: Open Circuit View**. Reload the host window (`Ctrl+R`) after rebuilding.
 
 Without VS Code:
 

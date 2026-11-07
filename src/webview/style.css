@@ -1,4 +1,4 @@
-/* CodeCurrent webview — follows the VS Code theme, neon accents on dark themes. */
+/* CodeGraph webview — follows the VS Code theme, neon accents on dark themes. */
 :root {
   --cc-font: var(--vscode-font-family, -apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, sans-serif);
   --cc-mono: var(--vscode-editor-font-family, 'SF Mono', Menlo, Consolas, 'Liberation Mono', monospace);
