@@ -1,38 +1,58 @@
 # Architecture
 
-```
-┌─────────────────────────── extension host (Node) ───────────────────────────┐
-│ extension.ts      commands, file watcher, cursor follow, status bar          │
-│ host/service.ts   findFiles → AnalysisSession → CodeGraph; compile check     │
-│ host/panel.ts     webview panel, CSP, message routing, verify on open/save   │
-│ host/run.ts       Run & Trace: pick entry, check, build, run, post the trace │
-│                                                                              │
-│ core/ (no VS Code dependency — also used by the CLI and the tests)           │
-│   pool.ts         worker_threads pool ──► parseWorker.ts                     │
-│   extract/        tree-sitter WASM → FileFacts (per file, cacheable)         │
-│   link.ts         FileFacts[] → CodeGraph (+ static problems)                │
-│   analyze.ts      file walk, compile_commands.json, mtime cache              │
-│   verify.ts       gcc/clang -fsyntax-only, python compile() → Diagnostics    │
-│   health.ts       Diagnostics → broken / affected / unpowered / cut wires    │
-│   instrument.ts   copy C/C++ sources with one probe per function body        │
-│   runner.ts       build (C/C++) or start (Python) with a tracer, collect     │
-│   trace.ts        trace format, parser → RunTrace (spans, threads, objects)  │
-│   model.ts        shared types                                               │
-│ runtime/          python/cg_tracer.py · c/cg_trace.{h,c} · c/cg_trace_cxx.cpp│
-└──────────────────────────────────┬───────────────────────────────────────────┘
-          postMessage(CodeGraph, diagnostics, trace)  ▲ open / verify / runTrace
-┌──────────────────────────────────▼──────── webview (browser) ──────┴────────┐
-│ projection.ts  tree (files|symbols) + level → visible blocks, lifted wires   │
-│ layout.ts      ELK layered (INCLUDE_CHILDREN) in a web worker               │
-│ overlay.ts     health → red / orange / grey blocks, cut wires               │
-│ traceview.ts   trace → per-projection runtime facts, time queries, trails   │
-│ timeline.ts    thread swimlanes (canvas), scrub / play / step               │
-│ render.ts      SVG zones / blocks / wires / labels / live glows              │
-│ flow.ts        canvas particles: arguments →, ← return values, replay pulses │
-│ viewport.ts    pan / zoom / pinch / tap                                      │
-│ main.ts        state, toolbar, details / problems / run panels, replay loop  │
-└──────────────────────────────────────────────────────────────────────────────┘
-```
+CodeGraph has three parts: the **extension host** (Node, inside VS Code), a **core** that has no VS Code
+dependency (the same code runs in the CLI and the tests), and the **webview** that draws the circuit. The
+**runtime** tracers run inside the user's program during Run & Trace.
+
+**Extension host** (`src/extension.ts`, `src/host/`)
+
+| file | role |
+| --- | --- |
+| `extension.ts` | commands, file watcher, cursor follow, status bar |
+| `host/service.ts` | finds files, runs the analysis and the compile check, keeps the latest results |
+| `host/panel.ts` | the webview panel: content security policy, messages, verify on open and on save |
+| `host/run.ts` | Run & Trace: pick the entry point, check, build, run, send the trace to the view |
+
+**Core** (`src/core/`)
+
+| file | role |
+| --- | --- |
+| `pool.ts`, `parseWorker.ts` | parse files on worker threads |
+| `extract/` | tree-sitter (WebAssembly) syntax trees → per-file facts (`cpp.ts` for C and C++, `python.ts`) |
+| `link.ts` | facts of all files → one `CodeGraph`, plus problems found without a compiler |
+| `analyze.ts` | file walk, `compile_commands.json`, cache by modification time |
+| `verify.ts` | compile check with `gcc`/`clang -fsyntax-only` and Python `compile()` |
+| `health.ts` | diagnostics → broken / affected / unpowered blocks, cut wires |
+| `instrument.ts` | copies C/C++ sources with one probe per function body |
+| `runner.ts` | builds (C/C++) or starts (Python) the program with a tracer and collects the result |
+| `trace.ts` | trace format and parser → `RunTrace` (calls per thread, values, shared objects) |
+| `model.ts` | shared types |
+
+**Runtime** (`runtime/`): `python/cg_tracer.py` (standard library only), `c/cg_trace.h` + `c/cg_trace.c`
+(C99 and pthreads) and `c/cg_trace_cxx.cpp` (uncaught C++ exceptions).
+
+**Webview** (`src/webview/`)
+
+| file | role |
+| --- | --- |
+| `projection.ts` | containment tree (files or symbols) + level → visible blocks and merged wires |
+| `layout.ts` | ELK layered layout in a web worker |
+| `overlay.ts` | problems → red / orange / grey blocks and cut wires |
+| `traceview.ts` | trace → what ran in the current view, time queries, data trails |
+| `timeline.ts` | thread swimlanes: scrub, play, step |
+| `render.ts` | SVG zones, blocks, wires, labels and live glows |
+| `flow.ts` | canvas layer: moving charges, replay pulses |
+| `viewport.ts` | pan, zoom, pinch, tap |
+| `main.ts` | state, toolbar, details / problems / run panels, replay loop |
+
+**What happens when the view opens**
+
+1. `host/service.ts` lists the source files and parses them on worker threads (`extract/`).
+2. `link.ts` resolves names across files and returns the `CodeGraph`; the panel posts it to the webview.
+3. The compile check (`verify.ts`) runs in the background and posts its diagnostics; the webview computes the
+   impact (`health.ts`) and repaints.
+4. Run & Trace (`host/run.ts` → `runner.ts`) posts a `RunTrace`, which the webview replays on top of the same
+   graph.
 
 ## 1. Extraction (per file)
 

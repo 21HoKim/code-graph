@@ -85,7 +85,8 @@ npm test               # analyzer, projection, compile-check and Run & Trace tes
 npx @vscode/vsce package --no-dependencies   # -> code-graph-<version>.vsix
 ```
 
-Press **F5** in VS Code to launch an Extension Development Host on `samples/cpp-router`.
+To try a development build without installing it: `npm run build`, then
+`code --extensionDevelopmentPath="$PWD" samples/cpp-router`.
 
 **Requirements for compile check and Run & Trace**: `gcc` or `clang` (Linux, macOS; MinGW on Windows is
 untested) and/or Python 3.8+. Both execute your compiler and your program, so they are disabled in untrusted
@@ -125,12 +126,16 @@ node dist/cli.js trace path/to/project -o run.json -- --program --args
 
 ## How it works
 
-```
-files ─tree-sitter (workers)─► facts ─link─► CodeGraph ──────────────► webview: project(level) → ELK → SVG + canvas
-                                               │  ▲ diagnostics            ▲ problems overlay   ▲ trace replay
-              gcc/clang -fsyntax-only, compile()┘  │                        │                    │
-    instrument + build (C/C++) / sys.monitoring (Python) ─► run ─► trace.jsonl ─► spans, threads, objects
-```
+1. **Parse** — every source file is parsed with tree-sitter on worker threads into per-file facts
+   (definitions, calls, includes/imports), cached by modification time.
+2. **Link** — the facts are resolved across files into one graph of entities (namespaces, classes, functions)
+   and relations (call, spawn, create, inherit, include), each with a confidence.
+3. **Check** — the real compiler / interpreter checks the code; every error is attached to the function it is
+   in, and the impact is computed along the relations (who depends on it, what loses current).
+4. **Run** — for Run & Trace the program is built with probes (C/C++) or started under the tracer (Python);
+   the trace becomes calls per thread, values and the objects that travelled between them.
+5. **Draw** — the view picks the blocks of the chosen level, merges the wires between them, lays them out with
+   ELK in a web worker and draws SVG plus a canvas for the moving current.
 
 Details in [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md).
 

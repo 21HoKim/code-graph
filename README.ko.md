@@ -82,7 +82,8 @@ npm test               # 분석기·프로젝션·컴파일 검사·실행 추�
 npx @vscode/vsce package --no-dependencies   # -> code-graph-<버전>.vsix
 ```
 
-VS Code에서 **F5**를 누르면 `samples/cpp-router`를 연 확장 개발 호스트가 떠요.
+설치하지 않고 개발 빌드를 써 보려면 `npm run build` 후
+`code --extensionDevelopmentPath="$PWD" samples/cpp-router`를 실행하세요.
 
 **컴파일 검사와 실행 & 추적에 필요한 것**: `gcc` 또는 `clang`(Linux, macOS. Windows의 MinGW는 아직 검증 안 됨),
 Python 3.8 이상. 둘 다 컴파일러와 프로그램을 실제로 실행하므로 신뢰하지 않는 워크스페이스에선 꺼져 있어요.
@@ -122,12 +123,16 @@ node dist/cli.js trace path/to/project -o run.json -- --프로그램 --인자
 
 ## 동작 원리
 
-```
-파일 ─tree-sitter(워커)─► 사실 ─링크─► CodeGraph ───────────────► 웹뷰: project(단계) → ELK → SVG + 캔버스
-                                          │  ▲ 진단                   ▲ 문제 오버레이     ▲ 추적 재생
-           gcc/clang -fsyntax-only, compile()┘  │                       │                   │
-    계측 + 빌드(C/C++) / sys.monitoring(Python) ─► 실행 ─► trace.jsonl ─► 구간, 스레드, 객체
-```
+1. **파싱** — 소스 파일마다 워커 스레드에서 tree-sitter로 파싱해 파일별 사실(정의, 호출, include/import)을
+   뽑아요. 수정 시간 기준으로 캐시해요.
+2. **링크** — 파일들을 넘나들며 이름을 해석해 하나의 그래프로 묶어요. 엔티티(네임스페이스, 클래스, 함수)와
+   관계(호출, 스레드 생성, 객체 생성, 상속, include)마다 신뢰도가 붙어요.
+3. **검사** — 실제 컴파일러/인터프리터로 검사하고, 오류를 그 오류가 있는 함수에 붙인 뒤 관계를 따라 영향
+   범위(누가 의존하는지, 어디로 전류가 못 가는지)를 계산해요.
+4. **실행** — 실행 & 추적에선 프로브를 넣어 빌드(C/C++)하거나 트레이서로 실행(Python)하고, 추적 결과를
+   스레드별 호출, 값, 스레드 사이를 오간 객체로 정리해요.
+5. **그리기** — 고른 단계의 블록을 정하고 그 사이 전선을 합친 뒤, 웹 워커의 ELK로 배치해서 SVG와 전류용
+   캔버스로 그려요.
 
 자세한 내용은 [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md).
 

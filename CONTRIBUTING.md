@@ -10,8 +10,14 @@ npm run build      # or `npm run watch`
 npm test
 ```
 
-Open the folder in VS Code and press **F5** ("Run Extension (C++ sample)"). The extension host opens
-`samples/cpp-router`; run **CodeGraph: Open Circuit View**. Reload the host window (`Ctrl+R`) after rebuilding.
+Run the extension from source without installing it (rebuild with `npm run build`, then reload that window):
+
+```bash
+code --extensionDevelopmentPath="$PWD" samples/cpp-router
+```
+
+Open the command palette there and run **CodeGraph: Open Circuit View**. Editor settings and debug
+configurations (`.vscode/`) are personal and are not part of the repository.
 
 Without VS Code:
 
