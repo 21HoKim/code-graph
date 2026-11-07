@@ -12,10 +12,11 @@ import { runLayout, samplePath, signature, type ElkLike, type FlowDir, type Layo
 import {
   ALL_KINDS,
   LEVELS,
-  RANK,
   ancestorsOf,
+  availableLevels,
   buildTree,
   effectiveLevel,
+  hasSymbolsMode,
   pickLevel,
   project,
   type GroupMode,
@@ -337,8 +338,14 @@ class App {
 
   private rebuildTree(): void {
     if (!this.graph) return;
+    if (this.state.mode === 'symbols' && !hasSymbolsMode(this.graph)) this.state.mode = 'files';
     this.tree = buildTree(this.graph, this.state.mode);
     this.fileCounts.clear();
+  }
+
+  /** Abstraction levels that exist for the languages in this graph (Namespace only for C++, …). */
+  private levels(): ViewKind[] {
+    return this.tree && this.graph ? availableLevels(this.tree, this.graph) : LEVELS;
   }
 
   // -------------------------------------------------------------------------
@@ -482,17 +489,20 @@ class App {
     tb.append(h('span', { class: 'brand' }, `${LOGO}<span>CodeCurrent</span>`));
 
     const levels = h('div', { class: 'seg', role: 'group', 'data-role': 'levels' });
-    for (const l of LEVELS) {
-      const b = h('button', { 'data-level': l, title: `${t(l)} (${LEVELS.indexOf(l) + 1})` }, esc(t(l)));
+    const avail = this.levels();
+    avail.forEach((l, i) => {
+      const b = h('button', { 'data-level': l, title: `${t(l)} (${i + 1})` }, esc(t(this.levelLabel(l))));
       b.onclick = () => this.setLevel(l);
       levels.append(b);
-    }
+    });
     const modes = h('div', { class: 'seg', 'data-role': 'modes' });
-    for (const m of ['files', 'symbols'] as GroupMode[]) {
-      const b = h('button', { 'data-mode': m }, esc(t(m)));
-      b.onclick = () => this.setMode(m);
-      modes.append(b);
-    }
+    if (!this.graph || hasSymbolsMode(this.graph)) {
+      for (const m of ['files', 'symbols'] as GroupMode[]) {
+        const b = h('button', { 'data-mode': m }, esc(t(m)));
+        b.onclick = () => this.setMode(m);
+        modes.append(b);
+      }
+    } else modes.hidden = true;
     const styles = h('div', { class: 'seg', 'data-role': 'styles' });
     for (const st of ['circuit', 'network'] as LayoutStyle[]) {
       const b = h('button', { 'data-style': st }, esc(t(st)));
@@ -582,13 +592,19 @@ class App {
     this.updateToolbarState();
   }
 
+  /** Python-only code bases call folders and files packages and modules. */
+  private levelLabel(l: ViewKind): ViewKind | 'package' | 'module' {
+    const py = !!this.graph && this.graph.files.length > 0 && this.graph.files.every((f) => f.lang === 'python');
+    if (py && l === 'dir') return 'package';
+    if (py && l === 'file') return 'module';
+    return l;
+  }
+
   private updateToolbarState(): void {
     const s = this.state;
     const eff = this.tree ? effectiveLevel(this.tree, s.level) : s.level;
     for (const b of this.toolbar.querySelectorAll<HTMLButtonElement>('[data-level]')) {
-      const l = b.dataset.level as ViewKind;
-      b.classList.toggle('on', l === eff);
-      b.disabled = s.mode === 'symbols' && RANK[l] < RANK.namespace;
+      b.classList.toggle('on', b.dataset.level === eff);
     }
     for (const b of this.toolbar.querySelectorAll<HTMLButtonElement>('[data-mode]')) b.classList.toggle('on', b.dataset.mode === s.mode);
     for (const b of this.toolbar.querySelectorAll<HTMLButtonElement>('[data-style]')) b.classList.toggle('on', b.dataset.style === s.style);
@@ -669,6 +685,7 @@ class App {
   // -------------------------------------------------------------------------
 
   private setLevel(l: ViewKind): void {
+    if (!this.levels().includes(l)) return;
     this.state.level = l;
     this.state.levelChosen = true;
     this.state.expand = [];
@@ -689,6 +706,7 @@ class App {
     if (!this.state.levelChosen && this.tree) this.state.level = pickLevel(this.tree, this.blockBudget());
     this.fitPending = true;
     this.save();
+    this.buildToolbar();
     void this.refresh();
   }
 
@@ -1126,7 +1144,10 @@ class App {
       if (this.state.selected || this.selectedEdge) this.select(null);
       else if (this.state.focus) this.setFocus(null);
     } else if (e.key === 'f' || e.key === 'F') this.fit();
-    else if (/^[1-5]$/.test(e.key)) this.setLevel(LEVELS[Number(e.key) - 1]);
+    else if (/^[1-9]$/.test(e.key)) {
+      const l = this.levels()[Number(e.key) - 1];
+      if (l) this.setLevel(l);
+    }
     else if (e.key === 'Enter' && this.state.selected) {
       const loc = this.proj?.nodes.get(this.state.selected)?.t.loc;
       if (loc) this.openLoc(loc.file, loc.line);

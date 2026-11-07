@@ -1,5 +1,5 @@
 const en = {
-  dir: 'Folder', file: 'File', namespace: 'Namespace', class: 'Class', function: 'Function',
+  dir: 'Folder', file: 'File', namespace: 'Namespace', class: 'Class', function: 'Function', package: 'Package', module: 'Module',
   files: 'Files', symbols: 'Symbols', circuit: 'Circuit', network: 'Network',
   search: 'Search symbols…  (/)', fit: 'Fit', reanalyze: 'Re-analyze', edges: 'Wires',
   flowAll: 'Flow: all', flowFocus: 'Flow: selection', flowOff: 'Flow: off',
@@ -24,7 +24,7 @@ const en = {
 export type Strings = typeof en;
 
 const ko: Strings = {
-  dir: '폴더', file: '파일', namespace: '네임스페이스', class: '클래스', function: '함수',
+  dir: '폴더', file: '파일', namespace: '네임스페이스', class: '클래스', function: '함수', package: '패키지', module: '모듈',
   files: '파일 기준', symbols: '심볼 기준', circuit: '회로', network: '네트워크',
   search: '심볼 검색…  (/)', fit: '맞춤', reanalyze: '다시 분석', edges: '전선',
   flowAll: '흐름: 전체', flowFocus: '흐름: 선택만', flowOff: '흐름: 끔',

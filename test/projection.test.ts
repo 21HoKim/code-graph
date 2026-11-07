@@ -4,15 +4,48 @@ import { before, describe, it } from 'node:test';
 import { AnalysisSession, walk } from '../src/core/analyze';
 import type { CodeGraph, RelationKind } from '../src/core/model';
 import { ParsePool } from '../src/core/pool';
-import { ALL_KINDS, buildTree, pickLevel, project, type ProjectOptions, type ViewKind } from '../src/webview/projection';
+import { ALL_KINDS, availableLevels, buildTree, hasSymbolsMode, pickLevel, project, type ProjectOptions, type ViewKind } from '../src/webview/projection';
 
 const ROOT = path.resolve(__dirname, '..');
 
-let g: CodeGraph;
-before(async () => {
+async function sample(name: string): Promise<CodeGraph> {
   const pool = new ParsePool(path.join(ROOT, 'dist', 'wasm'), undefined, 0);
-  const dir = path.join(ROOT, 'samples', 'cpp-router');
-  g = await new AnalysisSession(dir, pool).analyze(walk(dir).files);
+  const dir = path.join(ROOT, 'samples', name);
+  return new AnalysisSession(dir, pool).analyze(walk(dir).files);
+}
+
+let g: CodeGraph;
+let py: CodeGraph;
+let c: CodeGraph;
+before(async () => {
+  [g, py, c] = await Promise.all([sample('cpp-router'), sample('py-pipeline'), sample('c-ringbuf')]);
+});
+
+describe('language-aware levels', () => {
+  it('C++ has every level', () => {
+    assert.deepEqual(availableLevels(buildTree(g, 'files'), g), ['dir', 'file', 'namespace', 'class', 'function']);
+    assert.ok(hasSymbolsMode(g));
+  });
+
+  it('Python has no namespace level and no symbols grouping', () => {
+    assert.deepEqual(availableLevels(buildTree(py, 'files'), py), ['dir', 'file', 'class', 'function']);
+    assert.equal(hasSymbolsMode(py), false);
+    const t = buildTree(py, 'symbols');
+    assert.ok(![...t.nodes.values()].some((n) => n.kind === 'namespace'), 'packages/modules are not namespaces');
+    assert.equal(t.nodes.get('e:py:pkg:pipeline')?.kind, 'dir');
+    assert.equal(t.nodes.get('e:py:mod:pipeline/runner.py')?.kind, 'file');
+  });
+
+  it('C has neither namespaces nor classes (structs are not a level)', () => {
+    assert.deepEqual(availableLevels(buildTree(c, 'files'), c), ['file', 'function']);
+    const t = buildTree(c, 'symbols');
+    assert.ok(![...t.nodes.values()].some((n) => n.kind === 'namespace'), 'no "(global)" namespace for C');
+  });
+
+  it('marks Python package folders', () => {
+    const t = buildTree(py, 'files');
+    assert.equal(t.nodes.get('d:pipeline')?.tag, 'pkg');
+  });
 });
 
 const opts = (level: ViewKind, extra: Partial<ProjectOptions> = {}): ProjectOptions => ({

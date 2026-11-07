@@ -96,6 +96,7 @@ export function buildTree(g: CodeGraph, mode: GroupMode): ViewTree {
   compact(t, 'dir', '/');
   compact(t, 'namespace', '::');
   finalize(t);
+  rememberLevels(t, g);
   return t;
 }
 
@@ -160,9 +161,21 @@ function buildFilesTree(g: CodeGraph): ViewTree {
   for (const e of g.entities) {
     if (e.kind === 'namespace' && e.sub === 'module' && e.def) t.entityNode.set(e.id, 'f:' + e.def.file);
   }
+  // a folder with __init__.py is a Python package
+  for (const f of g.files) {
+    if (!f.path.endsWith('__init__.py')) continue;
+    const dir = t.nodes.get(t.nodes.get('f:' + f.path)?.parent ?? '');
+    if (dir?.kind === 'dir') dir.tag = 'pkg';
+  }
   return t;
 }
 
+/**
+ * Logical grouping, per language:
+ *   C++     namespaces → classes → methods, merged across files (globals under "(global)")
+ *   Python  packages → modules → classes → functions (packages/modules are folder/file-kind: no namespaces)
+ *   C       no logical scopes: grouped by folder / file like the files view
+ */
 function buildSymbolsTree(g: CodeGraph): ViewTree {
   const t = newTree('symbols');
   const ents = new Map(g.entities.map((e) => [e.id, e]));
@@ -171,20 +184,63 @@ function buildSymbolsTree(g: CodeGraph): ViewTree {
     for (let p = e.parent ? ents.get(e.parent) : undefined; p && d < 64; p = p.parent ? ents.get(p.parent) : undefined) d++;
     return d;
   };
-  const sorted = [...g.entities].sort((a, b) => depthOf(a) - depthOf(b));
   const GLOBAL = 'g:cc';
-  for (const e of sorted) {
-    let parent: string | null = e.parent && ents.has(e.parent) ? 'e:' + e.parent : null;
-    if (!parent && e.lang !== 'python' && e.kind !== 'namespace') {
-      if (!t.nodes.has(GLOBAL)) {
-        addNode(t, { id: GLOBAL, kind: 'namespace', label: '(global)', tag: 'ns', parent: null, children: [], fnCount: 0, depth: 0 });
-      }
-      parent = GLOBAL;
+  const fileNodeFor = (path: string): string => {
+    const id = 'f:' + path;
+    if (t.nodes.has(id)) return id;
+    const parts = path.split('/');
+    let parent: string | null = null;
+    for (let i = 0; i < parts.length - 1; i++) {
+      const did = 'd:' + parts.slice(0, i + 1).join('/');
+      if (!t.nodes.has(did)) addNode(t, { id: did, kind: 'dir', label: parts[i], tag: 'dir', parent, children: [], fnCount: 0, depth: 0 });
+      parent = did;
     }
+    const f = g.files.find((x) => x.path === path);
+    addNode(t, {
+      id,
+      kind: 'file',
+      label: parts[parts.length - 1],
+      tag: fileTag(path),
+      parent,
+      children: [],
+      file: f,
+      loc: { file: path, line: 1, endLine: f?.lines ?? 1 },
+      fnCount: 0,
+      depth: 0,
+    });
+    t.fileNode.set('f:' + path, id);
+    return id;
+  };
+  const sorted = [...g.entities].sort((a, b) => depthOf(a) - depthOf(b));
+  for (const e of sorted) {
     const id = 'e:' + e.id;
-    addNode(t, entityViewNode(id, e, parent));
+    let node: TNode;
+    if (e.lang === 'python' && e.kind === 'namespace') {
+      // packages and modules are folders and files, not namespaces
+      const parent = e.parent && ents.has(e.parent) ? 'e:' + e.parent : null;
+      node = entityViewNode(id, e, parent);
+      node.kind = e.sub === 'package' ? 'dir' : 'file';
+      node.tag = e.sub === 'package' ? 'pkg' : 'py';
+      if (e.sub === 'module' && e.def) {
+        node.file = g.files.find((f) => f.path === e.def!.file);
+        t.fileNode.set('f:' + e.def.file, id);
+      }
+    } else if (e.lang === 'c' && !(e.parent && ents.get(e.parent)?.kind === 'class')) {
+      const loc = e.def ?? e.decl;
+      if (e.kind === 'namespace' || !loc) continue;
+      node = entityViewNode(id, e, e.parent && ents.get(e.parent)?.kind === 'function' ? 'e:' + e.parent : fileNodeFor(loc.file));
+    } else {
+      let parent: string | null = e.parent && ents.has(e.parent) ? 'e:' + e.parent : null;
+      if (!parent && e.lang !== 'python' && e.kind !== 'namespace') {
+        if (!t.nodes.has(GLOBAL)) {
+          addNode(t, { id: GLOBAL, kind: 'namespace', label: '(global)', tag: 'ns', parent: null, children: [], fnCount: 0, depth: 0 });
+        }
+        parent = GLOBAL;
+      }
+      node = entityViewNode(id, e, parent);
+    }
+    addNode(t, node);
     t.entityNode.set(e.id, id);
-    if (e.kind === 'namespace' && e.sub === 'module' && e.def) t.fileNode.set('f:' + e.def.file, id);
   }
   return t;
 }
@@ -281,8 +337,40 @@ export interface Projection {
   leaves: number;
 }
 
-export function effectiveLevel(tree: ViewTree, level: ViewKind): ViewKind {
-  return tree.mode === 'symbols' && RANK[level] < RANK.namespace ? 'namespace' : level;
+/**
+ * Levels that exist in this code base: Namespace only with C++ namespaces, Class only with C++/Python classes
+ * (C structs are not classes), Folder/File only when the grouping has them.
+ */
+export function availableLevels(tree: ViewTree, g: CodeGraph): ViewKind[] {
+  const kinds = new Set<ViewKind>();
+  for (const n of tree.nodes.values()) kinds.add(n.kind);
+  const out: ViewKind[] = [];
+  if (kinds.has('dir')) out.push('dir');
+  if (kinds.has('file')) out.push('file');
+  if (kinds.has('namespace') && g.entities.some((e) => e.kind === 'namespace' && e.sub === 'namespace')) out.push('namespace');
+  if (g.entities.some((e) => e.kind === 'class' && e.lang !== 'c')) out.push('class');
+  out.push('function');
+  return out;
+}
+
+/** The symbols grouping only differs from files for C++ (namespaces and classes merge across files). */
+export function hasSymbolsMode(g: CodeGraph): boolean {
+  return g.entities.some((e) => e.lang === 'cpp' && (e.kind === 'namespace' || e.kind === 'class'));
+}
+
+const levelCache = new WeakMap<ViewTree, ViewKind[]>();
+
+/** Requested level, snapped to the nearest finer level that exists (or the finest one). */
+export function effectiveLevel(tree: ViewTree, level: ViewKind, available?: ViewKind[]): ViewKind {
+  const av = available ?? levelCache.get(tree);
+  if (!av || av.includes(level)) return level;
+  return av.find((l) => RANK[l] >= RANK[level]) ?? av[av.length - 1];
+}
+
+export function rememberLevels(tree: ViewTree, g: CodeGraph): ViewKind[] {
+  const av = availableLevels(tree, g);
+  levelCache.set(tree, av);
+  return av;
 }
 
 export function isExpanded(tree: ViewTree, n: TNode, o: Pick<ProjectOptions, 'level' | 'expand' | 'collapse'>): boolean {
@@ -452,7 +540,7 @@ export function leavesAtLevel(tree: ViewTree, level: ViewKind): number {
 }
 
 export function pickLevel(tree: ViewTree, maxBlocks = 40): ViewKind {
-  const order: ViewKind[] = tree.mode === 'symbols' ? ['namespace', 'class', 'function'] : ['dir', 'file', 'namespace', 'class', 'function'];
+  const order: ViewKind[] = levelCache.get(tree) ?? ['dir', 'file', 'namespace', 'class', 'function'];
   let best: ViewKind = order[0];
   for (const l of order) {
     if (leavesAtLevel(tree, l) <= maxBlocks) best = l;
