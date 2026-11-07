@@ -35,6 +35,18 @@ ${cdn ? '' : `<script type="text/plain" id="elk-worker-src">${safe(elk)}</script
 window.__CODE_CURRENT_SAMPLES__ = ${safe(JSON.stringify(graphs.map((g) => ({ graph: g.graph, trace: g.trace }))))};</script>
 <script>${safe(js)}</script>
 <script>
+// keep the sample picker just below the toolbar (it wraps to several rows on phones)
+(function () {
+  var pick = document.querySelector('.demo-pick');
+  var place = function () {
+    var tb = document.querySelector('.toolbar');
+    if (tb) pick.style.top = Math.round(tb.getBoundingClientRect().bottom + 6) + 'px';
+  };
+  var tb = document.querySelector('.toolbar');
+  if (tb) new ResizeObserver(place).observe(tb);
+  window.addEventListener('resize', place);
+  place();
+})();
 document.getElementById('demo-sample').addEventListener('change', function (e) {
   var g = window.__CODE_CURRENT_SAMPLES__[Number(e.target.value)];
   window.codeCurrent.loadDemo(g.graph, ${JSON.stringify(settings)}, g.trace);

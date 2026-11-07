@@ -1,6 +1,6 @@
 {
   "displayName": "CodeCurrent — Code Circuit Visualizer",
-  "description": "See C, C++ and Python code as a live circuit: blocks for folders, files, namespaces, classes and functions; wires where calls, threads and data flow like current.",
+  "description": "See C, C++ and Python code as a live circuit: blocks for folders, files, classes and functions; wires where calls, threads and data flow like current. Compile errors turn red with their impact; Run & Trace replays threads and values.",
   "cmd.open": "Open Circuit View",
   "cmd.showFile": "Show in Circuit View",
   "cmd.reanalyze": "Re-analyze Workspace",
@@ -26,7 +26,7 @@
   "cfg.verifyMode.manual": "Only when you press Verify.",
   "cfg.verifyCc": "C compiler for checks and Run & Trace. Empty = `$CC`, then `cc`, `gcc`, `clang`.",
   "cfg.verifyCxx": "C++ compiler. Empty = `$CXX`, then `c++`, `g++`, `clang++`.",
-  "cfg.verifyPython": "Python 3 interpreter. Empty = the Python extension's interpreter is not used; `python3`, then `python`.",
+  "cfg.verifyPython": "Python 3 interpreter for checks and Run & Trace. Empty = `python3`, then `python` on PATH (the Python extension's selected interpreter is not picked up yet).",
   "cfg.verifyFlags": "Extra compiler flags for checks (e.g. `-DDEBUG`, `-std=c++20`).",
   "cfg.verifyCcdb": "Use the flags from `compile_commands.json` when the project has one.",
   "cfg.verifyEditor": "Also mark errors reported by language servers (C/C++, clangd, Pylance…).",

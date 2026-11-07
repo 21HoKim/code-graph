@@ -36,6 +36,7 @@ const en = {
   exceptions: 'Failures', stopped: 'stopped at the time limit', exitCode: 'exit code {n}', exitOk: 'exited normally', callsN: '{n} calls', runAgain: 'Run again',
   threads: 'Threads', startsIn: 'starts in', sharedData: 'Shared between threads', sharedHint: 'The same object used by several threads — where races and locks matter.',
   dataFlow: 'Data passed along', dataTrail: 'Data trail', sightings: 'seen {n}×', sharedAcross: 'used by {n} threads', returned: 'returned',
+  passedThrough: 'Passed through', firstSteps: 'First hand-overs',
   traceCapped: 'Detailed events stop after {n}; call counts cover the whole run.', output: 'Program output', speed: 'Replay speed', closeTrace: 'Close the trace',
 };
 export type Strings = typeof en;
@@ -78,6 +79,7 @@ const ko: Strings = {
   exceptions: '실패', stopped: '제한 시간에 멈춤', exitCode: '종료 코드 {n}', exitOk: '정상 종료', callsN: '호출 {n}', runAgain: '다시 실행',
   threads: '스레드', startsIn: '시작 함수', sharedData: '스레드 간 공유 데이터', sharedHint: '여러 스레드가 같은 객체를 씀 — 경쟁 상태와 락을 볼 곳이에요.',
   dataFlow: '전달된 데이터', dataTrail: '데이터 경로', sightings: '{n}번 등장', sharedAcross: '스레드 {n}개가 사용', returned: '반환',
+  passedThrough: '거쳐 간 함수', firstSteps: '처음 전달된 순서',
   traceCapped: '자세한 이벤트는 {n}개까지만 기록, 호출 횟수는 전체 실행 기준이에요.', output: '프로그램 출력', speed: '재생 속도', closeTrace: '추적 닫기',
 };
 

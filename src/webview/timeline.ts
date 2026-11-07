@@ -205,13 +205,23 @@ export class Timeline {
       c.lineTo(px, y + 7);
       c.fill();
     }
-    // followed object
+    // followed object: diamonds, or thin ticks when there are many
     c.fillStyle = '#ffffff';
+    const dense = this.marks.length > 200;
+    let lastPx = -10;
+    let lastLane = -1;
     for (const mk of this.marks) {
       const lane = this.threads.indexOf(mk.th);
       if (lane < 0 || mk.t < this.v0 || mk.t > this.v1) continue;
       const px = this.x(mk.t, W);
       const y = 14 + lane * LANE + LANE - 6;
+      if (dense) {
+        if (lane === lastLane && px - lastPx < 1) continue;
+        lastPx = px;
+        lastLane = lane;
+        c.fillRect(px, y - 3, 1, 6);
+        continue;
+      }
       c.beginPath();
       c.moveTo(px, y - 4);
       c.lineTo(px + 4, y);
@@ -246,7 +256,7 @@ export class Timeline {
     c.fillStyle = muted;
     c.strokeStyle = border;
     c.lineWidth = 1;
-    const ticks = 6;
+    const ticks = Math.max(2, Math.min(6, Math.floor((W - NAME_W) / 120)));
     for (let i = 0; i <= ticks; i++) {
       const tt = this.v0 + ((this.v1 - this.v0) * i) / ticks;
       const x = this.x(tt, W);

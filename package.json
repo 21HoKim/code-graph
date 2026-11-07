@@ -33,7 +33,10 @@
     "threads",
     "dataflow",
     "topology",
-    "circuit"
+    "circuit",
+    "tracing",
+    "runtime",
+    "compile errors"
   ],
   "icon": "media/icon.png",
   "galleryBanner": {
@@ -361,7 +364,7 @@
     "typecheck": "tsc --noEmit -p .",
     "test": "node scripts/build.mjs --tests && node --test out-test/*.test.js",
     "analyze": "node dist/cli.js",
-    "demo": "node scripts/build.mjs && node dist/cli.js samples/cpp-router -o out/cpp.json --quiet && node dist/cli.js samples/py-pipeline -o out/py.json --quiet && node dist/cli.js samples/c-ringbuf -o out/c.json --quiet && node scripts/build-demo.mjs out/demo.html en out/cpp.json:C++ out/py.json:Python out/c.json:C",
+    "demo": "node scripts/build.mjs && node dist/cli.js samples/cpp-router -o out/cpp.json --quiet --verify && node dist/cli.js samples/py-pipeline -o out/py.json --quiet --verify && node dist/cli.js samples/c-ringbuf -o out/c.json --quiet --verify && (node dist/cli.js samples/broken-cpp -o out/bcpp.json --quiet --verify || true) && (node dist/cli.js samples/broken-py -o out/bpy.json --quiet --verify || true) && node dist/cli.js trace samples/cpp-router -o out/run-cpp.json && node dist/cli.js trace samples/py-pipeline -o out/run-py.json -- --seconds 0.6 && node dist/cli.js trace samples/c-ringbuf -o out/run-c.json && node scripts/build-demo.mjs out/demo.html en \"out/cpp.json:C++ router (run trace):out/run-cpp.json\" \"out/py.json:Python pipeline (run trace):out/run-py.json\" \"out/c.json:C ring buffer (run trace):out/run-c.json\" \"out/bcpp.json:Broken C++ (compile check)\" \"out/bpy.json:Broken Python (compile check)\"",
     "vscode:prepublish": "node scripts/build.mjs --production",
     "package": "vsce package --no-dependencies"
   },

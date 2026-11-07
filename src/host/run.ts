@@ -63,7 +63,7 @@ export async function runTraceCommand(ctx: vscode.ExtensionContext, svc: Analysi
     const runAnyway = vscode.l10n.t('Run anyway');
     const show = vscode.l10n.t('Show problems');
     const choice = await vscode.window.showWarningMessage(
-      vscode.l10n.t('{0} compile errors (shown in red on the circuit). Run anyway?', errs.length),
+      vscode.l10n.t('The compile check found {0} error(s), shown in red on the circuit. Run anyway?', errs.length),
       runAnyway,
       show,
     );
@@ -122,7 +122,7 @@ export async function runTraceCommand(ctx: vscode.ExtensionContext, svc: Analysi
     panel.post({ type: 'diagnostics', set: 'runtime', diagnostics: r.runtimeDiagnostics });
     if (!r.trace) {
       const n = r.buildDiagnostics.filter((d) => d.severity === 'error').length;
-      const msg = n ? vscode.l10n.t('Build failed: {0} errors (shown in red).', n) : r.notes[r.notes.length - 1] ?? vscode.l10n.t('Run failed.');
+      const msg = n ? vscode.l10n.t('Build failed: {0} error(s), shown in red.', n) : r.notes[r.notes.length - 1] ?? vscode.l10n.t('Run failed.');
       task('error', msg, undefined, undefined, 'build');
       out.show(true);
       return;
@@ -133,7 +133,7 @@ export async function runTraceCommand(ctx: vscode.ExtensionContext, svc: Analysi
     const tr = r.trace;
     const failed = r.runtimeDiagnostics.length;
     const summary = vscode.l10n.t('{0}: {1} threads, {2} calls traced', entry.label, tr.threads.length, tr.spans.t.length);
-    if (failed) void vscode.window.showWarningMessage(`${summary} — ${vscode.l10n.t('{0} runtime failures (shown in red).', failed)}`);
+    if (failed) void vscode.window.showWarningMessage(`${summary} — ${vscode.l10n.t('{0} runtime failure(s), shown in red.', failed)}`);
     else void vscode.window.setStatusBarMessage(`$(pulse) ${summary}`, 6000);
   } catch (e) {
     const msg = String((e as Error)?.message ?? e);

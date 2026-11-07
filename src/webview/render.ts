@@ -205,7 +205,8 @@ export class Renderer {
       flags.includes('abstract') ? 'abstract' : '',
       t.children.length ? 'collapsed' : '',
       t.fragment ? 'fragment' : '',
-      runtime ? (rb ? 'ran' : 'cold') : '',
+      // blocks without functions (plain structs, empty headers) neither run nor sit idle
+      runtime && t.fnCount > 0 ? (rb ? 'ran' : 'cold') : '',
     ]
       .filter(Boolean)
       .join(' ');
@@ -297,12 +298,14 @@ export class Renderer {
     if (!this.current) return;
     const out: string[] = [];
     const stack = new Map<string, number>();
-    for (const it of items) {
+    // newest first, a few per block: values are read, not counted
+    for (const it of [...items].reverse()) {
+      if (out.length >= 10) break;
       const b = this.current.layout.boxes.get(it.node);
       if (!b) continue;
       const k = stack.get(it.node) ?? 0;
       stack.set(it.node, k + 1);
-      if (k > 2) continue;
+      if (k > 1) continue;
       const w = Math.ceil(measure(it.text, '10px var(--cc-mono)')) + 12;
       const x = b.x + b.w / 2 - w / 2;
       const y = b.y - 20 - k * 17 - (it.up ? it.age * 8 : 0);

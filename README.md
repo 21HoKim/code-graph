@@ -2,45 +2,75 @@
 
 **See your C, C++ and Python code as a live circuit.**
 Folders, files, namespaces, classes and functions become blocks; calls, thread spawns, object creation and
-inheritance become wires — and data flows along them like current.
+inheritance become wires — and data flows along them like current. Compile it and broken parts turn red with
+their impact spreading along the wires; run it and every thread lights up its own path, carrying real values.
 
-[한국어 README](README.ko.md) · [Architecture](docs/ARCHITECTURE.md) · [Roadmap (dynamic analysis)](docs/ROADMAP.md)
+[한국어 README](README.ko.md) · [Architecture](docs/ARCHITECTURE.md) · [Roadmap](docs/ROADMAP.md) · [Changelog](CHANGELOG.md)
 
-![Class level of a C++ router: zones for folders/files/namespaces, wires with call data](docs/images/circuit-cpp.png)
+![Replaying a run of a C++ router: rx and tx threads light up their blocks, values ride on the wires, swimlanes below](docs/images/trace-cpp.png)
 
-## Features (v0.1 — static analysis)
+## Features
 
-- **C, C++ and Python** parsed with tree-sitter (WebAssembly — no compiler, no native dependencies).
-- **Abstraction levels**: Folder → File → Namespace → Class → Function. Wires are lifted to whatever is
-  visible and merged, so the same project reads as a module map or as a call graph. Double-click any block
-  to open it up in place.
-- **Two groupings**: *Files* (physical: a C++ class whose methods live in `router.cpp` shows up there as a
-  dashed "implementation fragment") and *Symbols* (logical: namespaces → classes → methods, merged across files).
-- **Electric flow**: charges travel caller → callee (arguments); amber charges travel back when the callee
-  returns a value. Click a block and its wires light up with labels showing what travels on them
-  (`(pkt, 100) ⟲ bool`).
-- **Concurrency, statically**: thread entry points are found from `std::thread`, `std::async`,
-  `std::jthread`, `vector<thread>::emplace_back`, `pthread_create`, `threading.Thread(target=…)`,
-  `executor.submit/map`, `asyncio.create_task`, … and drawn as orange ⚡ spawn wires.
-- **Honest resolution**: every link carries a confidence — *exact*, *likely* (type inference) or *guess*
-  (name only, dashed). Guesses can be hidden.
-- **Two layouts**: *Circuit* (orthogonal traces, left→right; top→down on tall screens) and *Network*
-  (curved links), both computed by [ELK](https://eclipse.dev/elk/) in a web worker.
-- **Editor integration**: jump to source, "Show in Circuit View" from the explorer/editor, the block under the
-  cursor pulses, saving a file re-parses only that file.
-- **Light**: parsing runs on worker threads, the flow animation is a single canvas with a particle budget and
-  stops when the panel is hidden.
+### Static circuit
+- **C, C++ and Python** parsed with tree-sitter (WebAssembly — no native dependencies).
+- **Abstraction levels that fit the language**: Folder → File → Namespace → Class → Function for C++;
+  File → Function for C; Package → Module → Class → Function for Python (no namespaces where the language has
+  none). Wires are lifted to whatever is visible and merged; double-click a block to open it in place.
+- **Two groupings** for C++: *Files* (physical) and *Symbols* (namespaces → classes → methods across files).
+- **Electric flow**: charges travel caller → callee (arguments), amber charges travel back (return values).
+  Click a block and its wires show what travels on them (`(pkt, 100) ⟲ bool`).
+- **Concurrency, statically**: `std::thread`, `std::async`, `std::jthread`, `pthread_create`,
+  `threading.Thread(target=…)`, `executor.submit`, `asyncio.create_task`, … drawn as orange ⚡ spawn wires.
+- **Honest resolution**: every link is *exact*, *likely* (type inference) or *guess* (name only, dashed).
+- **Circuit** and **network** layouts (ELK in a web worker), jump to source, follow the cursor, incremental
+  re-analysis on save.
 
-| Function level: threads | Network layout (Python) |
+| Class level (C++) | Network layout (Python) |
 | --- | --- |
-| ![Thread spawns at function level](docs/images/function-level-threads.png) | ![Python pipeline in network layout](docs/images/network-python.png) |
+| ![Class level of a C++ router: zones for folders, files and namespaces](docs/images/circuit-cpp.png) | ![Python pipeline in network layout](docs/images/network-python.png) |
+
+### Compile check: only what is broken turns red
+- **Real toolchain**: every translation unit through `gcc`/`clang -fsyntax-only` (flags from
+  `compile_commands.json` when there is one), every Python file through `compile()` (+ pyflakes undefined names
+  when installed). Runs when the view opens and re-checks only the units a save affects.
+- **Static checks without a compiler**: parse errors, functions declared but never defined, `NotImplementedError`
+  stubs that are called, undefined Python names, missing relative imports / local `#include`s.
+- **Impact on the circuit**: the broken block is **red**; callers that depend on it are **orange** with their
+  distance (`⚠ +1`); blocks that can only be reached through a break are **grey** (no current); the wire into a
+  break is cut — current runs up to the break and sparks out. Containers only count the errors inside them.
+- **Problems panel**: every error with its source line, how many blocks it affects, and for any orange block the
+  path to the break that affects it.
+
+![Broken C++: calibrate does not compile (red), read and main depend on it (orange), clampRange gets no current](docs/images/problems.png)
+
+### Run & Trace: threads, data and crashes
+- **One click**: compile check → build (C/C++) → run with a tracer → replay. Build, link and runtime failures
+  come back as red blocks, like compile errors.
+- **Python**: a stdlib-only tracer (`sys.monitoring` on 3.12+, `sys.setprofile` before) records calls, returns,
+  exceptions, argument / return values and object identities, per thread, for workspace code only.
+- **C / C++**: the sources are copied and get one probe per function body, written on the line of the `{` so
+  compiler line numbers do not move; a small runtime records per-thread calls, argument values, `this` and pointer
+  identities, and on a crash (`SIGSEGV`, uncaught exception → `SIGABRT`) which function every thread was in.
+  Only the translation units `main` needs are built, with your `compile_commands.json` flags.
+- **Replay**: thread swimlanes with play / scrub / step; blocks on each thread's call stack glow in the thread's
+  colour, pulses run along the wires, argument and return values ride into the blocks. Blocks and wires that never
+  ran fade out; calls only the run revealed (virtual dispatch, callbacks) get wires of their own.
+- **Parallel structure**: who started which thread and where it begins; colour stripes show which threads ran a
+  block; solo one thread to see only its part of the circuit.
+- **Data tracking**: objects used by several threads are listed (*the same `Router`, `PacketQueue`, `ringbuf_t*`
+  in every thread*); click one to light up every function it passed through, in order, with its sightings marked
+  on the swimlanes.
+
+| Python pipeline replay | Data trail of a ring buffer shared by three threads |
+| --- | --- |
+| ![Python pipeline: pump threads, dispatcher and pool workers with values](docs/images/trace-python.png) | ![The ring buffer object followed through producer, consumer and main](docs/images/data-trail.png) |
 
 ## Install
 
 **From a release (.vsix)**
 
 ```bash
-code --install-extension code-current-0.1.0.vsix
+code --install-extension code-current-0.2.0.vsix
 ```
 
 or in VS Code: *Extensions* view → `…` menu → *Install from VSIX…*
@@ -50,61 +80,77 @@ or in VS Code: *Extensions* view → `…` menu → *Install from VSIX…*
 ```bash
 git clone https://github.com/21HoKim/code-current && cd code-current
 npm ci
-npm run build          # bundles dist/ (extension, parse worker, webview, WASM grammars)
-npm test               # analyzer + projection tests
+npm run build          # dist/: extension, parse worker, webview, WASM grammars, runtime tracers
+npm test               # analyzer, projection, compile-check and Run & Trace tests
 npx @vscode/vsce package --no-dependencies   # -> code-current-<version>.vsix
 ```
 
-Press **F5** in VS Code to launch an Extension Development Host on `samples/cpp-router`
-(see `.vscode/launch.json`).
+Press **F5** in VS Code to launch an Extension Development Host on `samples/cpp-router`.
+
+**Requirements for compile check and Run & Trace**: `gcc` or `clang` (Linux, macOS; MinGW on Windows is
+untested) and/or Python 3.8+. Both execute your compiler and your program, so they are disabled in untrusted
+workspaces. The static view needs nothing.
 
 ## Use
 
 | | |
 | --- | --- |
-| `CodeCurrent: Open Circuit View` | analyze the workspace and open the view |
+| `CodeCurrent: Open Circuit View` | analyze the workspace and open the view (compile check runs too) |
 | `CodeCurrent: Show in Circuit View` | focus the current file (explorer / editor context menu, status bar) |
-| click a block | trace its wires (others dim), details on the right |
-| double-click | expand / collapse; on a function: open source |
-| `1`…`5` | Folder / File / Namespace / Class / Function |
-| `/` | search symbols · `F` fit · `Esc` clear · `Enter` open selection |
+| `CodeCurrent: Verify (compile check)` | check again now (toolbar **✓ Verify**) |
+| `CodeCurrent: Run & Trace` | build, run and replay (toolbar **▶ Run**; asks which `main`/script when there are several) |
+| `CodeCurrent: Load Trace File…` | open a trace written by the CLI or the tracers |
+| click a block / double-click | trace its wires · expand, collapse or open source |
+| `1`…`5` · `/` · `F` · `Esc` | levels · search · fit · clear |
+| `Space` · `←` `→` | (with a trace) play / pause · previous / next call |
 
-Settings (`codeCurrent.*`): `defaultLevel`, `layout`, `flow.mode`, `flow.maxParticles`, `showGuessedLinks`,
-`followCursor`, `exclude`, `maxFiles`, `cpp.includePaths`, `analysis.workers`.
-`compile_commands.json` (root, `build/`, `out/`, `cmake-build-*`) is read automatically for include paths.
+Settings (`codeCurrent.*`):
 
-### Command-line analyzer
+- view: `defaultLevel`, `layout`, `flow.mode`, `flow.maxParticles`, `showGuessedLinks`, `followCursor`,
+  `exclude`, `maxFiles`, `cpp.includePaths`, `analysis.workers`
+- compile check: `verify.mode` (`onOpenAndSave` · `onOpen` · `manual`), `verify.cc`, `verify.cxx`,
+  `verify.python`, `verify.extraFlags`, `verify.useCompileCommands`, `verify.editorDiagnostics`
+  (also mark errors from clangd / C/C++ / Pylance), `verify.timeoutSeconds`
+- Run & Trace: `run.entry`, `run.args`, `run.cwd`, `run.env`, `run.buildFlags`, `run.linkFlags`,
+  `run.timeoutSeconds` (default 20 s; the trace up to the stop is kept), `run.maxEvents`, `run.captureValues`
+
+### Command line
 
 ```bash
-node dist/cli.js path/to/project -o graph.json
-# 15 files · 8 classes · 33 functions · 54 relations · 36/73 call sites resolved (49%) · …
+node dist/cli.js path/to/project -o graph.json            # static graph
+node dist/cli.js path/to/project --verify -o graph.json   # + compile check, exit code 2 on errors (CI)
+node dist/cli.js trace path/to/project -o run.json -- --program --args
+# src/main.cpp · main(): exit 0 · 6 threads · 1657 calls · 15 shared objects · 1008 ms traced
 ```
 
 ## How it works
 
 ```
-files ──tree-sitter (worker threads)──► per-file facts ──link──► CodeGraph (entities + relations)
-                                         (cached by mtime)          │
-                                                   webview: project(level, grouping) → ELK → SVG + canvas flow
+files ─tree-sitter (workers)─► facts ─link─► CodeGraph ──────────────► webview: project(level) → ELK → SVG + canvas
+                                               │  ▲ diagnostics            ▲ problems overlay   ▲ trace replay
+              gcc/clang -fsyntax-only, compile()┘  │                        │                    │
+    instrument + build (C/C++) / sys.monitoring (Python) ─► run ─► trace.jsonl ─► spans, threads, objects
 ```
 
-Unresolved call sites are mostly library calls (`std::`, libc, Python stdlib) — the view only draws links
-between symbols in your workspace. Details in [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md).
+Details in [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md).
 
 ## Limitations
 
-Static analysis without a compiler: macros are not expanded, templates are not instantiated, virtual and
-dynamic dispatch resolve to the declared target, function pointers/callbacks other than thread APIs are not
-followed. Low-confidence links are marked as such. A language-server pass (clangd / Pylance call hierarchy) to
-confirm them is on the [roadmap](docs/ROADMAP.md).
+- **Static**: macros are not expanded, templates not instantiated, virtual dispatch and callbacks resolve to the
+  declared target (a trace shows the real ones). Low-confidence links are marked as such.
+- **Run & Trace** builds simple projects by itself (the translation units reachable from `main`); projects that
+  need generated code or special link steps need `run.buildFlags` / `run.linkFlags`. Programs run without stdin.
+- C/C++ record argument values, not return values. Identities are addresses: Python and the C allocator may
+  reuse an address after an object is freed, so a long trail can mix two lifetimes.
+- Tracing costs time: about 1 µs per Python call in workspace code, less in C/C++. After `run.maxEvents` detailed
+  events only call counts are kept.
 
 ## Roadmap
 
-1. **Precision** — LSP call-hierarchy confirmation, virtual-dispatch fan-out, callbacks.
-2. **Dynamic** — runtime traces (Python `sys.monitoring`, C/C++ `-finstrument-functions` / eBPF), replay with
-   per-thread colours and swimlanes, follow one object (`id`) across wires and threads.
-3. **Live** — debugger (DAP) integration, lock contention.
-4. **More languages** — tree-sitter adapters for Rust, Go, Java, TypeScript.
+1. **Precision** — language-server call hierarchy to confirm links, virtual-dispatch fan-out, callbacks.
+2. **More runtime** — lock / wait events and contention heat, attach to a running process (eBPF), stream a live
+   debug session.
+3. **More languages** — Rust, Go, Java, TypeScript.
 
 ## Contributing
 

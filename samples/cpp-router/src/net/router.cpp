@@ -40,10 +40,16 @@ void Router::receive(const Packet& pkt) {
 
 void Router::rxLoop() {
   util::log("rx thread up");
+  uint32_t seq = 0;
   while (running_) {
     Packet pkt;
-    pkt.dst = 0x0A000001;
+    pkt.src = 0x0A000002;
+    // every fourth packet is addressed to the loopback interface
+    pkt.dst = seq % 4 == 3 ? 0x7F000001 : 0x0A000001 + seq % 3;
+    pkt.port = static_cast<uint16_t>(5000 + seq % 8);
+    for (int i = 0; i < 16; ++i) pkt.payload.push_back(static_cast<uint8_t>(seq * 31 + i));
     receive(pkt);
+    ++seq;
     std::this_thread::sleep_for(std::chrono::milliseconds(10));
   }
 }

@@ -1,6 +1,6 @@
 {
   "displayName": "CodeCurrent — 코드 회로도 시각화",
-  "description": "C, C++, Python 코드를 살아 있는 회로처럼 보여 줍니다. 폴더·파일·네임스페이스·클래스·함수는 블록으로, 호출·스레드·데이터는 전류처럼 흐르는 전선으로 표시합니다.",
+  "description": "C, C++, Python 코드를 살아 있는 회로처럼 보여 줍니다. 폴더·파일·클래스·함수는 블록, 호출·스레드·데이터는 전류처럼 흐르는 전선. 컴파일 오류는 영향 범위와 함께 빨갛게, 실행 & 추적은 스레드와 값을 재생합니다.",
   "cmd.open": "회로도 열기",
   "cmd.showFile": "회로도에서 보기",
   "cmd.reanalyze": "워크스페이스 다시 분석",
@@ -26,7 +26,7 @@
   "cfg.verifyMode.manual": "검증 버튼을 누를 때만.",
   "cfg.verifyCc": "검사와 실행 & 추적에 쓸 C 컴파일러. 비우면 `$CC`, `cc`, `gcc`, `clang` 순.",
   "cfg.verifyCxx": "C++ 컴파일러. 비우면 `$CXX`, `c++`, `g++`, `clang++` 순.",
-  "cfg.verifyPython": "Python 3 인터프리터. 비우면 `python3`, `python` 순.",
+  "cfg.verifyPython": "검사와 실행 & 추적에 쓸 Python 3 인터프리터. 비우면 PATH의 `python3`, `python` 순 (Python 확장에서 고른 인터프리터는 아직 따르지 않습니다).",
   "cfg.verifyFlags": "검사에 추가할 컴파일 플래그 (예: `-DDEBUG`, `-std=c++20`).",
   "cfg.verifyCcdb": "프로젝트에 `compile_commands.json`이 있으면 그 플래그를 사용.",
   "cfg.verifyEditor": "언어 서버(C/C++, clangd, Pylance…)가 보고한 오류도 표시.",

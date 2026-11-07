@@ -1653,15 +1653,32 @@ class App {
     html += `<div class="qn">${esc(obj?.label ?? '')} ${esc(id)}</div>`;
     html += `<div class="row">${threads.map((th) => this.threadChip(th)).join('')}<span class="flag">${esc(t('sightings', { n: sights.length }))}</span></div>`;
     if (threads.length > 1) html += `<div class="row"><span class="flag warn">⚠ ${esc(t('sharedAcross', { n: threads.length }))}</span></div>`;
-    html += `<ul class="lst">`;
-    // consecutive sightings in the same function on the same thread collapse into one row
+    // where it went: per function, with the threads that handled it there
+    const byFn = new Map<number, { n: number; th: Set<number>; first: number; roles: Set<string> }>();
+    for (const x of sights) {
+      const f = s.fn[x.span];
+      const e = byFn.get(f) ?? byFn.set(f, { n: 0, th: new Set(), first: x.span, roles: new Set() }).get(f)!;
+      e.n++;
+      e.th.add(s.th[x.span]);
+      e.roles.add(x.role === 'ret' ? t('returned') : x.role === 'self' ? 'self' : x.name ?? 'arg');
+    }
+    html += `<h3>${esc(t('passedThrough'))} (${byFn.size})</h3><ul class="lst">`;
+    for (const [f, e] of [...byFn].sort((a, b) => s.t[a[1].first] - s.t[b[1].first])) {
+      html +=
+        `<li><span class="dot" style="background:${threadColor(s.th[e.first])}"></span><a data-entity="${esc(m.tr.fns[f]?.id ?? '')}">${esc(this.fnName(f))}</a>` +
+        `<span class="cnt">×${e.n} ${[...e.th].map((th) => `<span style="color:${threadColor(th)}">●</span>`).join('')}</span>` +
+        `<span class="args">${esc([...e.roles].join(', '))} · <a data-span="${e.first}">${fmtNs(s.t[e.first])}</a></span></li>`;
+    }
+    html += '</ul>';
+    // the first hand-overs, in time order
+    html += `<h3>${esc(t('firstSteps'))}</h3><ul class="lst">`;
     const rows: { x: (typeof sights)[number]; n: number }[] = [];
     for (const x of sights) {
       const last = rows[rows.length - 1];
       if (last && s.fn[last.x.span] === s.fn[x.span] && s.th[last.x.span] === s.th[x.span] && last.x.role === x.role) last.n++;
       else rows.push({ x, n: 1 });
     }
-    for (const { x, n } of rows.slice(0, 80)) {
+    for (const { x, n } of rows.slice(0, 16)) {
       const f = s.fn[x.span];
       const role = x.role === 'ret' ? t('returned') : x.role === 'self' ? 'self' : x.name ?? 'arg';
       html +=
