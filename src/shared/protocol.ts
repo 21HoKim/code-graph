@@ -1,6 +1,7 @@
 /** Messages between the extension host and the webview. */
 import type { CodeGraph, Diagnostic, VerifyInfo } from '../core/model';
 import type { LiveUpdate } from '../core/live';
+import type { Peek } from '../core/peek';
 import type { RunTrace } from '../core/trace';
 
 export type { VerifyInfo };
@@ -37,11 +38,15 @@ export type HostMessage =
   | { type: 'live'; state: 'tick' | 'end'; update?: LiveUpdate }
   /** Another view of the same run played, paused, jumped or changed speed: follow it. */
   | { type: 'replay'; t: number; playing: boolean; speed: number }
+  /** Answer to a webview 'peek': the source lines for a hover preview (null: file not readable). */
+  | { type: 'peek'; req: number; peek: Peek | null }
   | { type: 'error'; message: string };
 
 export type WebviewMessage =
   | { type: 'ready' }
   | { type: 'open'; file: string; line: number }
+  /** A few source lines for the tooltip: a definition (`count` lines, up to `endLine`) or a call site (`count: 1`). */
+  | { type: 'peek'; req: number; file: string; line: number; endLine?: number; count?: number }
   | { type: 'reanalyze' }
   | { type: 'exportGraph' }
   | { type: 'verify' }

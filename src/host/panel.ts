@@ -1,5 +1,7 @@
 /** The "circuit" webview panel. */
+import * as fs from 'node:fs';
 import * as vscode from 'vscode';
+import { peekLines } from '../core/peek';
 import { processTrace } from '../core/trace';
 import type { HostMessage, LevelSetting, ViewSettings, WebviewMessage } from '../shared/protocol';
 import type { AnalysisService } from './service';
@@ -13,6 +15,19 @@ function nonce(): string {
   let s = '';
   for (let i = 0; i < 32; i++) s += chars[Math.floor(Math.random() * chars.length)];
   return s;
+}
+
+/** What the editor has for a file (unsaved edits included), else what is on disk; nothing for huge files. */
+async function sourceText(abs: string): Promise<string | undefined> {
+  const open = vscode.workspace.textDocuments.find((d) => d.uri.scheme === 'file' && d.uri.fsPath === abs);
+  if (open) return open.getText();
+  try {
+    const st = await fs.promises.stat(abs);
+    if (st.size > 4 * 1024 * 1024) return undefined;
+    return await fs.promises.readFile(abs, 'utf8');
+  } catch {
+    return undefined;
+  }
 }
 
 export function viewSettings(): ViewSettings {
@@ -271,6 +286,14 @@ export class CircuitPanel implements vscode.Disposable {
         // views of one run play together: the containers' calls line up across them
         for (const p of [CircuitPanel.current, ...CircuitPanel.scoped.values()]) if (p && p !== this) p.post({ type: 'replay', t: m.t, playing: m.playing, speed: m.speed });
         break;
+      case 'peek': {
+        // only files of the analyzed graph: the view cannot ask for anything else on disk
+        const abs = this.service.abs(m.file);
+        const text = abs ? await sourceText(abs) : undefined;
+        const peek = text === undefined ? null : peekLines(text, m.line, { endLine: m.endLine, count: m.count, lead: m.count === 1 ? 0 : 4 });
+        this.post({ type: 'peek', req: m.req, peek });
+        break;
+      }
       case 'open': {
         const abs = this.service.abs(m.file);
         if (!abs) return;

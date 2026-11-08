@@ -6,6 +6,7 @@ import type { Overlay } from './overlay';
 import type { PEdge, PNode, Projection } from './projection';
 import { threadColor, type RuntimeOverlay } from './traceview';
 import {
+  clipLabel,
   HEADER_H,
   labelOf,
   roundedPath,
@@ -270,9 +271,11 @@ export class Renderer {
       const pts = this.current.layout.routes.get(edge.id);
       if (!pts || pts.length < 2) continue;
       const mid = midpoint(pts);
-      const w = Math.ceil(measure(text, '10px var(--cc-mono)')) + 12;
+      const shown = clipLabel(text);
+      const w = Math.ceil(measure(shown, '10px var(--cc-mono)')) + 12;
+      // hovering the label is hovering its wire: the tooltip has the whole text
       out.push(
-        `<g class="dl k-${edge.kind}" transform="translate(${mid.x - w / 2},${mid.y - 8})"><rect width="${w}" height="16" rx="8"/><text x="${w / 2}" y="11.3" text-anchor="middle">${esc(text)}</text></g>`,
+        `<g class="dl k-${edge.kind}" data-id="${esc(edge.id)}" data-edge="1" transform="translate(${mid.x - w / 2},${mid.y - 8})"><rect width="${w}" height="16" rx="8"/><text x="${w / 2}" y="11.3" text-anchor="middle">${esc(shown)}</text></g>`,
       );
     }
     this.gLabels.innerHTML = out.join('');
@@ -306,12 +309,14 @@ export class Renderer {
       const k = stack.get(it.node) ?? 0;
       stack.set(it.node, k + 1);
       if (k > 1) continue;
-      const w = Math.ceil(measure(it.text, '10px var(--cc-mono)')) + 12;
+      const shown = clipLabel(it.text);
+      const w = Math.ceil(measure(shown, '10px var(--cc-mono)')) + 12;
       const x = b.x + b.w / 2 - w / 2;
       const y = b.y - 20 - k * 17 - (it.up ? it.age * 8 : 0);
       out.push(
         `<g class="lv" style="opacity:${Math.max(0, 1 - it.age).toFixed(2)}" transform="translate(${x.toFixed(1)},${y.toFixed(1)})">` +
-          `<rect width="${w}" height="15" rx="7.5" style="stroke:${it.color}"/><text x="${w / 2}" y="10.8" text-anchor="middle">${esc(it.text)}</text></g>`,
+          (shown !== it.text ? `<title>${esc(it.text)}</title>` : '') +
+          `<rect width="${w}" height="15" rx="7.5" style="stroke:${it.color}"/><text x="${w / 2}" y="10.8" text-anchor="middle">${esc(shown)}</text></g>`,
       );
     }
     this.gLive.innerHTML = out.join('');

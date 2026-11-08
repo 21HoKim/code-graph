@@ -351,6 +351,21 @@ h3 a.bad, h3 .nocase { text-transform: none; letter-spacing: 0; font-size: 12px;
   box-shadow: 0 6px 18px rgba(0, 0, 0, 0.3);
 }
 .tooltip .mono { font-family: var(--cc-mono); font-size: 10.5px; color: var(--cc-muted); }
+.tooltip.wide { max-width: min(560px, calc(100% - 16px)); }
+.tooltip .peek {
+  margin: 6px 0 0;
+  padding: 5px 8px 5px 0;
+  max-height: 11.5em;
+  overflow: hidden;
+  font: 11px/1.45 var(--cc-mono);
+  color: var(--vscode-editor-foreground, var(--cc-fg));
+  background: var(--vscode-textCodeBlock-background, color-mix(in srgb, var(--cc-bg) 70%, transparent));
+  border-radius: 4px;
+  white-space: pre;
+}
+.tooltip .peek .ln { display: inline-block; width: 3.4em; padding-right: 0.8em; text-align: right; color: var(--cc-muted); user-select: none; }
+.tooltip .peek .hd { font-weight: 600; }
+.tooltip .peek-hint { margin-top: 4px; opacity: 0.8; }
 .busy {
   position: absolute;
   top: 12px;

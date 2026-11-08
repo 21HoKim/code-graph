@@ -18,7 +18,7 @@ const en = {
   tooMany: '{n} blocks is too many for one view. Choose a coarser level or Focus on a block.',
   compact: 'compact wiring',
   fns: '{n} fn', methods: '{n} methods', filesN: '{n} files', lines: '{n} lines',
-  hint: 'Click a block to trace its wires · double-click to open/close · drag to pan · wheel to zoom',
+  hint: 'Click a block to trace its wires · double-click to open/close · Ctrl+click: source · drag to pan · wheel to zoom',
   noResults: 'No matches', decl: 'declaration only', fragmentNote: 'Part of a class implemented in this file',
   verify: 'Verify', verifyHint: 'Compile-check the workspace (gcc/clang -fsyntax-only, Python compile)',
   verifying: 'Verifying', building: 'Building', running: 'Running',
@@ -38,6 +38,7 @@ const en = {
   dataFlow: 'Data passed along', dataTrail: 'Data trail', sightings: 'seen {n}×', sharedAcross: 'used by {n} threads', returned: 'returned',
   passedThrough: 'Passed through', firstSteps: 'First hand-overs',
   traceCapped: 'Detailed events stop after {n}; call counts cover the whole run.', output: 'Program output', speed: 'Replay speed', closeTrace: 'Close the trace',
+  peekOpen: '{key}+click or F12: open the source', peekSite: '{key}+click or F12: go to the call',
 };
 export type Strings = typeof en;
 
@@ -61,7 +62,7 @@ const ko: Strings = {
   tooMany: '블록 {n}개는 한 화면에 그리기엔 너무 많아요. 더 높은 단계를 고르거나 블록에 집중해 보세요.',
   compact: '간략 배선',
   fns: '함수 {n}', methods: '메서드 {n}', filesN: '파일 {n}', lines: '{n}줄',
-  hint: '블록 클릭: 전선 추적 · 더블클릭: 펼치기/접기 · 드래그: 이동 · 휠: 확대/축소',
+  hint: '블록 클릭: 전선 추적 · 더블클릭: 펼치기/접기 · Ctrl+클릭: 소스 · 드래그: 이동 · 휠: 확대/축소',
   noResults: '결과 없음', decl: '선언만 있음', fragmentNote: '이 파일에서 구현된 클래스의 일부',
   verify: '검증', verifyHint: '워크스페이스 컴파일 검사 (gcc/clang -fsyntax-only, Python compile)',
   verifying: '검증 중', building: '빌드 중', running: '실행 중',
@@ -81,6 +82,7 @@ const ko: Strings = {
   dataFlow: '전달된 데이터', dataTrail: '데이터 경로', sightings: '{n}번 등장', sharedAcross: '스레드 {n}개가 사용', returned: '반환',
   passedThrough: '거쳐 간 함수', firstSteps: '처음 전달된 순서',
   traceCapped: '자세한 이벤트는 {n}개까지만 기록, 호출 횟수는 전체 실행 기준이에요.', output: '프로그램 출력', speed: '재생 속도', closeTrace: '추적 닫기',
+  peekOpen: '{key}+클릭 또는 F12: 소스 열기', peekSite: '{key}+클릭 또는 F12: 호출한 줄로 이동',
 };
 
 let dict: Strings = en;

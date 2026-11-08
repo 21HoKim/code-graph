@@ -33,6 +33,7 @@ import { Renderer, esc } from './render';
 import { Timeline } from './timeline';
 import { RuntimeMap, TraceModel, argsText, augmentGraph, fmtNs, retText, threadColor, valText } from './traceview';
 import type { LiveUpdate } from '../core/live';
+import type { Peek } from '../core/peek';
 import type { RunTrace } from '../core/trace';
 import { Viewport } from './viewport';
 
@@ -257,6 +258,13 @@ class App {
   private live: { node: string; text: string; color: string; born: number; up?: boolean }[] = [];
   private follow: string | null = null;
   private soloThread: number | null = null;
+  /** Hover previews of source lines from the host, by `file:line:count`; the one the tooltip waits for. */
+  private peeks = new Map<string, Peek | null>();
+  private peekAsked = new Map<number, string>();
+  private peekReq = 0;
+  private peekTimer = 0;
+  private peekWant = '';
+  private lastHover?: PointerEvent;
 
   // DOM
   private root = document.getElementById('app') ?? document.body.appendChild(h('div', { id: 'app' }));
@@ -291,8 +299,10 @@ class App {
         this.renderer.setTransform(this.vp.x, this.vp.y, this.vp.k);
         this.flow.setTransform(this.vp.x, this.vp.y, this.vp.k);
       },
-      onTap: (target) => this.onTap(target),
-      onDoubleTap: (target) => this.onDoubleTap(target),
+      onTap: (target, ev) => this.onTap(target, ev),
+      onDoubleTap: (target, ev) => {
+        if (!ev.ctrlKey && !ev.metaKey) this.onDoubleTap(target);
+      },
     });
     new ResizeObserver(() => {
       this.flow.resize();
@@ -360,6 +370,9 @@ class App {
       case 'live':
         if (m.state === 'end') this.endLive();
         else if (m.update) this.applyLive(m.update);
+        break;
+      case 'peek':
+        this.gotPeek(m.req, m.peek);
         break;
       case 'error':
         this.showNotice(m.message, 8000);
@@ -1020,8 +1033,17 @@ class App {
   // selection & details
   // -------------------------------------------------------------------------
 
-  private onTap(target: Element | null): void {
+  private onTap(target: Element | null, ev?: PointerEvent): void {
     document.querySelector('.pop.wires')?.remove();
+    // Ctrl+click (⌘+click on macOS), as in the editor: straight to the code
+    if (ev && (ev.ctrlKey || ev.metaKey)) {
+      const el = target?.closest('[data-id]');
+      const src = el ? this.sourceOf(el.getAttribute('data-id')!, el.hasAttribute('data-edge')) : undefined;
+      if (src) {
+        this.openLoc(src.file, src.line);
+        return;
+      }
+    }
     if (target?.closest('[data-act=collapse]')) {
       const z = target.closest('[data-id]');
       if (z) this.toggle(z.getAttribute('data-id')!);
@@ -1117,8 +1139,8 @@ class App {
     return `(${(e.params ?? []).map((p) => p.type ?? p.name ?? '?').join(', ')})`;
   }
 
-  /** What travels on a wire, compactly. */
-  private wireText(e: PEdge): string {
+  /** What travels on a wire, compactly (`max`: longest text for one link; the tooltip asks for more). */
+  private wireText(e: PEdge, max = 46): string {
     if (e.kind === 'spawn') return `⚡ ${e.rels[0]?.via ?? 'thread'}`;
     if (e.kind === 'inherit') return t('extends');
     if (e.kind === 'include') return '#include';
@@ -1130,7 +1152,7 @@ class App {
       const a = args ? `(${args.join(', ')})` : this.sigTypes(callee);
       const ret = callee?.returns && !/^(void|None)$/.test(callee.returns) ? ` ⟲ ${callee.returns}` : '';
       const text = (e.kind === 'instantiate' ? 'new ' : '') + a + ret + (r.count > 1 ? ` ×${r.count}` : '');
-      return text.length > 46 ? text.slice(0, 45) + '…' : text;
+      return text.length > max ? text.slice(0, max - 1) + '…' : text;
     }
     // aggregated wire: name what is reached through it
     const names = [...new Set(e.rels.map((r) => this.entities.get(e.kind === 'inherit' ? r.from : r.to)?.name ?? '?'))];
@@ -2008,19 +2030,22 @@ class App {
 
   private onHover(ev: PointerEvent): void {
     if (ev.buttons) return;
+    this.lastHover = ev;
     const el = (ev.target as Element)?.closest?.('[data-id]');
     if (!el || !this.proj) {
       this.tooltip.hidden = true;
+      this.wantPeek(null);
       return;
     }
     const id = el.getAttribute('data-id')!;
+    const src = this.sourceOf(id, el.hasAttribute('data-edge'));
     let html = '';
     if (el.hasAttribute('data-edge')) {
       const e = this.proj.edges.find((x) => x.id === id);
       if (!e) return;
       const a = this.proj.nodes.get(e.src)!.t.label;
       const b = this.proj.nodes.get(e.dst)!.t.label;
-      html = `<b>${esc(KIND_ICON[e.kind])} ${esc(a)} → ${esc(b)}</b> <span class="mono">×${e.count} · ${esc(t(e.conf))}</span><div class="mono">${esc(this.wireText(e))}</div>`;
+      html = `<b>${esc(KIND_ICON[e.kind])} ${esc(a)} → ${esc(b)}</b> <span class="mono">×${e.count} · ${esc(t(e.conf))}</span><div class="mono">${esc(this.wireText(e, 200))}</div>`;
     } else {
       const n = this.proj.nodes.get(id);
       if (!n) return;
@@ -2036,13 +2061,80 @@ class App {
       else if (st?.state === 'affected') html += `<div class="tip-warn">⚠ ${esc(t('dependsOn'))} +${st.dist}</div>`;
       else if (st?.state === 'unpowered') html += `<div class="mono">○ ${esc(t('legendUnpowered'))}</div>`;
     }
+    const peek = this.peekHtml(src);
+    html += peek;
     const r = this.stage.getBoundingClientRect();
+    this.tooltip.classList.toggle('wide', !!peek);
     this.tooltip.innerHTML = html;
     this.tooltip.hidden = false;
     const x = Math.min(ev.clientX - r.left + 14, r.width - this.tooltip.offsetWidth - 8);
     const y = Math.min(ev.clientY - r.top + 16, r.height - this.tooltip.offsetHeight - 8);
     this.tooltip.style.left = `${Math.max(4, x)}px`;
     this.tooltip.style.top = `${Math.max(4, y)}px`;
+  }
+
+  /** Where Ctrl/Cmd+click and F12 go: a block's definition, or the line of a wire's (first) call. */
+  private sourceOf(id: string, edge: boolean): { file: string; line: number; endLine?: number; site: boolean } | undefined {
+    if (edge) {
+      const e = this.proj?.edges.find((x) => x.id === id);
+      const site = e?.rels.find((r) => r.sites?.length)?.sites?.[0];
+      return site ? { file: site.file, line: site.line, site: true } : undefined;
+    }
+    const loc = this.proj?.nodes.get(id)?.t.loc;
+    return loc ? { file: loc.file, line: loc.line, endLine: loc.endLine, site: false } : undefined;
+  }
+
+  /** The source lines for the tooltip if the host already sent them; otherwise asked for after a short rest. */
+  private peekHtml(src: ReturnType<App['sourceOf']>): string {
+    if (!src || this.settings?.host === false) {
+      this.wantPeek(null);
+      return '';
+    }
+    const count = src.site ? 1 : 6;
+    const key = `${src.file}:${src.line}:${count}`;
+    const mod = /Mac|iPhone|iPad/.test(navigator.platform) ? '⌘' : 'Ctrl';
+    const hint = `<div class="mono peek-hint">${esc(t(src.site ? 'peekSite' : 'peekOpen', { key: mod }))}</div>`;
+    if (!this.peeks.has(key)) {
+      this.wantPeek(key, () => api.postMessage({ type: 'peek', req: this.askPeek(key), file: src.file, line: src.line, endLine: src.endLine, count }));
+      return hint;
+    }
+    this.wantPeek(null);
+    const p = this.peeks.get(key);
+    if (!p?.lines.length) return hint;
+    const rows = p.lines.map((l, i) => {
+      const n = p.first + i;
+      const row = `<span class="ln">${n}</span>${esc(l) || ' '}`;
+      return n === src.line ? `<span class="hd">${row}</span>` : row;
+    });
+    if (p.more && !src.site) rows.push('<span class="ln"> </span>…');
+    return `<pre class="peek">${rows.join('\n')}</pre>${hint}`;
+  }
+
+  /** Ask the host for `key` once the pointer rests on it; null cancels. */
+  private wantPeek(key: string | null, ask?: () => void): void {
+    if (key === this.peekWant) return;
+    clearTimeout(this.peekTimer);
+    this.peekWant = key ?? '';
+    if (key && ask) this.peekTimer = window.setTimeout(ask, 220);
+  }
+
+  private askPeek(key: string): number {
+    const req = ++this.peekReq;
+    this.peekAsked.set(req, key);
+    return req;
+  }
+
+  private gotPeek(req: number, peek: Peek | null): void {
+    const key = this.peekAsked.get(req);
+    this.peekAsked.delete(req);
+    if (key === undefined) return;
+    if (this.peeks.size > 300) this.peeks.delete(this.peeks.keys().next().value!);
+    this.peeks.set(key, peek);
+    // still hovering what asked for it: show it now
+    if (key === this.peekWant && !this.tooltip.hidden && this.lastHover) {
+      this.peekWant = '';
+      this.onHover(this.lastHover);
+    }
   }
 
   private onKey(e: KeyboardEvent): void {
@@ -2065,9 +2157,12 @@ class App {
       const l = this.levels()[Number(e.key) - 1];
       if (l) this.setLevel(l);
     }
-    else if (e.key === 'Enter' && this.state.selected) {
-      const loc = this.proj?.nodes.get(this.state.selected)?.t.loc;
-      if (loc) this.openLoc(loc.file, loc.line);
+    else if ((e.key === 'Enter' || e.key === 'F12') && (this.state.selected || this.selectedEdge)) {
+      const src = this.selectedEdge ? this.sourceOf(this.selectedEdge, true) : this.sourceOf(this.state.selected!, false);
+      if (src) {
+        e.preventDefault();
+        this.openLoc(src.file, src.line);
+      }
     }
   }
 }
