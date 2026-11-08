@@ -39,6 +39,6 @@ export type WebviewMessage =
   | { type: 'reanalyze' }
   | { type: 'exportGraph' }
   | { type: 'verify' }
-  | { type: 'runTrace' }
+  | { type: 'runTrace'; compose?: boolean }
   | { type: 'loadTrace' }
   | { type: 'clearTrace' };

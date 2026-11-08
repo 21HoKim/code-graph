@@ -13,6 +13,7 @@ import { spawn, type ChildProcess } from 'child_process';
 import * as fs from 'fs';
 import * as os from 'os';
 import * as path from 'path';
+import { guessLibraries, libraryDirFlags, libraryFlags, type BuildTarget, type LibraryGuess } from './buildinfo';
 import type { Parsers } from './extract';
 import { instrumentSources } from './instrument';
 import type { CodeGraph, Diagnostic, Entity } from './model';
@@ -43,6 +44,11 @@ export interface RunInput {
   compileCommands?: CompileCommand[];
   buildFlags: string[];
   linkFlags: string[];
+  /**
+   * The program as the project's build system makes it (make / CMake): exact sources, flags and
+   * libraries, and the directory it runs from. Without it the units come from the static graph.
+   */
+  target?: BuildTarget;
   /** Directory holding python/cg_tracer.py and c/cg_trace.{h,c} + c/cg_trace_cxx.cpp. */
   runtimeDir: string;
   /** Scratch directory for the instrumented build and the trace (wiped). */
@@ -128,7 +134,7 @@ export async function runAndTrace(o: RunInput): Promise<RunResult> {
   o.onStage?.('run', command);
   o.log?.(`$ ${command}`);
   const started = new Date().toISOString();
-  const cwd = o.cwd ? path.resolve(o.root, o.cwd) : o.root;
+  const cwd = o.cwd ? path.resolve(o.root, o.cwd) : (o.target?.dir ?? o.root);
   const r = await runProgram(cmd, args, { cwd, env, timeoutMs: o.timeoutMs, signal: o.signal });
   const output = r.output;
   if (r.error) return fail('run', `could not start ${cmd}: ${r.error}`, output);
@@ -188,8 +194,23 @@ async function buildNative(o: RunInput): Promise<NativeBuild> {
   o.log?.(`instrumented ${inst.fns.length} functions in ${inst.instrumented} files${inst.skipped.length ? ` (${inst.skipped.length} skipped)` : ''}`);
 
   const byRel = new Map(native.map((f) => [f.rel, f]));
-  let units = selectUnits(o.graph, main, native);
-  const ccdb = new Map((o.compileCommands ?? []).map((c) => [path.normalize(c.file), c]));
+  const target = o.target;
+  const rootRel = (abs: string): string | undefined => {
+    const rel = path.relative(o.root, abs).split(path.sep).join('/');
+    return rel.startsWith('..') || path.isAbsolute(rel) ? undefined : rel;
+  };
+  // the build system says which sources make the program; otherwise follow the static graph from main
+  const outside: CompileCommand[] = [];
+  let units: string[] = [];
+  if (target) {
+    for (const u of target.units) {
+      const rel = rootRel(path.resolve(u.directory, u.file));
+      if (rel && byRel.has(rel)) units.push(rel);
+      else outside.push(u); // generated or out-of-tree sources: built as they are
+    }
+    o.log?.(`build: ${target.from} program ${target.name} in ${rootRel(target.dir) || '.'} · ${units.length + outside.length} sources${target.linkFlags.length ? ` · ${target.linkFlags.join(' ')}` : ''}`);
+  } else units = selectUnits(o.graph, main, native);
+  const ccdb = new Map([...(o.compileCommands ?? []), ...(target?.units ?? [])].map((c) => [path.normalize(path.resolve(c.directory, c.file)), c]));
   const rt = path.join(o.runtimeDir, 'c');
   const hdr = path.join(rt, 'cg_trace.h');
   const relOf = (abs: string): string | undefined => {
@@ -277,6 +298,16 @@ async function buildNative(o: RunInput): Promise<NativeBuild> {
   };
 
   if (!(await compileAll(units))) return { fns: inst.fns, diagnostics: dedupe(diagnostics), notes, log };
+  for (const u of outside) {
+    const obj = path.join(objDir, `x${objects.size}-${path.basename(u.file).replace(/\W/g, '_')}.o`);
+    const r0 = await run(u.args[0], fromCompileCommand(u, path.resolve(u.directory, u.file), obj, o.root), { cwd: u.directory, timeoutMs: 180_000, signal: o.signal });
+    if (r0.code !== 0) {
+      log += `$ ${u.args[0]} … ${u.file}\n${clip(r0.stderr)}\n`;
+      notes.push(`${path.basename(u.file)} (outside the workspace) did not compile: ${r0.stderr.trim().split('\n')[0] ?? ''}`);
+      return { fns: inst.fns, diagnostics: dedupe(diagnostics), notes, log };
+    }
+    objects.set('\0' + u.file, obj);
+  }
 
   // runtime
   const anyCpp = [...objects.keys()].some((u) => byRel.get(u)?.lang === 'cpp');
@@ -297,25 +328,63 @@ async function buildNative(o: RunInput): Promise<NativeBuild> {
     if (r.code === 0) rtObjs.push(rtX);
   }
 
-  // link (one retry: pull in units that define what the linker misses)
-  const linker = anyCpp ? tc.cxx : tc.cc;
+  // link; when symbols are missing, retry with the workspace units that define them (no build
+  // system info) or with the libraries that usually do (OpenSSL, Boost.JSON, libm, …)
+  const linker = target?.linker ?? (anyCpp ? tc.cxx : tc.cc);
   if (!linker) return { fns: inst.fns, diagnostics, notes: [...notes, 'no linker'], log };
-  const stem = path.basename(o.entry.file).replace(/\.[^.]+$/, '').replace(/[^\w.-]/g, '_') || 'program';
+  const stem = (target?.name ?? path.basename(o.entry.file).replace(/\.[^.]+$/, '')).replace(/[^\w.-]/g, '_') || 'program';
   const exe = path.join(o.workDir, process.platform === 'win32' ? `${stem}.exe` : stem);
-  for (let attempt = 0; attempt < 2; attempt++) {
-    const linkArgs = [...objects.values(), ...rtObjs, '-o', exe, ...(process.platform === 'win32' ? [] : ['-pthread']), ...o.linkFlags];
+  const baseFlags = [...(process.platform === 'win32' ? [] : ['-pthread']), ...(target?.linkFlags ?? []), ...o.linkFlags];
+  let guessed: string[] = [];
+  let guesses: LibraryGuess[] = [];
+  const notInstalled = new Set<string>();
+  for (let attempt = 0; attempt < 8; attempt++) {
+    const linkArgs = [...objects.values(), ...rtObjs, '-o', exe, ...baseFlags, ...guessed];
     if ([...objects.keys()].some((u) => byRel.get(u)?.lang === 'c')) linkArgs.push('-lm');
     r = await run(linker, linkArgs, { cwd: o.workDir, timeoutMs: 180_000, signal: o.signal });
-    if (r.code === 0) return { exe, fns: inst.fns, diagnostics, notes, log };
-    log += `$ ${linker} ${linkArgs.join(' ')}\n${r.stderr}\n`;
+    if (r.code === 0) {
+      if (guessed.length) {
+        const msg = `linked with ${guessed.join(' ')} (${guesses.map((g) => g.label).join(', ')}, guessed from the undefined symbols) — add them to codeGraph.run.linkFlags to skip the guess`;
+        notes.push(msg);
+        o.log?.('link: ' + msg);
+      }
+      return { exe, fns: inst.fns, diagnostics, notes, log };
+    }
+    log += `$ ${path.basename(linker)} ${linkArgs.map((a) => (a.startsWith(o.workDir) ? path.relative(o.workDir, a) : a)).join(' ')}\n${clip(r.stderr)}\n`;
     const missing = parseLinkerErrors(r.stderr + r.stdout);
-    const extra = attempt === 0 ? unitsDefining(o.graph, missing, byRel).filter((u) => !objects.has(u)) : [];
-    if (extra.length) {
-      o.log?.(`link: adding ${extra.join(', ')}`);
-      units = [...units, ...extra];
-      if (await compileAll(extra)) continue;
+    if (!target) {
+      // each unit added can need more (link.cpp → proto.cpp): repeat while new ones turn up
+      const extra = unitsDefining(o.graph, missing, byRel).filter((u) => !objects.has(u));
+      if (extra.length) {
+        o.log?.(`link: adding ${extra.join(', ')}`);
+        units = [...units, ...extra];
+        if (await compileAll(extra)) continue;
+        break;
+      }
+    }
+    const notFound = [...(r.stderr + r.stdout).matchAll(/cannot find -l(\S+?)[:\s]/g)].map((m) => m[1]);
+    for (const l of notFound) notInstalled.add(l);
+    if (notFound.length && guessed.some((f) => notFound.includes(f.slice(2)))) {
+      // a guessed library that is not installed: drop it, report it below
+      guessed = guessed.filter((f) => !notFound.includes(f.slice(2)));
+      continue;
+    }
+    const external = missing.filter((sym) => !unitsDefining(o.graph, [sym], byRel).length);
+    const fresh = guessLibraries(external).filter((g) => !guesses.some((x) => x.label === g.label));
+    const more = libraryFlags(fresh, [...baseFlags, ...guessed]);
+    if (more.length && attempt < 7) {
+      guesses = [...guesses, ...fresh];
+      const dirs = libraryDirFlags(more.filter((f) => f.startsWith('-l')).map((f) => f.slice(2)), [...baseFlags, ...guessed]);
+      guessed = [...guessed, ...dirs, ...more];
+      o.log?.(`link: ${missing.length} undefined symbols look like ${fresh.map((g) => g.label).join(', ')} — retrying with ${[...dirs, ...more].join(' ')}`);
+      continue;
     }
     diagnostics.push(...linkerDiagnostics(o.graph, missing, r.stderr));
+    const libDiag = libraryDiagnostic(main, external, [...notInstalled], [...baseFlags, ...guessed]);
+    if (libDiag) {
+      diagnostics.push(libDiag);
+      notes.push(libDiag.message);
+    }
     break;
   }
   return { fns: inst.fns, diagnostics: dedupe(diagnostics), notes, log };
@@ -361,19 +430,53 @@ export function selectUnits(g: CodeGraph, main: Entity, files: { rel: string }[]
   return [...seen].filter((f) => tus.has(f));
 }
 
+/** "ns::C::f[abi:cxx11](int) const" → "ns::C::f" (what the static graph calls it). */
+function symbolName(s: string): string {
+  return s
+    .replace(/^(non-virtual thunk to|typeinfo for|vtable for|VTT for|construction vtable for)\s+/, '')
+    .replace(/\[abi:[^\]]*\]/g, '')
+    .replace(/\(.*$/, '')
+    .trim();
+}
+
 function unitsDefining(g: CodeGraph, symbols: string[], byRel: Map<string, unknown>): string[] {
   const out = new Set<string>();
   for (const s of symbols) {
-    const q = s.replace(/\(.*$/, '').trim();
+    const q = symbolName(s);
     for (const e of g.entities) if (e.def && (e.qname === q || e.name === q) && byRel.has(e.def.file) && TU.test(e.def.file)) out.add(e.def.file);
   }
   return [...out];
 }
 
+/** A failed link with library symbols, reported on main(): which libraries, and what to add. */
+function libraryDiagnostic(main: Entity, external: string[], notFound: string[], flags: string[]): Diagnostic | undefined {
+  if (!external.length && !notFound.length) return undefined;
+  const loc = main.def ?? main.decl;
+  if (!loc) return undefined;
+  const guesses = guessLibraries(external);
+  const parts: string[] = [];
+  if (external.length) {
+    const what = guesses.length
+      ? guesses.map((g) => `${g.label} (${g.symbols.slice(0, 2).join(', ')}${g.count > 2 ? ', …' : ''})`).join('; ')
+      : external.slice(0, 3).join(', ') + (external.length > 3 ? ', …' : '');
+    parts.push(`link failed: ${external.length} undefined symbol${external.length === 1 ? '' : 's'} from ${what}`);
+  }
+  if (notFound.length) parts.push(`the linker cannot find ${notFound.map((l) => '-l' + l).join(' ')} (not installed, or its directory needs -L in codeGraph.run.linkFlags)`);
+  const want = libraryFlags(guesses, flags).filter((f) => !notFound.includes(f.slice(2)));
+  if (want.length) parts.push(`add ${want.join(' ')} to codeGraph.run.linkFlags`);
+  return { file: loc.file, line: loc.line, severity: 'error', source: 'linker', message: parts.join(' — '), target: main.id };
+}
+
+/** First lines of a long compiler/linker message, with a count of the rest. */
+function clip(text: string, lines = 30): string {
+  const all = text.trimEnd().split('\n');
+  return all.length <= lines ? all.join('\n') : [...all.slice(0, lines), `… ${all.length - lines} more lines`].join('\n');
+}
+
 function linkerDiagnostics(g: CodeGraph, symbols: string[], stderr: string): Diagnostic[] {
   const out: Diagnostic[] = [];
   for (const s of symbols) {
-    const q = s.replace(/\(.*$/, '').trim();
+    const q = symbolName(s);
     const e = g.entities.find((x) => x.kind === 'function' && (x.qname === q || (x.name === q && !x.qname.includes('::'))));
     const loc = e?.decl ?? e?.def;
     if (loc) out.push({ file: loc.file, line: loc.line, severity: 'error', source: 'linker', message: `undefined reference to '${s}'`, target: e!.id });

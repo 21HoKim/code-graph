@@ -16,5 +16,13 @@
   "Not a CodeGraph trace: {0}": "CodeGraph 추적 파일이 아니에요: {0}",
   "The compile check found {0} error(s), shown in red on the circuit. Run anyway?": "컴파일 검사에서 오류 {0}개를 찾았어요 (회로도에 빨간색으로 표시). 그래도 실행할까요?",
   "Build failed: {0} error(s), shown in red.": "빌드 실패: 오류 {0}개 (빨간색으로 표시).",
-  "{0} runtime failure(s), shown in red.": "런타임 실패 {0}개 (빨간색으로 표시)."
+  "{0} runtime failure(s), shown in red.": "런타임 실패 {0}개 (빨간색으로 표시).",
+  "codeGraph.run.target \"{0}\" is not built from {1}; pick one.": "codeGraph.run.target \"{0}\"는 {1}로 만드는 프로그램이 아니에요. 목록에서 골라 주세요.",
+  "CodeGraph: which program?": "CodeGraph: 어떤 프로그램을 실행할까요?",
+  "{0} is built into {1} programs": "{0}는 프로그램 {1}개에 들어가요",
+  "{0}: {1} processes, {2} threads, {3} calls traced": "{0}: 프로세스 {1}개, 스레드 {2}개, 호출 {3}개 추적",
+  "No compose file in the workspace (compose.yaml, docker-compose.yml): set codeGraph.run.compose.file.": "워크스페이스에 Compose 파일(compose.yaml, docker-compose.yml)이 없어요. codeGraph.run.compose.file을 설정해 주세요.",
+  "Restart with tracing": "추적하며 다시 시작",
+  "{0} of this Compose project are running. CodeGraph recreates them with tracing and takes the project down when the trace is done.": "이 Compose 프로젝트의 {0}이(가) 실행 중이에요. CodeGraph가 추적을 켜서 다시 만들고, 추적이 끝나면 프로젝트를 내려요.",
+  "Cancelled.": "취소했어요."
 }

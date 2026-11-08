@@ -20,8 +20,9 @@ import sys
 import threading
 import time
 
-_now = time.perf_counter_ns
+_now = time.perf_counter_ns  # CLOCK_MONOTONIC on Linux, like the C/C++ runtime
 _T0 = _now()
+_WALL0 = time.time_ns()
 _MISSING = object()
 _SKIP_DIRS = {"site-packages", "dist-packages", ".venv", "venv", "env", "__pycache__", "node_modules", ".tox", ".git"}
 _PRIM = (int, float, str, bool, type(None))
@@ -33,7 +34,7 @@ class Tracer:
         self.self_file = os.path.realpath(__file__)
         self.max_events = max_events
         self.values = values
-        self.out = open(out, "w", encoding="utf-8")
+        self.out = open(out.replace("{pid}", str(os.getpid())), "w", encoding="utf-8")
         # re-entrant: sys.monitoring also fires for code that the callbacks themselves run (json, os.path …)
         self.lock = threading.RLock()
         self.buf = []
@@ -47,7 +48,7 @@ class Tracer:
         self.edges = {}
         self.done = False
         self.write({"k": "h", "schema": "code-graph-trace/1", "lang": "python", "root": self.root[:-1], "clock": "ns",
-                    "pid": os.getpid(), "python": sys.version.split()[0], "argv": sys.argv[1:]})
+                    "pid": os.getpid(), "python": sys.version.split()[0], "argv": sys.argv[1:], "mono": _T0, "wall": _WALL0})
 
     # -- output ---------------------------------------------------------------
     def write(self, obj):

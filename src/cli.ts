@@ -7,10 +7,13 @@
  *   --verify   also compile-check with the real toolchain (gcc/clang -fsyntax-only, python compile) and
  *              store the result in graph.compile; exits with code 2 when errors were found (handy in CI)
  *
- *   node dist/cli.js trace <dir> [--entry FILE] [-o run.json] [--timeout S] [--max-events N] [--no-values] [-- ARGS…]
+ *   node dist/cli.js trace <dir> [--entry FILE] [--target NAME] [-o run.json] [--timeout S] [--max-events N] [--no-values] [-- ARGS…]
+ *   node dist/cli.js trace <dir> --compose [FILE] [--service NAME]… [-o run.json] [--timeout S]
  *
  *              Run & Trace without VS Code: build (C/C++, instrumented) or start (Python) the program,
  *              record calls per thread with argument values, and write the trace model the viewer replays.
+ *              --target picks the program when the makefile / CMake builds the entry into several;
+ *              --compose runs the directory's Compose project with every service that mounts it traced.
  */
 import * as fs from 'fs';
 import * as os from 'os';
@@ -18,7 +21,9 @@ import * as path from 'path';
 import { AnalysisSession, walk } from './core/analyze';
 import { ParsePool, defaultWorkerCount } from './core/pool';
 import { loadParsers } from './core/extract';
-import { findEntries, runAndTrace } from './core/runner';
+import { readBuildTargets, targetsFor } from './core/buildinfo';
+import { findComposeFile, runComposeTrace } from './core/compose';
+import { findEntries, runAndTrace, type RunResult } from './core/runner';
 import { detectToolchain, loadCompileCommands, verifyWorkspace } from './core/verify';
 
 async function main(): Promise<void> {
@@ -102,6 +107,9 @@ async function traceMain(argv: string[]): Promise<void> {
   let maxEvents = 200000;
   let values = true;
   let progArgs: string[] = [];
+  let targetArg: string | undefined;
+  let compose: string | true | undefined;
+  const services: string[] = [];
   for (let i = 0; i < argv.length; i++) {
     const a = argv[i];
     if (a === '--') {
@@ -109,6 +117,9 @@ async function traceMain(argv: string[]): Promise<void> {
       break;
     } else if (a === '-o' || a === '--out') out = argv[++i];
     else if (a === '--entry') entryArg = argv[++i];
+    else if (a === '--target') targetArg = argv[++i];
+    else if (a === '--compose') compose = argv[i + 1] && /\.ya?ml$/.test(argv[i + 1]) ? argv[++i] : true;
+    else if (a === '--service') services.push(argv[++i]);
     else if (a === '--timeout') timeout = Number(argv[++i]);
     else if (a === '--max-events') maxEvents = Number(argv[++i]);
     else if (a === '--no-values') values = false;
@@ -120,35 +131,69 @@ async function traceMain(argv: string[]): Promise<void> {
   const { files } = walk(root, { maxFiles: 5000 });
   const session = new AnalysisSession(root, pool);
   const graph = await session.analyze(files);
-  const entries = findEntries(graph);
-  const entry = entryArg ? entries.find((e) => e.file === entryArg || e.label.includes(entryArg!)) : entries[0];
-  if (!entry) {
-    pool.dispose();
-    throw new Error(`no entry point${entryArg ? ` matching ${entryArg}` : ''}; found: ${entries.map((e) => e.label).join(', ') || 'none'}`);
-  }
+  const fileList = files
+    .filter((f) => !/\.pyi$/i.test(f.rel))
+    .map((f) => ({ abs: f.abs, rel: f.rel, lang: (/\.py$/i.test(f.rel) ? 'python' : graph.files.find((x) => x.path === f.rel)?.lang === 'c' ? 'c' : 'cpp') as 'c' | 'cpp' | 'python' }));
   const t0 = Date.now();
   const workDir = path.join(os.tmpdir(), `code-graph-run-${process.pid}`);
-  const r = await runAndTrace({
-    root,
-    graph,
-    files: files
-      .filter((f) => !/\.pyi$/i.test(f.rel))
-      .map((f) => ({ abs: f.abs, rel: f.rel, lang: (/\.py$/i.test(f.rel) ? 'python' : graph.files.find((x) => x.path === f.rel)?.lang === 'c' ? 'c' : 'cpp') as 'c' | 'cpp' | 'python' })),
-    entry,
-    args: progArgs,
-    toolchain: detectToolchain({ cc: process.env.CC, cxx: process.env.CXX }),
-    includePaths: session.includePaths,
-    compileCommands: loadCompileCommands(root),
-    buildFlags: [],
-    linkFlags: [],
-    runtimeDir: path.join(__dirname, 'runtime'),
-    workDir,
-    parsers: () => loadParsers(path.join(__dirname, 'wasm')),
-    timeoutMs: timeout * 1000,
-    maxEvents,
-    values,
-    log: (l) => console.error(l),
-  });
+  let r: Omit<RunResult, 'stage'>;
+  let label: string;
+  if (compose) {
+    const composeFile = compose === true ? findComposeFile(root) : path.resolve(compose);
+    if (!composeFile) {
+      pool.dispose();
+      throw new Error(`no compose file in ${root}`);
+    }
+    label = path.relative(root, composeFile) || composeFile;
+    r = await runComposeTrace({
+      root,
+      graph,
+      files: fileList,
+      composeFile,
+      services,
+      runtimeDir: path.join(__dirname, 'runtime'),
+      workDir,
+      parsers: () => loadParsers(path.join(__dirname, 'wasm')),
+      timeoutMs: timeout * 1000,
+      startTimeoutMs: 600_000,
+      maxEvents,
+      values,
+      log: (l) => console.error(l),
+    });
+  } else {
+    const entries = findEntries(graph);
+    const entry = entryArg ? entries.find((e) => e.file === entryArg || e.label.includes(entryArg!)) : entries[0];
+    if (!entry) {
+      pool.dispose();
+      throw new Error(`no entry point${entryArg ? ` matching ${entryArg}` : ''}; found: ${entries.map((e) => e.label).join(', ') || 'none'}`);
+    }
+    const compileCommands = loadCompileCommands(root);
+    const built = entry.kind === 'native' ? targetsFor((await readBuildTargets(root, { compileCommands })).targets, path.join(root, ...entry.file.split('/'))) : [];
+    const target = targetArg ? built.find((t) => t.name === targetArg) : built[0];
+    if (targetArg && !target) throw new Error(`no program "${targetArg}" is built from ${entry.file}; found: ${built.map((t) => t.name).join(', ') || 'none'}`);
+    if (!targetArg && built.length > 1) console.error(`note: ${entry.file} goes into ${built.map((t) => t.name).join(', ')} — running ${target!.name} (--target to choose)`);
+    label = target ? `${entry.label} · ${target.name}` : entry.label;
+    r = await runAndTrace({
+      root,
+      graph,
+      files: fileList,
+      entry,
+      args: progArgs,
+      toolchain: detectToolchain({ cc: process.env.CC, cxx: process.env.CXX }),
+      includePaths: session.includePaths,
+      compileCommands,
+      buildFlags: [],
+      linkFlags: [],
+      target,
+      runtimeDir: path.join(__dirname, 'runtime'),
+      workDir,
+      parsers: () => loadParsers(path.join(__dirname, 'wasm')),
+      timeoutMs: timeout * 1000,
+      maxEvents,
+      values,
+      log: (l) => console.error(l),
+    });
+  }
   pool.dispose();
   fs.rmSync(workDir, { recursive: true, force: true });
   for (const n of r.notes) console.error('note:', n);
@@ -156,7 +201,7 @@ async function traceMain(argv: string[]): Promise<void> {
   if (r.trace) {
     const tr = r.trace;
     console.error(
-      `${entry.label}: exit ${tr.exit.code ?? tr.exit.signal ?? '?'}${tr.exit.crash ? ` (${tr.exit.crash})` : ''} · ${tr.threads.length} threads · ${tr.spans.t.length} calls · ` +
+      `${label}: exit ${tr.exit.code ?? tr.exit.signal ?? '?'}${tr.exit.crash ? ` (${tr.exit.crash})` : ''}${tr.procs ? ` · ${tr.procs.length} processes` : ''} · ${tr.threads.length} threads · ${tr.spans.t.length} calls · ` +
         `${tr.objects.length} shared objects · ${(tr.durationNs / 1e6).toFixed(1)} ms traced · ${Date.now() - t0} ms total`,
     );
     const json = JSON.stringify({ ...tr, diagnostics: [...r.buildDiagnostics, ...r.runtimeDiagnostics], notes: r.notes });

@@ -32,7 +32,7 @@
   "cfg.verifyCxx": "C++ compiler. Empty = `$CXX`, then `c++`, `g++`, `clang++`.",
   "cfg.verifyPython": "Python 3 interpreter for checks and Run & Trace. Empty = `python3`, then `python` on PATH (the Python extension's selected interpreter is not picked up yet).",
   "cfg.verifyFlags": "Extra compiler flags for checks (e.g. `-DDEBUG`, `-std=c++20`).",
-  "cfg.verifyCcdb": "Use the flags from `compile_commands.json` when the project has one.",
+  "cfg.verifyCcdb": "Use the project's build flags: `compile_commands.json`, or the flags its makefile passes (read with a `make -n` dry run).",
   "cfg.verifyEditor": "Also mark errors reported by language servers (C/C++, clangd, Pylance…).",
   "cfg.verifyTimeout": "Time limit per translation unit.",
   "cfg.runEntry": "What Run & Trace starts: a Python file, or a C/C++ file containing `main`. Empty = the active editor's entry point, or pick from a list.",
@@ -43,5 +43,13 @@
   "cfg.runLinkFlags": "Extra link flags/libraries for the traced C/C++ build (e.g. `-lm`, `-lssl`). `-pthread` is always added on Linux/macOS.",
   "cfg.runTimeout": "Stop the traced program after this many seconds (the trace up to that point is kept).",
   "cfg.runMaxEvents": "Detailed events recorded per run; after that only call counts are kept.",
-  "cfg.runValues": "Record argument/return values and object identities (data tracking). Turn off for lower overhead."
+  "cfg.runValues": "Record argument/return values and object identities (data tracking). Turn off for lower overhead.",
+  "cmd.runCompose": "Run & Trace with Docker Compose",
+  "welcome.compose": "This workspace has a Compose file: run its services in their own containers and network, and see every container on one timeline.\n[Run & Trace with Docker Compose](command:codeGraph.runCompose)",
+  "cfg.runUseBuildSystem": "Build C/C++ programs the way the project does: sources, defines, libraries and the directory to run from come from the makefile (`make -n`) or CMake (`CMakeFiles/*/link.txt`).",
+  "cfg.runTarget": "Program to run when the entry file is built into several (e.g. `node-a` and `node-b` from one `main.cpp`). Empty = ask.",
+  "cfg.composeFile": "Compose file for **Run & Trace with Docker Compose** (workspace-relative). Empty = `compose.yaml` / `docker-compose.yml` at the root.",
+  "cfg.composeServices": "Services to trace. Empty = every service that mounts the workspace (e.g. `- ./:/app`); the others still run.",
+  "cfg.composeStartTimeout": "Time allowed for image builds and the builds inside the containers, before the first traced program starts. `codeGraph.run.timeoutSeconds` counts from then.",
+  "cfg.composeDocker": "The docker CLI (with Compose v2) to use."
 }

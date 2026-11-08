@@ -44,6 +44,17 @@ export interface TraceThread {
   entry?: number;
   start: number;
   end?: number;
+  /** Process the thread belongs to (index into RunTrace.procs) in a trace of several processes. */
+  proc?: number;
+}
+
+/** One program of a multi-process trace (e.g. one container of a Compose project). */
+export interface TraceProcess {
+  name: string;
+  pid?: number;
+  exit: RunTrace['exit'];
+  /** Its threads (ids in the merged trace). */
+  threads: number[];
 }
 
 export interface TraceException {
@@ -111,6 +122,13 @@ export interface RunTrace {
   stacks?: { th: number; fns: number[] }[];
   objects: TraceObject[];
   output: string;
+  pid?: number;
+  /** Program file name (C/C++ runtime). */
+  exe?: string;
+  /** Monotonic and wall clock (ns) at time 0, for lining up traces of processes that ran side by side. */
+  clock?: { mono?: number; wall?: number };
+  /** Set when the trace combines several processes (threads are numbered across all of them). */
+  procs?: TraceProcess[];
 }
 
 export interface ParseTraceOptions {
@@ -202,6 +220,7 @@ export function parseTrace(text: string, g: CodeGraph, opts: ParseTraceOptions =
   let edges: [number, number, number, number][] | undefined;
   let end: Record<string, unknown> | undefined;
   let crash: string | undefined;
+  let header: Record<string, unknown> = {};
   const locator = new EntityLocator(g);
   const pyFn = new Map<number, number>();
 
@@ -213,6 +232,7 @@ export function parseTrace(text: string, g: CodeGraph, opts: ParseTraceOptions =
     switch (l.k) {
       case 'h':
         lang = l.lang === 'cpp' ? 'cpp' : l.lang === 'c' ? 'c' : 'python';
+        header = l;
         break;
       case 'f': {
         const file = String(l.file ?? '');
@@ -324,6 +344,8 @@ export function parseTrace(text: string, g: CodeGraph, opts: ParseTraceOptions =
         }
       } else if (kind === 'x' && st.length) span = st[st.length - 1]; // C/C++ crash: still inside
       if (kind === 'r' && isVal(ev[4]) && span >= 0) rets[span] = ev[4];
+      // SIGTERM / SIGINT: the run was stopped (time limit, docker stop), not a failure — the spans end, nothing turns red
+      if (kind === 'x' && lang !== 'python' && (ev[4] === 'SIGTERM' || ev[4] === 'SIGINT')) continue;
       if (kind === 'x') {
         exceptions.push({
           t,
@@ -417,11 +439,21 @@ export function parseTrace(text: string, g: CodeGraph, opts: ParseTraceOptions =
     stacks: stacks.length ? stacks.map((s) => ({ th: s.th, fns: s.fns.map(F).filter((f) => f >= 0) })) : undefined,
     objects: [],
     output: opts.output ?? '',
+    pid: typeof header.pid === 'number' ? header.pid : undefined,
+    exe: typeof header.exe === 'string' && header.exe ? header.exe : undefined,
+    clock: typeof header.mono === 'number' || typeof header.wall === 'number' ? { mono: num(header.mono), wall: num(header.wall) } : undefined,
   };
-  // label objects by what the static graph knows: `this` → its class, a pointer argument → its declared type
+  trace.objects = collectObjects(trace, objectLabeler(trace, g));
+  return trace;
+}
+
+const num = (v: unknown): number | undefined => (typeof v === 'number' && Number.isFinite(v) ? v : undefined);
+
+/** Labels for objects from what the static graph knows: `this` → its class, a pointer argument → its declared type. */
+function objectLabeler(tr: RunTrace, g: CodeGraph): (span: number, role: 'arg' | 'ret' | 'self', name?: string) => string | undefined {
   const ent = new Map(g.entities.map((e) => [e.id, e]));
-  trace.objects = collectObjects(trace, (span, role, name) => {
-    const e = ent.get(fns[spans.fn[span]]?.id ?? '');
+  return (span, role, name) => {
+    const e = ent.get(tr.fns[tr.spans.fn[span]]?.id ?? '');
     if (!e) return undefined;
     if (role === 'self') {
       const cls = e.parent ? ent.get(e.parent) : undefined;
@@ -429,7 +461,149 @@ export function parseTrace(text: string, g: CodeGraph, opts: ParseTraceOptions =
     }
     const p = name ? e.params?.find((x) => x.name === name) : undefined;
     return p?.type?.replace(/\s+/g, ' ');
+  };
+}
+
+/**
+ * One trace from the traces of several processes that ran at the same time (the containers of a
+ * Compose project, a client and its server): one function table, threads numbered across all
+ * processes and named after their process, calls on a common clock, object identities kept apart
+ * per process (the same address in two processes is not the same object).
+ */
+export function mergeTraces(input: { name: string; trace: RunTrace }[], g: CodeGraph, o: { command: string; output?: string; started?: string }): RunTrace {
+  const anchor = (tr: RunTrace) => tr.clock?.mono;
+  // the process that started first comes first (a server before its clients)
+  const start = (tr: RunTrace) => tr.clock?.mono ?? tr.clock?.wall;
+  const parts = input.every((p) => start(p.trace) !== undefined) ? [...input].sort((a, b) => start(a.trace)! - start(b.trace)!) : input;
+  const useMono = parts.every((p) => anchor(p.trace) !== undefined);
+  const useWall = !useMono && parts.every((p) => p.trace.clock?.wall !== undefined);
+  const base = Math.min(...parts.map((p) => (useMono ? anchor(p.trace)! : useWall ? p.trace.clock!.wall! : 0)));
+  const offset = parts.map((p) => (useMono ? anchor(p.trace)! - base : useWall ? p.trace.clock!.wall! - base : 0));
+
+  // one function table: C/C++ parts share the instrumenter's, Python parts number their own
+  const fns: TraceFn[] = [];
+  const fnKey = new Map<string, number>();
+  const fnMap = parts.map((p) =>
+    p.trace.fns.map((f) => {
+      const k = `${f.id}|${f.name}|${f.file ?? ''}|${f.line ?? ''}`;
+      let i = fnKey.get(k);
+      if (i === undefined) {
+        i = fns.length;
+        fns.push({ ...f });
+        fnKey.set(k, i);
+      }
+      return i;
+    }),
+  );
+  const F = (p: number, f: number) => (f >= 0 ? (fnMap[p][f] ?? -1) : f);
+
+  // threads, numbered across processes
+  const threads: TraceThread[] = [];
+  const procs: TraceProcess[] = [];
+  const thMap = parts.map(() => new Map<number, number>());
+  let nextId = 1;
+  parts.forEach((p, pi) => {
+    const ids: number[] = [];
+    for (const th of p.trace.threads) {
+      const id = nextId++;
+      thMap[pi].set(th.id, id);
+      ids.push(id);
+    }
+    for (const th of p.trace.threads) {
+      threads.push({
+        id: thMap[pi].get(th.id)!,
+        name: parts.length > 1 ? `${p.name} · ${th.name}` : th.name,
+        parent: th.parent !== undefined ? thMap[pi].get(th.parent) : undefined,
+        entry: th.entry !== undefined ? F(pi, th.entry) : undefined,
+        start: th.start + offset[pi],
+        end: th.end !== undefined ? th.end + offset[pi] : undefined,
+        proc: pi,
+      });
+    }
+    procs.push({ name: p.name, pid: p.trace.pid, exit: p.trace.exit, threads: ids });
   });
+  const TH = (p: number, th: number) => thMap[p].get(th) ?? th;
+  const ident = (p: number, id: string | null | undefined) => (id && id !== '0x0' && id !== '(nil)' && parts.length > 1 ? `${parts[p].name}/${id}` : id);
+
+  // spans on the common clock, in start order
+  const order: [number, number][] = [];
+  parts.forEach((p, pi) => {
+    for (let i = 0; i < p.trace.spans.t.length; i++) order.push([pi, i]);
+  });
+  const tOf = ([pi, i]: [number, number]) => parts[pi].trace.spans.t[i] + offset[pi];
+  order.sort((a, b) => tOf(a) - tOf(b));
+  const spanMap = parts.map((p) => new Int32Array(p.trace.spans.t.length));
+  order.forEach(([pi, i], k) => (spanMap[pi][i] = k));
+  const spans: Spans = { t: [], end: [], th: [], fn: [], parent: [], depth: [] };
+  const args: Record<number, ArgVal[]> = {};
+  const rets: Record<number, Val> = {};
+  const selfs: Record<number, string> = {};
+  for (const [pi, i] of order) {
+    const s = parts[pi].trace.spans;
+    const k = spans.t.length;
+    spans.t.push(s.t[i] + offset[pi]);
+    spans.end.push(s.end[i] + offset[pi]);
+    spans.th.push(TH(pi, s.th[i]));
+    spans.fn.push(F(pi, s.fn[i]));
+    spans.parent.push(s.parent[i] >= 0 ? spanMap[pi][s.parent[i]] : -1);
+    spans.depth.push(s.depth[i]);
+    const tr = parts[pi].trace;
+    if (tr.args[i]) args[k] = tr.args[i].map((a) => (a[3] ? ([a[0], a[1], a[2], ident(pi, a[3]), a[4]] as ArgVal) : a));
+    if (tr.rets[i]) {
+      const v = tr.rets[i];
+      rets[k] = v[2] ? ([v[0], v[1], ident(pi, v[2]), v[3]] as Val) : v;
+    }
+    if (tr.selfs[i]) selfs[k] = ident(pi, tr.selfs[i])!;
+  }
+
+  const calls = new Map<number, number>();
+  parts.forEach((p, pi) => {
+    for (const [f, n] of p.trace.calls) calls.set(F(pi, f), (calls.get(F(pi, f)) ?? 0) + n);
+  });
+  const crashed = parts.find((p) => p.trace.exit.crash && p.trace.exit.crash !== 'SIGTERM');
+  const failed = parts.find((p) => p.trace.exit.code);
+  const trace: RunTrace = {
+    schema: 1,
+    lang: parts.some((p) => p.trace.lang === 'cpp') ? 'cpp' : (parts[0]?.trace.lang ?? 'cpp'),
+    command: o.command,
+    started: o.started ?? parts[0]?.trace.started ?? new Date().toISOString(),
+    durationNs: Math.max(0, ...parts.map((p, pi) => p.trace.durationNs + offset[pi])),
+    exit: {
+      code: failed?.trace.exit.code ?? (parts.every((p) => p.trace.exit.code === 0) ? 0 : null),
+      crash: crashed ? `${crashed.name}: ${crashed.trace.exit.crash}` : undefined,
+      timedOut: parts.some((p) => p.trace.exit.timedOut),
+      signal: crashed?.trace.exit.signal,
+    },
+    truncated: parts.some((p) => p.trace.truncated),
+    events: parts.reduce((n, p) => n + p.trace.events, 0),
+    dropped: parts.reduce((n, p) => n + p.trace.dropped, 0),
+    fns,
+    threads,
+    spans,
+    args,
+    rets,
+    selfs,
+    exceptions: parts
+      .flatMap((p, pi) =>
+        p.trace.exceptions.map((x) => ({
+          ...x,
+          t: x.t + offset[pi],
+          th: TH(pi, x.th),
+          fn: F(pi, x.fn),
+          frames: x.frames?.map(([f, line]) => [F(pi, f), line] as [number, number]),
+          span: x.span !== undefined ? spanMap[pi][x.span] : undefined,
+        })),
+      )
+      .sort((a, b) => a.t - b.t),
+    calls: [...calls],
+    edges: parts.flatMap((p, pi) => p.trace.edges.map(([a, b, th, n]) => [F(pi, a), F(pi, b), TH(pi, th), n] as [number, number, number, number])),
+    stacks: parts.flatMap((p, pi) => (p.trace.stacks ?? []).map((st) => ({ th: TH(pi, st.th), fns: st.fns.map((f) => F(pi, f)) }))),
+    objects: [],
+    output: o.output ?? parts.map((p) => p.trace.output).join(''),
+    clock: useMono ? { mono: base } : useWall ? { wall: base } : undefined,
+    procs,
+  };
+  trace.objects = collectObjects(trace, objectLabeler(trace, g));
   return trace;
 }
 

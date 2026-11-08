@@ -1,0 +1,46 @@
+# Two nodes on their own network: node-b listens on 198.51.100.20:7000, node-a connects,
+# sends a few signed messages and checks the acknowledgements.
+#
+#   docker compose up --build            run it
+#   CodeGraph: Run & Trace with Docker Compose   run it traced, both nodes on one timeline
+
+x-node: &node
+  build:
+    context: .
+    dockerfile: docker/Dockerfile
+  image: net-pair-build:local
+  # the whole sample is mounted: sources, cfg/ and the build output
+  volumes:
+    - ./:/app
+  # the programs read ../cfg relative to here
+  working_dir: /app/src
+
+services:
+  node-b:
+    <<: *node
+    command: ["sh", "-c", "make node-b && exec ../build/node-b"]
+    networks:
+      pair-net:
+        ipv4_address: 198.51.100.20
+    # listening on 7000 (0x1B58)? Read /proc so the check does not use up node-b's one connection
+    healthcheck:
+      test: ["CMD-SHELL", "grep -qi ':1B58 00000000:0000 0A' /proc/net/tcp"]
+      interval: 1s
+      timeout: 1s
+      retries: 120
+
+  node-a:
+    <<: *node
+    command: ["sh", "-c", "make node-a && exec ../build/node-a"]
+    networks:
+      pair-net:
+        ipv4_address: 198.51.100.10
+    depends_on:
+      node-b:
+        condition: service_healthy
+
+networks:
+  pair-net:
+    ipam:
+      config:
+        - subnet: 198.51.100.0/24

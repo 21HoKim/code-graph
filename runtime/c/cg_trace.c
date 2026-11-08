@@ -5,13 +5,16 @@
  * environment variable CODE_GRAPH_TRACE names an output file, so the
  * instrumented binary behaves exactly like the original otherwise.
  *
- *   CODE_GRAPH_TRACE       output path (JSON lines, schema code-graph-trace/1)
+ *   CODE_GRAPH_TRACE       output path (JSON lines, schema code-graph-trace/1); "{pid}" in it
+ *                          becomes the process id, so several processes can share one setting
  *   CODE_GRAPH_MAX_EVENTS  detailed events to record (default 200000); call counts continue after that
  *   CODE_GRAPH_VALUES      0 = do not record argument values
  *
  * Every thread buffers its own events and appends them to the file under one
  * mutex. A per-thread shadow stack (fids of the active calls) lets a crash be
- * attributed to the function that was running, in every thread.
+ * attributed to the function that was running, in every thread. The header
+ * records the monotonic and wall clock at time 0, so traces of processes that
+ * ran side by side (e.g. containers of one Compose project) can be lined up.
  */
 #ifndef _GNU_SOURCE
 #define _GNU_SOURCE
@@ -142,6 +145,37 @@ static void cgt_finish_impl(int lock);
 static void cgt_on_signal(int sig);
 static char g_main_name[64];
 
+/* CODE_GRAPH_TRACE with "{pid}" replaced */
+static void cgt_trace_path(const char *in, char *out, size_t cap) {
+  size_t n = 0;
+  for (const char *p = in; *p && n + 1 < cap;) {
+    if (strncmp(p, "{pid}", 5) == 0) {
+      n += (size_t)snprintf(out + n, cap - n, "%d", (int)getpid());
+      if (n >= cap) n = cap - 1;
+      p += 5;
+    } else
+      out[n++] = *p++;
+  }
+  out[n] = 0;
+}
+
+/* program file name, for telling processes apart ("" when unknown) */
+static void cgt_exe_name(char *out, size_t cap) {
+  out[0] = 0;
+#ifdef __linux__
+  char buf[512];
+  ssize_t n = readlink("/proc/self/exe", buf, sizeof buf - 1);
+  if (n <= 0) return;
+  buf[n] = 0;
+  const char *base = strrchr(buf, '/');
+  base = base ? base + 1 : buf;
+  size_t k = 0;
+  for (; *base && k + 1 < cap; base++)
+    if ((*base >= 'a' && *base <= 'z') || (*base >= 'A' && *base <= 'Z') || (*base >= '0' && *base <= '9') || strchr("._+-", *base)) out[k++] = *base;
+  out[k] = 0;
+#endif
+}
+
 static void cgt_init(void) {
   const char *path = getenv("CODE_GRAPH_TRACE");
   if (!path || !*path) return;
@@ -149,18 +183,25 @@ static void cgt_init(void) {
   if (m && *m) g_max = atoll(m);
   const char *v = getenv("CODE_GRAPH_VALUES");
   if (v && (*v == '0' || *v == 'f' || *v == 'o')) g_values = 0;
-  g_out = fopen(path, "w");
+  char file[1024];
+  cgt_trace_path(path, file, sizeof file);
+  g_out = fopen(file, "w");
   if (!g_out) return;
-  struct timespec ts;
+  struct timespec ts, wall;
   clock_gettime(CLOCK_MONOTONIC, &ts);
+  clock_gettime(CLOCK_REALTIME, &wall);
   g_t0 = (uint64_t)ts.tv_sec * 1000000000ull + (uint64_t)ts.tv_nsec;
-  fprintf(g_out, "{\"k\":\"h\",\"schema\":\"code-graph-trace/1\",\"lang\":\"%s\",\"clock\":\"ns\",\"pid\":%d,\"fns\":%d}\n",
+  char exe[128];
+  cgt_exe_name(exe, sizeof exe);
+  fprintf(g_out,
+          "{\"k\":\"h\",\"schema\":\"code-graph-trace/1\",\"lang\":\"%s\",\"clock\":\"ns\",\"pid\":%d,\"fns\":%d,\"mono\":%llu,\"wall\":%llu,\"exe\":\"%s\"}\n",
 #ifdef CGT_LANG_CPP
           "cpp",
 #else
           "c",
 #endif
-          (int)getpid(), CGT_NFN);
+          (int)getpid(), CGT_NFN, (unsigned long long)g_t0,
+          (unsigned long long)wall.tv_sec * 1000000000ull + (unsigned long long)wall.tv_nsec, exe);
   pthread_key_create(&g_key, cgt_thread_exit);
   atexit(cgt_finish);
   int sigs[] = {SIGSEGV, SIGFPE, SIGILL, SIGABRT, SIGTERM, SIGINT,
@@ -405,5 +446,8 @@ static void cgt_on_signal(int sig) {
     cgt_finish_impl(0);
     if (locked) pthread_mutex_unlock(&g_mu);
   }
+  /* PID 1 (a container's main process) ignores signals left at their default action:
+     end the way a shell would report it instead of waiting to be killed */
+  if (getpid() == 1 && (sig == SIGTERM || sig == SIGINT)) _exit(128 + sig);
   raise(sig);
 }

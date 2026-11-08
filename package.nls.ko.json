@@ -32,7 +32,7 @@
   "cfg.verifyCxx": "C++ 컴파일러. 비우면 `$CXX`, `c++`, `g++`, `clang++` 순.",
   "cfg.verifyPython": "검사와 실행 & 추적에 쓸 Python 3 인터프리터. 비우면 PATH의 `python3`, `python` 순 (Python 확장에서 고른 인터프리터는 아직 따르지 않습니다).",
   "cfg.verifyFlags": "검사에 추가할 컴파일 플래그 (예: `-DDEBUG`, `-std=c++20`).",
-  "cfg.verifyCcdb": "프로젝트에 `compile_commands.json`이 있으면 그 플래그를 사용.",
+  "cfg.verifyCcdb": "프로젝트의 빌드 플래그를 씁니다. `compile_commands.json`이 있으면 그것을, 없으면 makefile이 넘기는 플래그(`make -n` 드라이런으로 읽음)를 씁니다.",
   "cfg.verifyEditor": "언어 서버(C/C++, clangd, Pylance…)가 보고한 오류도 표시.",
   "cfg.verifyTimeout": "번역 단위 하나당 제한 시간(초).",
   "cfg.runEntry": "실행 & 추적이 시작할 대상: Python 파일, 또는 `main`이 있는 C/C++ 파일. 비우면 현재 에디터의 진입점, 없으면 목록에서 선택.",
@@ -43,5 +43,13 @@
   "cfg.runLinkFlags": "추적용 C/C++ 빌드에 추가할 링크 플래그/라이브러리 (예: `-lm`, `-lssl`). Linux/macOS에선 `-pthread`가 항상 들어갑니다.",
   "cfg.runTimeout": "이 시간(초)이 지나면 추적 중인 프로그램을 멈춥니다 (그때까지의 추적은 남습니다).",
   "cfg.runMaxEvents": "실행마다 자세히 기록할 이벤트 수. 넘으면 호출 횟수만 집계합니다.",
-  "cfg.runValues": "인자/반환 값과 객체 식별자를 기록 (데이터 추적). 끄면 오버헤드가 줄어듭니다."
+  "cfg.runValues": "인자/반환 값과 객체 식별자를 기록 (데이터 추적). 끄면 오버헤드가 줄어듭니다.",
+  "cmd.runCompose": "Docker Compose로 실행 & 추적",
+  "welcome.compose": "이 워크스페이스에는 Compose 파일이 있습니다. 서비스를 각자의 컨테이너와 네트워크에서 실행하고, 모든 컨테이너를 한 타임라인에서 봅니다.\n[Docker Compose로 실행 & 추적](command:codeGraph.runCompose)",
+  "cfg.runUseBuildSystem": "C/C++ 프로그램을 프로젝트와 같은 방식으로 빌드합니다. 소스, 정의(-D), 라이브러리, 실행 위치를 makefile(`make -n`)이나 CMake(`CMakeFiles/*/link.txt`)에서 가져옵니다.",
+  "cfg.runTarget": "진입 파일이 여러 프로그램에 들어갈 때(예: `main.cpp` 하나로 `node-a`, `node-b`) 실행할 프로그램. 비우면 물어봅니다.",
+  "cfg.composeFile": "**Docker Compose로 실행 & 추적**에 쓸 Compose 파일(워크스페이스 기준 경로). 비우면 루트의 `compose.yaml` / `docker-compose.yml`.",
+  "cfg.composeServices": "추적할 서비스. 비우면 워크스페이스를 마운트하는(예: `- ./:/app`) 모든 서비스. 나머지 서비스도 함께 실행됩니다.",
+  "cfg.composeStartTimeout": "첫 추적 프로그램이 시작되기 전까지 이미지 빌드와 컨테이너 안 빌드에 허용하는 시간. `codeGraph.run.timeoutSeconds`는 그때부터 셉니다.",
+  "cfg.composeDocker": "사용할 docker CLI(Compose v2 포함)."
 }

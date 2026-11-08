@@ -1763,6 +1763,28 @@ class App {
     else html += `<span class="flag ${ex.code ? 'bad' : ''}">${esc(ex.code ? t('exitCode', { n: ex.code }) : t('exitOk'))}</span>`;
     html += `<span class="flag">${fmtNs(tr.durationNs)}</span><span class="flag">${esc(t('callsN', { n: tr.spans.t.length }))}</span></div>`;
     if (this.settings?.host !== false) html += `<div class="row"><button class="btn" data-act="rerun">▶ ${esc(t('runAgain'))}</button></div>`;
+    // processes (containers of a Compose run): how each ended, which threads are theirs
+    if (tr.procs && tr.procs.length > 1) {
+      html += `<h3>▣ ${esc(t('processes'))} (${tr.procs.length})</h3><ul class="lst">`;
+      for (const p of tr.procs) {
+        const x = p.exit;
+        const stopped = x.timedOut && (x.code === null || x.code === 143 || x.code === 130);
+        const flag =
+          x.crash && x.crash !== 'SIGTERM'
+            ? `<span class="flag bad">✕ ${esc(x.crash)}</span>`
+            : stopped
+              ? `<span class="flag warn">⏱ ${esc(t('stopped'))}</span>`
+              : x.code === null
+                ? ''
+                : `<span class="flag ${x.code ? 'bad' : ''}">${esc(x.code ? t('exitCode', { n: x.code }) : t('exitOk'))}</span>`;
+        html +=
+          `<li><span class="dot" style="background:var(--cc-call)"></span><b>${esc(p.name)}</b>${flag}` +
+          `<span class="cnt">${p.threads.map((id) => `<span style="color:${threadColor(id)}">●</span>`).join('')}</span>` +
+          (p.pid !== undefined ? `<span class="args">pid ${p.pid}</span>` : '') +
+          `</li>`;
+      }
+      html += '</ul>';
+    }
     // thread tree
     html += `<h3>⚡ ${esc(t('threads'))} (${tr.threads.length})</h3><ul class="lst">`;
     const kids = new Map<number, number[]>();
@@ -1816,7 +1838,7 @@ class App {
     this.details.innerHTML = html;
     this.details.hidden = false;
     this.wireDetails(null);
-    this.details.querySelector<HTMLElement>('[data-act=rerun]')?.addEventListener('click', () => api.postMessage({ type: 'runTrace' }));
+    this.details.querySelector<HTMLElement>('[data-act=rerun]')?.addEventListener('click', () => api.postMessage({ type: 'runTrace', compose: !!tr.procs }));
     for (const a of this.details.querySelectorAll<HTMLElement>('[data-span-t]')) a.onclick = () => this.seek(Number(a.dataset.spanT));
   }
 

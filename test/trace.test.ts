@@ -8,8 +8,9 @@ import { loadParsers } from '../src/core/extract';
 import { instrumentSources } from '../src/core/instrument';
 import type { CodeGraph } from '../src/core/model';
 import { ParsePool } from '../src/core/pool';
-import { findEntries, runAndTrace, selectUnits, type RunResult } from '../src/core/runner';
-import { parseTrace } from '../src/core/trace';
+import { readMakeTargets } from '../src/core/buildinfo';
+import { findEntries, runAndTrace, selectUnits, type RunInput, type RunResult } from '../src/core/runner';
+import { mergeTraces, parseTrace } from '../src/core/trace';
 import { detectToolchain } from '../src/core/verify';
 
 const ROOT = path.resolve(__dirname, '..');
@@ -23,7 +24,7 @@ async function analyze(dir: string): Promise<{ g: CodeGraph; session: AnalysisSe
   return { g: await session.analyze(files), session, files };
 }
 
-async function trace(dir: string, entryFile?: string, args: string[] = []): Promise<{ r: RunResult; g: CodeGraph }> {
+async function trace(dir: string, entryFile?: string, args: string[] = [], extra: Partial<RunInput> = {}): Promise<{ r: RunResult; g: CodeGraph }> {
   const { g, session, files } = await analyze(dir);
   const entries = findEntries(g);
   const entry = entryFile ? entries.find((e) => e.file === entryFile)! : entries[0];
@@ -44,6 +45,7 @@ async function trace(dir: string, entryFile?: string, args: string[] = []): Prom
     timeoutMs: 20000,
     maxEvents: 200000,
     values: true,
+    ...extra,
   });
   return { r, g };
 }
@@ -71,6 +73,70 @@ describe('trace parsing', () => {
     assert.equal(tr.selfs[1], '0x10');
     assert.deepEqual(tr.args[2], [['n', 'i', '3']]);
     assert.equal(tr.threads.find((t) => t.id === 2)?.entry, 1);
+  });
+});
+
+describe('traces of several processes', () => {
+  const g: CodeGraph = { root: '/x', files: [], entities: [], relations: [] } as unknown as CodeGraph;
+  const fns = [
+    { id: 'a', name: 'main' },
+    { id: 'b', name: 'serve' },
+  ];
+  const one = (pid: number, mono: number, self: string) =>
+    parseTrace(
+      [
+        `{"k":"h","schema":"code-graph-trace/1","lang":"cpp","clock":"ns","pid":${pid},"mono":${mono},"exe":"node"}`,
+        '{"k":"t","id":1,"t":0,"name":"main"}',
+        `["c",10,1,0,"${self}",[]]`,
+        `["c",20,1,1,"${self}",[]]`,
+        '["r",30,1,1]',
+        `["c",40,1,1,"${self}",[]]`,
+        '["r",50,1,1]',
+        '["r",60,1,0]',
+      ].join('\n'),
+      g,
+      { fns },
+    );
+
+  it('lines processes up on one clock and keeps their threads and objects apart', () => {
+    const a = one(1, 1_000_000, '0x10');
+    const b = one(1, 1_000_015, '0x10');
+    assert.equal(a.clock?.mono, 1_000_000);
+    const m = mergeTraces(
+      [
+        { name: 'node-b', trace: b },
+        { name: 'node-a', trace: a },
+      ],
+      g,
+      { command: 'compose' },
+    );
+    // node-a started first: it comes first
+    assert.deepEqual(
+      m.threads.map((t) => t.name),
+      ['node-a · main', 'node-b · main'],
+    );
+    assert.deepEqual(
+      m.procs?.map((p) => [p.name, p.threads]),
+      [
+        ['node-a', [1]],
+        ['node-b', [2]],
+      ],
+    );
+    assert.deepEqual(
+      m.threads.map((t) => t.id),
+      [1, 2],
+    );
+    assert.equal(m.spans.t.length, 6);
+    // node-a started 15 ns earlier: its calls come first on the common clock
+    assert.deepEqual(m.spans.t.slice(0, 3), [10, 20, 25]);
+    for (let i = 1; i < m.spans.t.length; i++) assert.ok(m.spans.t[i] >= m.spans.t[i - 1]);
+    for (let i = 0; i < m.spans.t.length; i++) if (m.spans.parent[i] >= 0) assert.equal(m.spans.th[m.spans.parent[i]], m.spans.th[i]);
+    // the same address in two processes is two objects
+    assert.deepEqual(m.objects.map((o) => o.id).sort(), ['node-a/0x10', 'node-b/0x10']);
+    assert.deepEqual(m.calls.sort(), [
+      [0, 2],
+      [1, 4],
+    ]);
   });
 });
 
@@ -148,6 +214,27 @@ describe('Run & Trace (C producer/consumer)', { skip: !native }, () => {
     assert.deepEqual(tr.threads.map((t) => t.name).sort(), ['consumer', 'main', 'producer']);
     const rb = tr.objects.find((o) => o.label.includes('ringbuf'));
     assert.ok(rb && rb.threads.length === 3);
+  });
+});
+
+describe('Run & Trace (build system)', { skip: !native }, () => {
+  const PAIR = path.join(ROOT, 'samples', 'net-pair');
+
+  it('builds the makefile program with its defines and libraries, and runs it where make links it', async () => {
+    const { targets } = await readMakeTargets(PAIR);
+    const target = targets.find((t) => t.name === 'node-b')!;
+    const { r } = await trace(PAIR, 'src/main.cpp', [], { target, timeoutMs: 2500 });
+    assert.ok(r.ok, r.notes.join('\n'));
+    const ran = new Set(r.trace!.spans.fn.map((f) => r.trace!.fns[f]?.id ?? ''));
+    // reading ../cfg/node-b.conf only works from src/, where make links node-b
+    assert.ok([...ran].some((id) => id.endsWith('Config::load')), 'config loaded');
+    assert.ok([...ran].some((id) => id.endsWith('Server::run')), 'ran as node-b');
+  });
+
+  it('guesses the library when a link without build info misses its symbols', async () => {
+    const { r } = await trace(PAIR, 'src/main.cpp', [], { buildFlags: ['-DNODE_B'], timeoutMs: 2500 });
+    assert.ok(r.ok, r.notes.join('\n'));
+    assert.ok(r.notes.some((n) => n.includes('-lcrypto') && n.includes('OpenSSL')), r.notes.join('\n'));
   });
 });
 

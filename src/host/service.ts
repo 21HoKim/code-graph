@@ -8,6 +8,7 @@ import * as vscode from 'vscode';
 import { AnalysisSession, DEFAULT_EXCLUDE_DIRS, type FileEntry } from '../core/analyze';
 import type { CodeGraph, Diagnostic } from '../core/model';
 import { ParsePool, defaultWorkerCount } from '../core/pool';
+import { compileCommandsOf, readBuildTargets, type BuildTarget } from '../core/buildinfo';
 import { detectToolchain, loadCompileCommands, verifyWorkspace, type Toolchain } from '../core/verify';
 import type { RunTrace } from '../core/trace';
 import type { VerifyInfo } from '../shared/protocol';
@@ -98,6 +99,29 @@ export class AnalysisService implements vscode.Disposable {
     return this.graph?.files.find((f) => f.path === rel)?.lang === 'cpp';
   }
 
+  private buildInfo?: Promise<{ targets: BuildTarget[]; from?: BuildTarget['from']; error?: string }>;
+
+  /** The project's own programs (make dry run / CMake link files), cached until a build file changes. */
+  buildTargets(): Promise<{ targets: BuildTarget[]; from?: BuildTarget['from']; error?: string }> {
+    if (!vscode.workspace.isTrusted) return Promise.resolve({ targets: [] }); // make -n runs the makefile
+    this.buildInfo ??= readBuildTargets(this.root, { compileCommands: loadCompileCommands(this.root) }).then(
+      (r) => {
+        if (r.targets.length) this.log.appendLine(`build: ${r.from} — ${r.targets.map((t) => t.name).join(', ')}`);
+        if (r.error) this.log.appendLine(`build: make -n: ${r.error}`);
+        return r;
+      },
+      (e) => {
+        this.log.appendLine(`build: ${String((e as Error)?.message ?? e)}`);
+        return { targets: [] };
+      },
+    );
+    return this.buildInfo;
+  }
+
+  invalidateBuildInfo(): void {
+    this.buildInfo = undefined;
+  }
+
   toolchainFor(): Toolchain {
     const c = vscode.workspace.getConfiguration('codeGraph.verify');
     const pref = { cc: c.get<string>('cc', '') || undefined, cxx: c.get<string>('cxx', '') || undefined, python: c.get<string>('python', '') || undefined };
@@ -120,12 +144,18 @@ export class AnalysisService implements vscode.Disposable {
     const wanted = opts.units ? new Set(opts.units) : undefined;
     const files = wanted ? all.filter((f) => wanted.has(f.rel)) : all;
     const root = this.root;
+    // the project's flags: compile_commands.json, else what its makefile passes (defines like -DNODE_A, -I…)
+    let compileCommands = cfg.get<boolean>('useCompileCommands', true) ? loadCompileCommands(root) : undefined;
+    if (!compileCommands && cfg.get<boolean>('useCompileCommands', true)) {
+      const bt = await this.buildTargets();
+      if (bt.targets.length) compileCommands = compileCommandsOf(bt.targets);
+    }
     const r = await verifyWorkspace({
       root,
       files,
       includePaths: this.includePaths,
       toolchain: this.toolchainFor(),
-      compileCommands: cfg.get<boolean>('useCompileCommands', true) ? loadCompileCommands(root) : undefined,
+      compileCommands,
       extraFlags: cfg.get<string[]>('extraFlags', []),
       timeoutMs: Math.max(5, cfg.get<number>('timeoutSeconds', 60)) * 1000,
       onProgress: opts.onProgress,

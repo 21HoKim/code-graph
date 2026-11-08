@@ -209,7 +209,7 @@ export class CircuitPanel implements vscode.Disposable {
         await this.verify();
         break;
       case 'runTrace':
-        await vscode.commands.executeCommand('codeGraph.runTrace');
+        await vscode.commands.executeCommand(m.compose ? 'codeGraph.runCompose' : 'codeGraph.runTrace');
         break;
       case 'loadTrace':
         await vscode.commands.executeCommand('codeGraph.loadTrace');

@@ -65,7 +65,10 @@
         "codeGraph.run.cwd",
         "codeGraph.run.env",
         "codeGraph.run.buildFlags",
-        "codeGraph.run.linkFlags"
+        "codeGraph.run.linkFlags",
+        "codeGraph.run.useBuildSystem",
+        "codeGraph.run.compose.file",
+        "codeGraph.run.compose.docker"
       ]
     },
     "virtualWorkspaces": false
@@ -102,6 +105,13 @@
         "title": "%cmd.runTrace%",
         "category": "CodeGraph",
         "icon": "$(debug-start)",
+        "enablement": "isWorkspaceTrusted"
+      },
+      {
+        "command": "codeGraph.runCompose",
+        "title": "%cmd.runCompose%",
+        "category": "CodeGraph",
+        "icon": "$(server-process)",
         "enablement": "isWorkspaceTrusted"
       },
       {
@@ -146,6 +156,11 @@
         "view": "codeGraph.home",
         "contents": "%welcome.check%",
         "when": "isWorkspaceTrusted"
+      },
+      {
+        "view": "codeGraph.home",
+        "contents": "%welcome.compose%",
+        "when": "codeGraph.hasCompose && isWorkspaceTrusted"
       },
       {
         "view": "codeGraph.home",
@@ -392,6 +407,40 @@
           },
           "default": [],
           "markdownDescription": "%cfg.runLinkFlags%"
+        },
+        "codeGraph.run.useBuildSystem": {
+          "type": "boolean",
+          "default": true,
+          "markdownDescription": "%cfg.runUseBuildSystem%"
+        },
+        "codeGraph.run.target": {
+          "type": "string",
+          "default": "",
+          "markdownDescription": "%cfg.runTarget%"
+        },
+        "codeGraph.run.compose.file": {
+          "type": "string",
+          "default": "",
+          "markdownDescription": "%cfg.composeFile%"
+        },
+        "codeGraph.run.compose.services": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "default": [],
+          "markdownDescription": "%cfg.composeServices%"
+        },
+        "codeGraph.run.compose.startTimeoutSeconds": {
+          "type": "number",
+          "default": 600,
+          "minimum": 10,
+          "markdownDescription": "%cfg.composeStartTimeout%"
+        },
+        "codeGraph.run.compose.docker": {
+          "type": "string",
+          "default": "docker",
+          "markdownDescription": "%cfg.composeDocker%"
         },
         "codeGraph.run.timeoutSeconds": {
           "type": "number",
