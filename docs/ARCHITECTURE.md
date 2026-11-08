@@ -297,6 +297,14 @@ runtime exits on `SIGTERM` even as PID 1) and taken down. A service that ended w
 saying what to write in `.codegraph.json` (it compiled nothing, no workspace Python ran); its log is parsed for
 compiler errors, with container paths mapped back to the workspace.
 
+**Live** (`live.ts`): with `CODE_GRAPH_LIVE=1` the runtimes append, every 200 ms, a `live` record of what runs right
+now: each thread's call stack (the C runtime's flusher thread reads the shadow stacks; the Python tracer its own),
+cumulative call counts and caller → callee counts (C keeps those in a lock-free table in live mode). `LiveTail`
+follows the trace files (for C/C++ only the tail of what they gained: the latest record is enough; Python files are
+read in full for their function records), maps functions to entities, and reports threads, stacks and the calls
+since the previous update every 250 ms; the webview lights the stacks, pulses those calls and labels busy functions.
+A run has no time limit by default: Stop ends it (`finish`, unlike `signal`, keeps the trace) and the replay follows.
+
 **Several processes** (`mergeTraces`): every trace header carries the monotonic and wall clock at its time 0
 (containers share the host's clock), so spans are shifted onto one clock and re-sorted; threads are renumbered
 across processes and named `<service> · <thread>`; object identities get the process name in front (the same

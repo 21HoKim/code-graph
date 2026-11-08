@@ -20,7 +20,7 @@
   "cmd.loadTrace": "Load Trace File…",
   "cmd.clearTrace": "Clear Trace",
   "welcome.open": "See your code as a circuit. Folders, files, classes and functions become blocks; calls, threads and data are wires that current flows through.\n[Open Circuit View](command:codeGraph.open)\n[Show Current File](command:codeGraph.showFile)",
-  "welcome.check": "Check that the code compiles. Only the broken parts turn red, and the wires show how far the break reaches.\n[Verify (compile check)](command:codeGraph.verify)\nRun the program and replay what each thread did and which values flowed.\n[Run & Trace](command:codeGraph.runTrace)",
+  "welcome.check": "Check that the code compiles. Only the broken parts turn red, and the wires show how far the break reaches.\n[Verify (compile check)](command:codeGraph.verify)\nRun the program and watch each thread live; stop it any time and replay what it did, with the values.\n[Run & Trace](command:codeGraph.runTrace)",
   "welcome.untrusted": "Verify and Run & Trace start your compiler and program, so they only work in a trusted workspace.\n[Manage Workspace Trust](command:workbench.trust.manage)",
   "welcome.more": "[Load Trace File…](command:codeGraph.loadTrace)\nTip: right-click a C, C++ or Python file, or click CodeGraph in the status bar, to jump to that file in the circuit.\n[Settings](command:workbench.action.openSettings?%5B%22codeGraph%22%5D) · [Guide](https://github.com/21HoKim/code-graph/blob/main/docs/GUIDE.md)",
   "trust.description": "Static analysis works everywhere. Compile checks and Run & Trace execute your compiler and program, so they need a trusted workspace.",
@@ -41,11 +41,11 @@
   "cfg.runEnv": "Extra environment variables for the traced program.",
   "cfg.runBuildFlags": "Extra compile flags when building a C/C++ program for tracing (e.g. `-DUSE_THREADS`).",
   "cfg.runLinkFlags": "Extra link flags/libraries for the traced C/C++ build (e.g. `-lm`, `-lssl`). `-pthread` is always added on Linux/macOS.",
-  "cfg.runTimeout": "Stop the traced program after this many seconds (the trace up to that point is kept).",
+  "cfg.runTimeout": "Stop the traced program after this many seconds; 0 = when it ends, or when you press **Stop**. The circuit follows the program live meanwhile, and the trace so far is kept.",
   "cfg.runMaxEvents": "Detailed events recorded per run; after that only call counts are kept.",
   "cfg.runValues": "Record argument/return values and object identities (data tracking). Turn off for lower overhead.",
   "cmd.runCompose": "Run & Trace with Docker Compose",
-  "welcome.compose": "This workspace has a Compose file: run its services in their own containers and network, and see every container on one timeline.\n[Run & Trace with Docker Compose](command:codeGraph.runCompose)",
+  "welcome.compose": "This workspace has a Compose file: run its services in their own containers and network, follow every container live and replay them on one timeline.\n[Run & Trace with Docker Compose](command:codeGraph.runCompose)",
   "cfg.runUseBuildSystem": "Build C/C++ programs the way the project does: sources, defines, libraries and the directory to run from come from the makefile (`make -n`) or CMake (`CMakeFiles/*/link.txt`).",
   "cfg.runTarget": "Program to run when the entry file is built into several (e.g. `node-a` and `node-b` from one `main.cpp`). Empty = ask.",
   "cfg.composeFile": "Compose file for **Run & Trace with Docker Compose** (workspace-relative). Empty = `compose.yaml` / `docker-compose.yml` at the root, plus its override file. Several files, profiles and per-service settings go in `.codegraph.json`.",
@@ -54,5 +54,6 @@
   "cfg.composeDocker": "The docker CLI (with Compose v2) to use.",
   "cmd.createConfig": "Create / Open .codegraph.json",
   "welcome.config": "Build or Docker setup CodeGraph does not get right? Write what it cannot find out by itself in one file, `.codegraph.json`.\n[Create .codegraph.json](command:codeGraph.createConfig)",
-  "cmd.splitTrace": "Open a View per Container"
+  "cmd.splitTrace": "Open a View per Container",
+  "cmd.stopRun": "Stop Run and Show the Trace"
 }

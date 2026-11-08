@@ -17,6 +17,7 @@ import {
   type SourceFile,
 } from '../src/core/compose';
 import { loadParsers } from '../src/core/extract';
+import type { LiveUpdate } from '../src/core/live';
 import { instrumentSources } from '../src/core/instrument';
 import { mirrorWorkspace } from '../src/core/mirror';
 import type { CodeGraph } from '../src/core/model';
@@ -328,7 +329,12 @@ describe('Compose: Run & Trace with Docker', { skip: !(dockerUp && process.env.C
   const ranFns = (tr: RunTrace) => new Set(tr.spans.fn.map((f) => tr.fns[f]?.id ?? ''));
 
   it('traces both nodes of the sample in their containers, on one timeline (workspace mounted, built at start)', async () => {
-    const { tr, lines } = await traceIt(PAIR, [path.join(PAIR, 'compose.yaml')]);
+    const updates: LiveUpdate[] = [];
+    const { tr, lines } = await traceIt(PAIR, [path.join(PAIR, 'compose.yaml')], { live: (u) => updates.push(u) });
+    // followed live while it ran: both containers' threads, where they were
+    const procs = new Set(updates.flatMap((u) => u.threads.map((t) => t.proc)));
+    assert.ok(procs.has('node-a') && procs.has('node-b'), `live updates from both containers (${[...procs].join(', ')}, ${updates.length} updates)`);
+    assert.ok(updates.some((u) => u.stacks.some((st) => st.fns.length)), 'stacks while it ran');
     assert.deepEqual(tr.procs?.map((p) => p.name).sort(), ['node-a', 'node-b']);
     assert.equal(tr.procs?.find((p) => p.name === 'node-a')?.exit.code, 0, lines.slice(-30).join('\n'));
     const ran = ranFns(tr);

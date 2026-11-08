@@ -7,7 +7,7 @@ import { CircuitPanel, VIEW_TYPE, verifyMode, viewSettings } from './host/panel'
 import { COMPOSE_FILES } from './core/compose';
 import { CONFIG_FILE } from './core/config';
 import { createConfigCommand, options } from './host/project';
-import { clearTraceCommand, loadTraceCommand, runComposeCommand, runTraceCommand, splitTraceCommand, stopRun } from './host/run';
+import { clearTraceCommand, finishRun, loadTraceCommand, runComposeCommand, runTraceCommand, splitTraceCommand, stopRun } from './host/run';
 import { AnalysisService } from './host/service';
 
 let service: AnalysisService | undefined;
@@ -35,6 +35,7 @@ export function activate(ctx: vscode.ExtensionContext): void {
     vscode.commands.registerCommand('codeGraph.runTrace', () => runTraceCommand(ctx, svc)),
     vscode.commands.registerCommand('codeGraph.runCompose', () => runComposeCommand(ctx, svc)),
     vscode.commands.registerCommand('codeGraph.createConfig', () => createConfigCommand(svc)),
+    vscode.commands.registerCommand('codeGraph.stopRun', () => finishRun()),
     vscode.commands.registerCommand('codeGraph.splitTrace', (proc?: string) => splitTraceCommand(ctx, svc, typeof proc === 'string' ? proc : undefined)),
     vscode.commands.registerCommand('codeGraph.loadTrace', () => loadTraceCommand(ctx, svc)),
     vscode.commands.registerCommand('codeGraph.clearTrace', () => clearTraceCommand(svc)),

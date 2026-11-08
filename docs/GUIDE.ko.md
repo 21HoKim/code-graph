@@ -79,6 +79,11 @@
   실행돼요.
 - **Python**: 표준 라이브러리만 쓰는 트레이서(3.12+는 `sys.monitoring`, 그 전엔 `sys.setprofile`)가 워크스페이스
   코드의 호출·반환·예외, 값, 객체 식별자를 스레드별로 기록해요.
+- **실시간**: 프로그램이 실행되는 동안 스레드마다 지금의 호출 스택이 그 스레드 색으로 빛나고, 방금 일어난 호출이 전선을
+  따라 흐르며, 바쁜 함수에는 방금 받은 호출 수(`+120`)가 떠요. 아래 막대에 스레드, 시간, **■ 멈추기**가 있어요. 실행은
+  프로그램이 끝나거나 멈추기를 누를 때까지 이어지고(`run.timeoutSeconds`로 제한을 둘 수 있어요. 기본값 0은 제한 없음),
+  멈춰도 그때까지 기록한 건 모두 남아서 바로 재생돼요. 오래 실행하면 재생에는 처음 `run.maxEvents`개 호출이 자세히
+  남고, 실시간 보기는 끝까지 보여 줘요.
 - **재생**: 스레드 레인에서 재생, 탐색, 한 단계씩 넘기기. 각 스레드의 호출 스택에 있는 블록이 그 스레드 색으로 빛나고,
   펄스가 전선을 따라 달리며 값이 블록으로 들어가요. 한 번도 실행 안 된 블록은 흐려지고, 실행해야 드러나는
   호출(가상 함수, 콜백)은 새 전선이 생겨요.
@@ -119,9 +124,9 @@ override 파일을 `docker compose`가 읽는 그대로 써요. 다르면 `.code
 
 추적되는 컨테이너 안에서는 `PATH`에 있는 C/C++ 컴파일러가 전부 감싸져요(`gcc`, `g++-12`, `clang++-17`, 크로스
 컴파일러, 전체 경로로 준 `CC`/`CXX`, 앞에 `ccache`를 써도 돼요). Python 인터프리터도 마찬가지고, 다른 방식으로
-시작한 Python 프로세스(전체 경로, gunicorn, multiprocessing 자식)는 `sitecustomize`가 추적해요. 실행 시간 제한
-(`timeoutSeconds`, 20초)은 처음 추적된 프로그램부터 세고, 이미지 빌드와 컨테이너 안 빌드에는
-`startTimeoutSeconds`(600초)가 주어져요.
+시작한 Python 프로세스(전체 경로, gunicorn, multiprocessing 자식)는 `sitecustomize`가 추적해요. 실행은 실시간으로
+따라가고, 추적되는 컨테이너가 모두 끝나거나 **■ 멈추기**를 누를 때까지 이어져요. `timeoutSeconds`로 제한을 두면 처음
+추적된 프로그램부터 세요. 이미지 빌드와 컨테이너 안 빌드에는 `startTimeoutSeconds`(600초)가 주어져요.
 
 서비스가 추적된 프로그램 없이 끝나면 실행 요약에 이유와 `.codegraph.json`에 무엇을 적으면 되는지 나와요.
 
@@ -148,13 +153,13 @@ override 파일을 `docker compose`가 읽는 그대로 써요. 다르면 `.code
 | `run.args`, `run.cwd`, `run.env` | 인자, 실행할 폴더(기본: 빌드가 프로그램을 두는 곳), 추가 환경 변수 |
 | `run.build`, `run.program` | CodeGraph가 스스로 못 읽는 빌드 명령과 그게 만드는 프로그램(워크스페이스 기준) |
 | `run.buildFlags`, `run.linkFlags` | 추가 컴파일 플래그(`-DDEBUG`), 추가 라이브러리(`-lssl`) |
-| `run.timeoutSeconds` | 이 시간이 지나면 프로그램을 멈춤(그때까지의 추적은 남음) |
+| `run.timeoutSeconds` | 이 시간이 지나면 프로그램을 멈춤(그때까지의 추적은 남음). 0이면 끝나거나 멈추기를 누를 때까지 |
 | `compose.files`, `compose.profiles` | 순서대로 쓸 Compose 파일, 켤 프로필 |
 | `compose.services` | 추적할 서비스(기본: 워크스페이스 소스가 있는 모든 서비스) |
 | `compose.build` | 서비스별: 서비스 명령 전에 그 컨테이너에서 실행할 명령 |
 | `compose.sourcePath` | 서비스별: 그 컨테이너에서 워크스페이스가 있는 곳 |
 | `compose.env` | 서비스별: 추적 실행에 더할 환경 변수(예: `CXX`) |
-| `compose.timeoutSeconds`, `compose.startTimeoutSeconds` | 프로그램 실행 시간, 이미지·컨테이너 안 빌드에 주는 시간 |
+| `compose.timeoutSeconds`, `compose.startTimeoutSeconds` | 프로그램 실행 시간(0이면 멈출 때까지), 이미지·컨테이너 안 빌드에 주는 시간 |
 
 ```jsonc
 {
@@ -179,6 +184,7 @@ override 파일을 `docker compose`가 읽는 그대로 써요. 다르면 `.code
 | `CodeGraph: 실행 & 추적` | 빌드, 실행, 재생(툴바 **▶ 실행**) |
 | `CodeGraph: Docker Compose로 실행 & 추적` | 서비스를 각자의 컨테이너에서 추적하며 Compose 프로젝트 실행 |
 | `CodeGraph: 컨테이너별로 회로도 열기` | 지금 추적의 컨테이너마다 회로도를 하나씩 나란히, 함께 재생 |
+| `CodeGraph: 실행 멈추고 추적 보기` | 진행 중인 실행을 끝내고(실시간 막대의 **■ 멈추기**) 기록한 걸 재생 |
 | `CodeGraph: .codegraph.json 만들기 / 열기` | 특이한 환경을 위한 프로젝트 설정 |
 | `CodeGraph: 추적 파일 불러오기…` | 명령줄이나 트레이서가 쓴 추적 파일 열기. 여러 개를 고르면 한 타임라인에 합쳐짐 |
 | 블록 클릭 / 더블클릭 | 전선 보기 · 펼치기 또는 소스로 이동 |

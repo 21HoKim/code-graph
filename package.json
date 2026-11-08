@@ -2,7 +2,7 @@
   "name": "code-graph-vscode",
   "displayName": "%displayName%",
   "description": "%description%",
-  "version": "0.4.0",
+  "version": "0.5.0",
   "publisher": "21HoKim",
   "license": "MIT",
   "author": {
@@ -117,6 +117,12 @@
         "enablement": "isWorkspaceTrusted"
       },
       {
+        "command": "codeGraph.stopRun",
+        "title": "%cmd.stopRun%",
+        "category": "CodeGraph",
+        "icon": "$(debug-stop)"
+      },
+      {
         "command": "codeGraph.splitTrace",
         "title": "%cmd.splitTrace%",
         "category": "CodeGraph",
@@ -194,6 +200,11 @@
     "menus": {
       "view/title": [
         {
+          "command": "codeGraph.stopRun",
+          "when": "view == codeGraph.home && codeGraph.running",
+          "group": "navigation@0"
+        },
+        {
           "command": "codeGraph.reanalyze",
           "when": "view == codeGraph.home",
           "group": "navigation@1"
@@ -244,6 +255,10 @@
         {
           "command": "codeGraph.splitTrace",
           "when": "codeGraph.multiProcess"
+        },
+        {
+          "command": "codeGraph.stopRun",
+          "when": "codeGraph.running"
         }
       ]
     },
@@ -474,8 +489,8 @@
         },
         "codeGraph.run.timeoutSeconds": {
           "type": "number",
-          "default": 20,
-          "minimum": 1,
+          "default": 0,
+          "minimum": 0,
           "markdownDescription": "%cfg.runTimeout%"
         },
         "codeGraph.run.maxEvents": {

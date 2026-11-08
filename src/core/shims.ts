@@ -16,6 +16,7 @@
  *
  * All POSIX sh, no symlinks in the folder itself (Windows hosts can write it).
  */
+import * as crypto from 'node:crypto';
 import * as fs from 'fs';
 import * as path from 'path';
 
@@ -35,7 +36,12 @@ find_real() {
 }`;
 
 /** Compiler shim (cg-cc), run under the name of the compiler it stands in for. */
-export function ccShim(nfn: number, base = MOUNT): string {
+/**
+ * `tag` names the runtime build cached in the container (/tmp/codegraph-rt-<tag>): it changes with the
+ * runtime's source and the number of functions, so a container kept from an earlier run (or another
+ * CodeGraph version) does not link a stale runtime.
+ */
+export function ccShim(nfn: number, base = MOUNT, tag = String(Math.max(1, nfn))): string {
   const n = Math.max(1, nfn);
   return `#!/bin/sh
 # CodeGraph Run & Trace — stands in for the compiler of the same name. Compiles with the tracer header
@@ -61,7 +67,7 @@ if [ $link = 0 ] || [ $shared = 1 ]; then exec "$real" -include "$CG/rt/cg_trace
 
 # linking a program: build the runtime once (C++ links also get the C++ part), then link it in
 case "$self" in *++*) cxx=1 ;; *) cxx=0 ;; esac
-rt=/tmp/codegraph-rt; mkdir -p "$rt" 2>/dev/null && [ -w "$rt" ] || rt=$(mktemp -d)
+rt=/tmp/codegraph-rt-${tag}; mkdir -p "$rt" 2>/dev/null && [ -w "$rt" ] || rt=$(mktemp -d)
 cc=$(find_real gcc || find_real cc || find_real clang) || cc=
 if [ $cxx = 1 ]; then rtc="$rt/cg_trace_cpp.o"; lang=-DCGT_LANG_CPP; else rtc="$rt/cg_trace_c.o"; lang=; fi
 if [ ! -f "$rtc" ]; then
@@ -216,8 +222,10 @@ export function writeCodegraphDir(dir: string, runtimeDir: string, nfn: number, 
   fs.mkdirSync(path.join(rt, 'py'), { recursive: true });
   fs.copyFileSync(path.join(runtimeDir, 'python', 'sitecustomize.py'), path.join(rt, 'py', 'sitecustomize.py'));
   fs.writeFileSync(path.join(rt, 'cgt.dynlist'), '{ cgt_*; };\n');
+  const hash = crypto.createHash('sha1');
+  for (const f of ['cg_trace.h', 'cg_trace.c', 'cg_trace_cxx.cpp']) hash.update(fs.readFileSync(path.join(rt, f)));
   const scripts: [string, string][] = [
-    ['cg-cc', ccShim(nfn, base)],
+    ['cg-cc', ccShim(nfn, base, `${Math.max(1, nfn)}-${hash.digest('hex').slice(0, 10)}`)],
     ['cg-py', pyShim(base)],
     ['cg-setup', setupScript(base)],
     ['cg-run', runScript(base)],

@@ -130,7 +130,8 @@ export class CircuitPanel implements vscode.Disposable {
   post(m: HostMessage): void {
     if (!this.ready) {
       // keep only the latest message of each kind while the webview boots
-      const key = (x: HostMessage) => (x.type === 'diagnostics' ? 'diagnostics:' + x.set : x.type === 'task' ? 'task:' + x.task : x.type);
+      const key = (x: HostMessage) =>
+        x.type === 'diagnostics' ? 'diagnostics:' + x.set : x.type === 'task' ? 'task:' + x.task : x.type === 'live' ? 'live:' + x.state : x.type;
       this.queue = this.queue.filter((q) => key(q) !== key(m) || m.type === 'error');
       this.queue.push(m);
       return;
@@ -262,6 +263,9 @@ export class CircuitPanel implements vscode.Disposable {
         break;
       case 'splitTrace':
         await vscode.commands.executeCommand('codeGraph.splitTrace', m.proc);
+        break;
+      case 'stopRun':
+        await vscode.commands.executeCommand('codeGraph.stopRun');
         break;
       case 'replay':
         // views of one run play together: the containers' calls line up across them

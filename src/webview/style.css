@@ -417,6 +417,11 @@ pre.sig.out { max-height: 220px; overflow: auto; font-size: 10.5px; }
 .tl-body canvas { position: absolute; left: 0; top: 0; }
 .tl-over { cursor: crosshair; }
 .timeline .tooltip { position: absolute; z-index: 30; }
+.live-bar .tl-head { min-height: 24px; }
+.live-dot { width: 8px; height: 8px; border-radius: 50%; background: var(--cc-broken); box-shadow: 0 0 6px var(--cc-broken); animation: live-blink 1.2s ease-in-out infinite; }
+@keyframes live-blink { 50% { opacity: .25; } }
+.live-bar .btn.stop { border-color: var(--cc-broken); color: var(--cc-fg); }
+.live-bar .btn.stop:hover { background: color-mix(in srgb, var(--cc-broken) 18%, transparent); }
 .mono { font-family: var(--cc-mono); font-size: 10.5px; }
 
 /* narrow screens: details become a bottom sheet */

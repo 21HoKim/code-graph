@@ -14,6 +14,7 @@ import * as fs from 'fs';
 import * as os from 'os';
 import * as path from 'path';
 import { guessLibraries, libraryDirFlags, libraryDirs, libraryFlags, type BuildTarget, type LibraryGuess } from './buildinfo';
+import { LiveTail, type LiveUpdate } from './live';
 import type { Parsers } from './extract';
 import { instrumentSources } from './instrument';
 import { mirrorWorkspace } from './mirror';
@@ -65,6 +66,10 @@ export interface RunInput {
   maxEvents: number;
   values: boolean;
   signal?: AbortSignal;
+  /** Ends the program now and keeps its trace (a Stop button); `signal` cancels the run instead. */
+  finish?: AbortSignal;
+  /** Follow the program while it runs (the runtimes write what runs right now every 200 ms). */
+  live?: (u: LiveUpdate) => void;
   onStage?: (stage: 'build' | 'run' | 'trace', message?: string, done?: number, total?: number) => void;
   log?: (line: string) => void;
 }
@@ -152,10 +157,19 @@ export async function runAndTrace(o: RunInput): Promise<RunResult> {
   const started = new Date().toISOString();
   // a custom build runs its program in the traced copy; a make/CMake program where it is linked
   const cwd = runDir ? path.join(runDir, ...(o.cwd ?? '').split('/').filter(Boolean)) : o.cwd ? path.resolve(o.root, o.cwd) : (o.target?.dir ?? o.root);
-  const r = await runProgram(cmd, args, { cwd, env, timeoutMs: o.timeoutMs, signal: o.signal });
+  let tail: LiveTail | undefined;
+  if (o.live) {
+    env.CODE_GRAPH_LIVE = '1';
+    const liveFns = fns;
+    tail = new LiveTail({ graph: o.graph, sources: () => [{ file: traceFile, fns: liveFns }], onUpdate: o.live });
+    tail.begin();
+  }
+  const r = await runProgram(cmd, args, { cwd, env, timeoutMs: o.timeoutMs, signal: o.signal, finish: o.finish });
+  tail?.end();
   const output = r.output;
   if (r.error) return fail('run', `could not start ${cmd}: ${r.error}`, output);
   if (r.timedOut) notes.push(`stopped after ${Math.round(o.timeoutMs / 1000)} s (codeGraph.run.timeoutSeconds)`);
+  if (r.stopped) notes.push('stopped by you');
 
   o.onStage?.('trace');
   let text = '';
@@ -171,7 +185,7 @@ export async function runAndTrace(o: RunInput): Promise<RunResult> {
     command,
     started,
     output,
-    exit: { code: r.code, signal: r.signal ?? undefined, timedOut: r.timedOut },
+    exit: { code: r.code, signal: r.signal ?? undefined, timedOut: r.timedOut, stopped: r.stopped || undefined },
   });
   if (o.entry.kind === 'python' && trace.exit.code === null && r.code !== null) trace.exit.code = r.code;
   const runtimeDiagnostics = traceDiagnostics(trace, o.graph);
@@ -595,14 +609,16 @@ function dedupe(d: Diagnostic[]): Diagnostic[] {
 }
 
 /** Run the traced program: no stdin, output captured (tail), SIGTERM at the time limit then SIGKILL. */
+/** Runs a program to its end, the time limit (0 = none) or a stop (`signal` cancels, `finish` ends it as asked). */
 export function runProgram(
   cmd: string,
   args: string[],
-  o: { cwd: string; env: NodeJS.ProcessEnv; timeoutMs: number; signal?: AbortSignal },
-): Promise<{ code: number | null; signal: string | null; timedOut: boolean; output: string; error?: string }> {
+  o: { cwd: string; env: NodeJS.ProcessEnv; timeoutMs: number; signal?: AbortSignal; finish?: AbortSignal },
+): Promise<{ code: number | null; signal: string | null; timedOut: boolean; stopped?: boolean; output: string; error?: string }> {
   return new Promise((resolve) => {
     let output = '';
     let timedOut = false;
+    let stopped = false;
     let child: ChildProcess;
     try {
       child = spawn(cmd, args, { cwd: o.cwd, env: o.env, stdio: ['ignore', 'pipe', 'pipe'], windowsHide: true });
@@ -621,11 +637,20 @@ export function runProgram(
       child.kill('SIGTERM');
       killer = setTimeout(() => child.kill('SIGKILL'), 2500);
     };
-    const timer = setTimeout(() => {
-      timedOut = true;
+    const timer =
+      o.timeoutMs > 0
+        ? setTimeout(() => {
+            timedOut = true;
+            stop();
+          }, o.timeoutMs)
+        : undefined;
+    const finish = () => {
+      stopped = true;
       stop();
-    }, o.timeoutMs);
+    };
     o.signal?.addEventListener('abort', stop);
+    o.finish?.addEventListener('abort', finish);
+    if (o.finish?.aborted) finish();
     child.on('error', (e) => {
       clearTimeout(timer);
       resolve({ code: null, signal: null, timedOut, output, error: String(e) });
@@ -634,7 +659,8 @@ export function runProgram(
       clearTimeout(timer);
       if (killer) clearTimeout(killer);
       o.signal?.removeEventListener('abort', stop);
-      resolve({ code, signal: sig, timedOut, output: output.length > OUTPUT_MAX ? '…' + output.slice(-OUTPUT_MAX) : output });
+      o.finish?.removeEventListener('abort', finish);
+      resolve({ code, signal: sig, timedOut, stopped, output: output.length > OUTPUT_MAX ? '…' + output.slice(-OUTPUT_MAX) : output });
     });
   });
 }

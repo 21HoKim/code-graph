@@ -52,7 +52,8 @@ export function options(root: string): Options {
   }
   const r = config.run ?? {};
   const c = config.compose ?? {};
-  const secs = (v: unknown, fallback: number) => (typeof v === 'number' && v > 0 ? v : fallback);
+  // 0 = no limit: the run ends with the program, or with Stop
+  const secs = (v: unknown, fallback: number) => (typeof v === 'number' && v >= 0 ? v : fallback);
   const setting = s.get<string>('run.compose.file', '');
   return {
     config,
@@ -67,7 +68,7 @@ export function options(root: string): Options {
     linkFlags: r.linkFlags ?? s.get<string[]>('run.linkFlags', []),
     useBuildSystem: s.get<boolean>('run.useBuildSystem', true),
     customBuild: r.build && r.program ? { command: r.build, program: r.program } : undefined,
-    timeoutMs: secs(r.timeoutSeconds, Math.max(1, s.get<number>('run.timeoutSeconds', 20))) * 1000,
+    timeoutMs: secs(r.timeoutSeconds, Math.max(0, s.get<number>('run.timeoutSeconds', 0))) * 1000,
     maxEvents: Math.max(1000, s.get<number>('run.maxEvents', 200000)),
     values: s.get<boolean>('run.captureValues', true),
     compose: {
@@ -75,7 +76,7 @@ export function options(root: string): Options {
       profiles: c.profiles ?? [],
       services: c.services ?? s.get<string[]>('run.compose.services', []),
       docker: s.get<string>('run.compose.docker', 'docker') || 'docker',
-      timeoutMs: secs(c.timeoutSeconds, secs(r.timeoutSeconds, Math.max(1, s.get<number>('run.timeoutSeconds', 20)))) * 1000,
+      timeoutMs: secs(c.timeoutSeconds, secs(r.timeoutSeconds, Math.max(0, s.get<number>('run.timeoutSeconds', 0)))) * 1000,
       startTimeoutMs: secs(c.startTimeoutSeconds, Math.max(10, s.get<number>('run.compose.startTimeoutSeconds', 600))) * 1000,
     },
   };

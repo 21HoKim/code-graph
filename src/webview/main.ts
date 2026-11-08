@@ -32,6 +32,7 @@ import { buildOverlay, type Overlay } from './overlay';
 import { Renderer, esc } from './render';
 import { Timeline } from './timeline';
 import { RuntimeMap, TraceModel, argsText, augmentGraph, fmtNs, retText, threadColor, valText } from './traceview';
+import type { LiveUpdate } from '../core/live';
 import type { RunTrace } from '../core/trace';
 import { Viewport } from './viewport';
 
@@ -248,6 +249,10 @@ class App {
   private traceScope?: string;
   /** Applying another view's replay state: do not send it back. */
   private syncing = false;
+  /** A run in progress, followed live: its bar (threads, time, Stop) and wire lookup. */
+  private liveBar?: HTMLElement;
+  private liveThreads = '';
+  private liveEnds?: { proj: Projection; map: Map<string, string> };
   private replay = { t: 0, playing: false, speed: 1, raf: 0, wall: 0 };
   private live: { node: string; text: string; color: string; born: number; up?: boolean }[] = [];
   private follow: string | null = null;
@@ -351,6 +356,10 @@ class App {
         break;
       case 'replay':
         this.followReplay(m.t, m.playing, m.speed);
+        break;
+      case 'live':
+        if (m.state === 'end') this.endLive();
+        else if (m.update) this.applyLive(m.update);
         break;
       case 'error':
         this.showNotice(m.message, 8000);
@@ -1392,6 +1401,7 @@ class App {
   }
 
   private setTrace(tr: RunTrace | null, notes: string[]): void {
+    if (tr) this.endLive();
     this.clearTraceState();
     this.traceNotes = notes;
     if (tr) {
@@ -1463,6 +1473,100 @@ class App {
     this.timeline?.setPlaying(false);
     this.flow.setMode(this.state.flow);
     this.shareReplay();
+  }
+
+  /**
+   * A run in progress: each thread's blocks light up in its colour (where it is right now), calls since
+   * the last update pulse along their wires, busy functions show how many calls they just took.
+   */
+  private applyLive(u: LiveUpdate): void {
+    if (!this.liveBar) {
+      if (this.trace) this.setTrace(null, []);
+      this.stopPlay();
+      this.flow.setMode('off');
+      // built once (updates only change its text: a click on Stop must not land on a replaced button);
+      // Stop first, since notifications cover the right end of the panel
+      this.liveBar = h('div', { class: 'timeline ui live-bar', title: t('liveHint') });
+      this.liveBar.innerHTML =
+        `<div class="tl-head"><span class="live-dot"></span><b>${esc(t('live'))}</b>` +
+        (this.settings?.host !== false ? `<button class="btn stop" title="${esc(t('stopHint'))}">■ ${esc(t('stopRun'))}</button>` : '') +
+        `<span class="tl-time mono"></span><span class="flag live-calls"></span><span class="tl-threads"></span></div>`;
+      this.liveBar.querySelector<HTMLElement>('.stop')?.addEventListener('click', () => api.postMessage({ type: 'stopRun' }));
+      this.liveThreads = '';
+      this.root.insertBefore(this.liveBar, this.status);
+    }
+    const procs = new Set(u.threads.map((x) => x.proc).filter(Boolean));
+    const name = (x: LiveUpdate['threads'][number]) => (procs.size > 1 && x.proc ? `${x.proc} · ${x.name}` : x.name);
+    this.liveBar.querySelector<HTMLElement>('.tl-time')!.textContent = `${(u.elapsedMs / 1000).toFixed(1)} s`;
+    this.liveBar.querySelector<HTMLElement>('.live-calls')!.textContent = t('liveCalls', { n: u.calls.toLocaleString() });
+    const chips = u.threads
+      .map((x) => `<span class="chip th" title="${esc(name(x))}"><i style="background:${threadColor(x.id)}"></i>${esc(name(x))}</span>`)
+      .join('');
+    if (chips !== this.liveThreads) {
+      this.liveThreads = chips;
+      this.liveBar.querySelector<HTMLElement>('.tl-threads')!.innerHTML = chips;
+    }
+    const proj = this.proj;
+    if (!proj) return;
+    // where every thread is: its stack, innermost first
+    const active = new Map<string, { color: string; top: boolean }>();
+    const owner = new Map<string, number>();
+    for (const st of u.stacks) {
+      const color = threadColor(st.th);
+      let top = true;
+      for (let i = st.fns.length - 1; i >= 0; i--) {
+        const node = proj.repOf(st.fns[i]);
+        if (!node) continue;
+        if (top) owner.set(st.fns[i], st.th);
+        if (!active.has(node)) active.set(node, { color, top });
+        top = false;
+      }
+    }
+    this.renderer.setActive(active);
+    // calls since the last update, along their wires
+    if (this.liveEnds?.proj !== proj) {
+      const map = new Map<string, string>();
+      for (const e of proj.edges) if (!map.has(e.src + '\u0001' + e.dst) || e.kind === 'call') map.set(e.src + '\u0001' + e.dst, e.id);
+      this.liveEnds = { proj, map };
+    }
+    const pal = readPalette();
+    let fired = 0;
+    for (const [a, b] of u.edges) {
+      if (fired >= 40 || !a) continue;
+      const na = proj.repOf(a);
+      const nb = proj.repOf(b);
+      const edge = na && nb && na !== nb ? this.liveEnds.map.get(na + '\u0001' + nb) : undefined;
+      if (!edge) continue;
+      const th = owner.get(b) ?? owner.get(a);
+      this.flow.pulse(edge, th !== undefined ? threadColor(th) : pal.call, false, 600);
+      fired++;
+    }
+    // the busiest functions of the last moment
+    const now = performance.now();
+    const labelled = new Set(this.live.filter((x) => now - x.born < 900).map((x) => x.node));
+    for (const [e, n] of u.hot.slice(0, 5)) {
+      const node = proj.repOf(e);
+      if (!node || labelled.has(node)) continue;
+      labelled.add(node);
+      const th = owner.get(e);
+      this.live.push({ node, text: `+${n.toLocaleString()}`, color: th !== undefined ? threadColor(th) : pal.call, born: now, up: true });
+    }
+    const life = 1500;
+    this.live = this.live.filter((x) => now - x.born < life).slice(-30);
+    this.renderer.liveLabels(
+      this.live.map((x) => ({ node: x.node, text: x.text, color: x.color, age: (now - x.born) / life, up: x.up })),
+      this.measure,
+    );
+  }
+
+  private endLive(): void {
+    if (!this.liveBar) return;
+    this.liveBar.remove();
+    this.liveBar = undefined;
+    this.live = [];
+    this.renderer.setActive(new Map());
+    this.renderer.liveLabels([], this.measure);
+    this.flow.setMode(this.state.flow);
   }
 
   /** Views of one run (one per container) play together: tell the others where this one is. */
@@ -1799,6 +1903,7 @@ class App {
     let html = `<h2><span class="pill" style="--k:var(--cc-call)">◉</span>${esc(t('runTitle'))}<button class="close">✕</button></h2>`;
     html += `<div class="qn">${esc(tr.command)}</div><div class="row">`;
     if (ex.crash && ex.crash !== 'SIGTERM') html += `<span class="flag bad">✕ ${esc(ex.crash)}</span>`;
+    else if (ex.stopped) html += `<span class="flag warn">■ ${esc(t('stoppedByYou'))}</span>`;
     else if (ex.timedOut) html += `<span class="flag warn">⏱ ${esc(t('stopped'))}</span>`;
     else html += `<span class="flag ${ex.code ? 'bad' : ''}">${esc(ex.code ? t('exitCode', { n: ex.code }) : t('exitOk'))}</span>`;
     html += `<span class="flag">${fmtNs(tr.durationNs)}</span><span class="flag">${esc(t('callsN', { n: tr.spans.t.length }))}</span></div>`;
@@ -1811,12 +1916,13 @@ class App {
       html += `<h3>▣ ${esc(t('processes'))} (${tr.procs.length})</h3><ul class="lst">`;
       for (const p of tr.procs) {
         const x = p.exit;
-        const stopped = x.timedOut && (x.code === null || x.code === 143 || x.code === 130);
+        // a stop (time limit, Stop) ends a container with SIGTERM: 143, or -15 for a plain process
+        const stopped = (x.timedOut || x.stopped) && (x.code === null || [143, 130, -15, -2].includes(x.code));
         const flag =
           x.crash && x.crash !== 'SIGTERM'
             ? `<span class="flag bad">✕ ${esc(x.crash)}</span>`
             : stopped
-              ? `<span class="flag warn">⏱ ${esc(t('stopped'))}</span>`
+              ? `<span class="flag warn">${x.stopped ? `■ ${esc(t('stoppedByYou'))}` : `⏱ ${esc(t('stopped'))}`}</span>`
               : x.code === null
                 ? ''
                 : `<span class="flag ${x.code ? 'bad' : ''}">${esc(x.code ? t('exitCode', { n: x.code }) : t('exitOk'))}</span>`;

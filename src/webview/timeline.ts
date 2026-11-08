@@ -77,7 +77,9 @@ export class Timeline {
     const status =
       ex.crash && ex.crash !== 'SIGTERM'
         ? `<span class="flag bad">✕ ${esc(ex.crash)}</span>`
-        : ex.timedOut
+        : ex.stopped
+          ? `<span class="flag warn">■ ${esc(t('stoppedByYou'))}</span>`
+          : ex.timedOut
           ? `<span class="flag warn">⏱ ${esc(t('stopped'))}</span>`
           : ex.code
             ? `<span class="flag bad">${esc(t('exitCode', { n: ex.code }))}</span>`

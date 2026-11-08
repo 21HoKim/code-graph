@@ -1,5 +1,6 @@
 /** Messages between the extension host and the webview. */
 import type { CodeGraph, Diagnostic, VerifyInfo } from '../core/model';
+import type { LiveUpdate } from '../core/live';
 import type { RunTrace } from '../core/trace';
 
 export type { VerifyInfo };
@@ -32,6 +33,8 @@ export type HostMessage =
   /** `scope`: a view of one process (container) of a trace of several. */
   | { type: 'trace'; trace: RunTrace | null; notes?: string[]; scope?: string }
   | { type: 'showProblems' }
+  /** A run in progress: what runs right now ('tick', every 250 ms), until 'end' (its trace follows). */
+  | { type: 'live'; state: 'tick' | 'end'; update?: LiveUpdate }
   /** Another view of the same run played, paused, jumped or changed speed: follow it. */
   | { type: 'replay'; t: number; playing: boolean; speed: number }
   | { type: 'error'; message: string };
@@ -47,5 +50,7 @@ export type WebviewMessage =
   | { type: 'clearTrace' }
   /** Open a view per process (container) of the trace, or of the one named. */
   | { type: 'splitTrace'; proc?: string }
+  /** Stop the run in progress and show what it recorded. */
+  | { type: 'stopRun' }
   /** The replay was played, paused, moved or sped up here: the other views of the run follow. */
   | { type: 'replay'; t: number; playing: boolean; speed: number };

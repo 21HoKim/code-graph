@@ -16,8 +16,13 @@ whole process however it was started, with the settings from the environment
 (CODE_GRAPH_TRACE, CODE_GRAPH_PY_ROOTS, …); its trace file is only created
 once code under a root runs. Forked children get a trace of their own.
 
+With CODE_GRAPH_LIVE=1 the trace also gets, every 200 ms, what runs right now
+(each thread's call stack, call counts, caller → callee counts), flushed at
+once, so a viewer can follow the program while it runs.
+
 Output: JSON lines (schema code-graph-trace/1), see src/core/trace.ts.
 """
+import _thread
 import atexit
 import json
 import os
@@ -83,6 +88,7 @@ class Tracer:
             self.code_fid = {}
         self.nfn = 0
         self.keep = False
+        self.names = {}
         self.threads = {}
         self.stacks = {}
         self.calls = {}
@@ -111,6 +117,40 @@ class Tracer:
         self.out = None  # the parent's (flushed) file; the child opens its own once it runs workspace code
         self.lazy = True
         self.reset()
+        self.start_live()  # threads do not survive a fork
+
+    # -- live: what runs right now, for a viewer following the run -----------------
+    def start_live(self):
+        if os.environ.get("CODE_GRAPH_LIVE", "0") in ("", "0"):
+            return
+        # a bare thread: not traced, not in the trace's thread list
+        _thread.start_new_thread(self._live_loop, ())
+
+    def _live_loop(self):
+        pause = 0.05  # the first one soon: short programs are seen too
+        while not self.done:
+            time.sleep(pause)
+            pause = 0.2
+            try:
+                self.live_tick()
+            except Exception:
+                pass
+
+    def live_tick(self):
+        with self.lock:
+            if self.done:
+                return
+            alive = {self.threads[i] for i in list(threading._active) if i in self.threads}
+            edges = {}
+            for (a, b, _t), n in list(self.edges.items()):
+                edges[(a, b)] = edges.get((a, b), 0) + n
+            self.write({"k": "live", "t": _now() - _T0,
+                        "th": [[t, self.names.get(t, "thread-%d" % t), list(st)] for t, st in list(self.stacks.items()) if t in alive],
+                        "calls": [[f, n] for f, n in list(self.calls.items())],
+                        "edges": [[a, b, n] for (a, b), n in edges.items()]})
+            self.flush()
+            if self.out is not None and not self.out.closed:
+                self.out.flush()
 
     # -- output ---------------------------------------------------------------
     def write(self, obj):
@@ -182,6 +222,7 @@ class Tracer:
             if new:
                 # threading._active is filled a moment after the thread starts: use the object we were given
                 cur = thread or threading._active.get(ident) or threading.current_thread()
+                self.names[t] = cur.name
                 self.write({"k": "t", "id": t, "name": cur.name, "parent": getattr(cur, "_cc_parent", None),
                             "t": _now() - _T0, "daemon": bool(getattr(cur, "daemon", False))})
         return t
@@ -494,6 +535,7 @@ def main():
     tracer = Tracer(opts["root"], opts["out"], opts["max"], opts["values"])
     tracer.patch_threading()
     _finish_on_hard_exit(tracer)
+    tracer.start_live()
 
     import signal
 
@@ -589,6 +631,7 @@ def start_auto():
         pass
     if not (sys.version_info >= (3, 12) and tracer.install_monitoring()):
         tracer.install_profile()
+    tracer.start_live()
     return tracer
 
 

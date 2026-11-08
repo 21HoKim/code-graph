@@ -3,6 +3,16 @@
 From 0.2.1 on, every change to the extension pushed to `main` is published automatically as the next patch
 version; the notes for each one are on the [Releases](https://github.com/21HoKim/code-graph/releases) page.
 
+## 0.5.0
+
+- **Live**: Run & Trace and Run & Trace with Docker Compose follow the program while it runs. Each thread lights up
+  where it is right now, calls flow along the wires, and busy functions show how many calls they just took. Every
+  container is followed live, in its own colours.
+- Runs have no time limit any more: they last until the program ends or you press **■ Stop** in the live bar (or run
+  *CodeGraph: Stop Run and Show the Trace*). Stopping keeps everything recorded, and the replay follows.
+  `run.timeoutSeconds` still sets a limit for those who want one.
+- A container kept from an earlier run no longer links a tracer runtime from an older CodeGraph version.
+
 ## 0.4.1
 
 - **A view per container**: after a Compose run (or loading several trace files at once), one circuit per

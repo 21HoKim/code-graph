@@ -85,6 +85,11 @@ Compose v2 for containers.
   wrapped.
 - **Python**: a standard-library tracer (`sys.monitoring` on 3.12+, `sys.setprofile` before) records calls,
   returns, exceptions, values and object identities per thread, for workspace code only.
+- **Live**: while the program runs, each thread's current call stack lights up in its colour, calls of the last
+  moment pulse along their wires, and busy functions show how many calls they just took (`+120`). The bar at the
+  bottom has the threads, the time and **■ Stop**. A run lasts until the program ends or you press Stop
+  (`run.timeoutSeconds` sets a limit; 0, the default, is none); Stop keeps everything recorded and the replay
+  follows. A long run is replayed with its first `run.maxEvents` calls in detail; the live view covers all of it.
 - **Replay**: thread swimlanes with play, scrub and step. Blocks on each thread's call stack glow in the thread's
   colour, pulses run along the wires, values ride into the blocks. Blocks that never ran fade out; calls only the
   run revealed (virtual dispatch, callbacks) get wires of their own.
@@ -127,8 +132,9 @@ workspace root plus its override file, as `docker compose` reads them, or `compo
 Inside a traced container, every C/C++ compiler on `PATH` is wrapped (`gcc`, `g++-12`, `clang++-17`, cross
 compilers, `CC`/`CXX` given by full path, `ccache` in front works too). So is every Python interpreter, and a
 `sitecustomize` traces the Python processes started some other way (by full path, gunicorn, multiprocessing
-children). The time limit (`timeoutSeconds`, 20 s) counts from the first traced program; image builds and builds
-inside the containers have `startTimeoutSeconds` (600 s).
+children). The run is followed live, and lasts until every traced container has ended or you press **■ Stop**;
+`timeoutSeconds` sets a limit, counted from the first traced program. Image builds and builds inside the
+containers have `startTimeoutSeconds` (600 s).
 
 When a service ran without a traced program, the run summary says why and which key of `.codegraph.json` fixes it:
 
@@ -155,13 +161,13 @@ completes and explains every key.
 | `run.args`, `run.cwd`, `run.env` | arguments, the folder to run in (default: where the build puts it), extra environment |
 | `run.build`, `run.program` | a build CodeGraph does not read by itself and the program it makes (workspace-relative) |
 | `run.buildFlags`, `run.linkFlags` | extra compile flags (`-DDEBUG`), extra libraries (`-lssl`) |
-| `run.timeoutSeconds` | stop the program after this long (the trace so far is kept) |
+| `run.timeoutSeconds` | stop the program after this long (the trace so far is kept); 0 = when it ends, or Stop |
 | `compose.files`, `compose.profiles` | compose files in order, profiles to enable |
 | `compose.services` | which services to trace (default: every service that has workspace sources) |
 | `compose.build` | per service: a command run in its container before its own command |
 | `compose.sourcePath` | per service: where the workspace is in its container |
 | `compose.env` | per service: extra environment for the traced run (e.g. `CXX`) |
-| `compose.timeoutSeconds`, `compose.startTimeoutSeconds` | how long the programs run; time for image and in-container builds |
+| `compose.timeoutSeconds`, `compose.startTimeoutSeconds` | how long the programs run (0 = until Stop); time for image and in-container builds |
 
 ```jsonc
 {
@@ -186,6 +192,7 @@ completes and explains every key.
 | `CodeGraph: Run & Trace` | build, run and replay (toolbar **▶ Run**) |
 | `CodeGraph: Run & Trace with Docker Compose` | the compose project with its services traced in their containers |
 | `CodeGraph: Open a View per Container` | one circuit per container of the current trace, side by side, playing together |
+| `CodeGraph: Stop Run and Show the Trace` | end the run in progress (the live bar's **■ Stop**) and replay what it recorded |
 | `CodeGraph: Create / Open .codegraph.json` | project settings for unusual setups |
 | `CodeGraph: Load Trace File…` | open a trace written by the CLI or the tracers; several at once share one timeline |
 | click / double-click a block | show its wires · open it, or jump to the source |

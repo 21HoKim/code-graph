@@ -103,7 +103,8 @@ export interface RunTrace {
   command: string;
   started: string;
   durationNs: number;
-  exit: { code: number | null; signal?: string; timedOut?: boolean; crash?: string };
+  /** `stopped`: ended by the user (Stop) — like `timedOut`, not a failure. */
+  exit: { code: number | null; signal?: string; timedOut?: boolean; stopped?: boolean; crash?: string };
   /** The detailed event cap was reached; counts in `calls` are still complete. */
   truncated: boolean;
   events: number;
@@ -574,6 +575,7 @@ export function mergeTraces(input: { name: string; trace: RunTrace }[], g: CodeG
       code: failed?.trace.exit.code ?? (parts.every((p) => p.trace.exit.code === 0) ? 0 : null),
       crash: crashed ? `${crashed.name}: ${crashed.trace.exit.crash}` : undefined,
       timedOut: parts.some((p) => p.trace.exit.timedOut),
+      stopped: parts.some((p) => p.trace.exit.stopped) || undefined,
       signal: crashed?.trace.exit.signal,
     },
     truncated: parts.some((p) => p.trace.truncated),

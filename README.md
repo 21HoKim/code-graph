@@ -13,8 +13,9 @@ values.
 1. Open a folder with C, C++ or Python code and click **CodeGraph** in the activity bar.
 2. **Open Circuit View**: the project as blocks and wires. Click a block to see what travels on its wires,
    double-click it to open it; `1`–`5` change the level, `/` searches.
-3. **▶ Run & Trace**: CodeGraph builds the program, runs it and replays the run. Every thread lights up the blocks
-   it is in, values ride along the wires, and a crash shows where each thread was.
+3. **▶ Run & Trace**: CodeGraph builds the program and runs it. While it runs, every thread lights up the blocks it
+   is in and calls flow along the wires, live. When it ends (or you press **■ Stop**) the run is replayed with the
+   values on the wires, and a crash shows where each thread was.
 4. **Run & Trace with Docker Compose**: for programs that only work together with their peers. Every container
    ends up on one timeline.
 
@@ -56,10 +57,11 @@ services:
     depends_on: [server]
 ```
 
-Click **Run & Trace with Docker Compose**: you see one node's request leave and the other node's handler pick it up.
-You don't need to attach VS Code to the containers; one run covers all of them.
+Click **Run & Trace with Docker Compose**: the circuit follows both containers live. **■ Stop** ends the run, and the
+replay shows one node's request leave and the other node's handler pick it up. You don't need to attach VS Code to
+the containers; one run covers all of them, for as long as you let it run.
 
-![Two nodes in their own Compose network, traced in their containers and replayed on one timeline](docs/images/compose.gif)
+![Both containers followed live, then Stop and the replay of what they did](docs/images/live.gif)
 
 **⧉ A view per container** opens one circuit per container side by side. They play together, and each shows only
 what ran in its own container.

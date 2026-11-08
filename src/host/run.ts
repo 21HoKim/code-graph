@@ -18,7 +18,31 @@ import { options, type Options } from './project';
 import type { AnalysisService } from './service';
 
 let running: AbortController | undefined;
+/** Ends the run in progress and keeps its trace (Stop), where `running` cancels it. */
+let finishing: AbortController | undefined;
 let output: vscode.OutputChannel | undefined;
+
+/** Run in progress: the circuit follows it live, and Stop is offered. */
+function begin(): { ctl: AbortController; fin: AbortController } {
+  running?.abort();
+  const ctl = (running = new AbortController());
+  const fin = (finishing = new AbortController());
+  void vscode.commands.executeCommand('setContext', 'codeGraph.running', true);
+  return { ctl, fin };
+}
+
+function done(ctl: AbortController, panel: CircuitPanel): void {
+  panel.post({ type: 'live', state: 'end' });
+  if (running !== ctl) return;
+  running = undefined;
+  finishing = undefined;
+  void vscode.commands.executeCommand('setContext', 'codeGraph.running', false);
+}
+
+/** "Stop": the program (or the Compose project) stops now; what it recorded is shown. */
+export function finishRun(): void {
+  finishing?.abort();
+}
 
 export function lastRunOutput(): vscode.OutputChannel {
   output ??= vscode.window.createOutputChannel('CodeGraph Run');
@@ -206,8 +230,7 @@ export async function runTraceCommand(ctx: vscode.ExtensionContext, svc: Analysi
   if (target === null) return;
   const label = o.customBuild && entry.kind === 'native' ? `${entry.label} · ${o.customBuild.program}` : target ? `${entry.label} · ${target.name}` : entry.label;
 
-  running?.abort();
-  const ctl = (running = new AbortController());
+  const { ctl, fin } = begin();
   const cfg = vscode.workspace.getConfiguration('codeGraph');
   const out = lastRunOutput();
   out.clear();
@@ -242,6 +265,8 @@ export async function runTraceCommand(ctx: vscode.ExtensionContext, svc: Analysi
           maxEvents: o.maxEvents,
           values: o.values,
           signal: ctl.signal,
+          finish: fin.signal,
+          live: (u) => panel.post({ type: 'live', state: 'tick', update: u }),
           log: (l) => out.appendLine(l),
           onStage: (stage, message, done, total) => {
             progress.report({ message: `${stage}${message ? ': ' + message : ''}${total ? ` ${done}/${total}` : ''}` });
@@ -252,14 +277,15 @@ export async function runTraceCommand(ctx: vscode.ExtensionContext, svc: Analysi
     if (ctl.signal.aborted) return;
     // a networked program may only work next to its peers: the Compose run is one click away
     const compose = o.compose.files.length ? { label: vscode.l10n.t('Run & Trace with Docker Compose'), command: 'codeGraph.runCompose' } : undefined;
+    panel.post({ type: 'live', state: 'end' });
     showRun(svc, panel, label, r, task, true, compose);
-    if (r.trace) offerCompose(svc, label, r.trace);
+    if (r.trace && !r.trace.exit.stopped) offerCompose(svc, label, r.trace);
   } catch (e) {
     const msg = String((e as Error)?.message ?? e);
     out.appendLine('run failed: ' + ((e as Error)?.stack ?? msg));
     task('error', msg);
   } finally {
-    if (running === ctl) running = undefined;
+    done(ctl, panel);
   }
 }
 
@@ -280,8 +306,7 @@ export async function runComposeCommand(ctx: vscode.ExtensionContext, svc: Analy
   }
   const panel = CircuitPanel.show(ctx, svc);
   const graph = svc.graph ?? (await svc.analyze());
-  running?.abort();
-  const ctl = (running = new AbortController());
+  const { ctl, fin } = begin();
   const out = lastRunOutput();
   out.clear();
   out.show(true); // image builds and in-container builds take a while: show what happens
@@ -312,6 +337,8 @@ export async function runComposeCommand(ctx: vscode.ExtensionContext, svc: Analy
           maxEvents: o.maxEvents,
           values: o.values,
           signal: ctl.signal,
+          finish: fin.signal,
+          live: (u) => panel.post({ type: 'live', state: 'tick', update: u }),
           confirmRecreate: async (up) => {
             const go = vscode.l10n.t('Restart with tracing');
             const pick = await vscode.window.showWarningMessage(
@@ -333,6 +360,7 @@ export async function runComposeCommand(ctx: vscode.ExtensionContext, svc: Analy
       task('error', vscode.l10n.t('Cancelled.'));
       return;
     }
+    panel.post({ type: 'live', state: 'end' });
     showRun(svc, panel, label, r, task, false);
     if (r.trace && r.needsConfig) void offerConfig(svc.root, vscode.l10n.t('Some services were not traced ({0}). Tell CodeGraph about them in {1}.', r.notes[0] ?? '', CONFIG_FILE));
   } catch (e) {
@@ -340,7 +368,7 @@ export async function runComposeCommand(ctx: vscode.ExtensionContext, svc: Analy
     out.appendLine('run failed: ' + ((e as Error)?.stack ?? msg));
     task('error', msg);
   } finally {
-    if (running === ctl) running = undefined;
+    done(ctl, panel);
   }
 }
 

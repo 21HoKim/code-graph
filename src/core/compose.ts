@@ -26,6 +26,7 @@ import * as fs from 'fs';
 import * as path from 'path';
 import type { ProjectConfig } from './config';
 import { analyzeDockerfile, copiedBy, traceDockerfile, type DockerfileCopy } from './dockerfile';
+import { LiveTail, type LiveUpdate } from './live';
 import type { Parsers } from './extract';
 import { instrumentSources } from './instrument';
 import { mirrorWorkspace } from './mirror';
@@ -237,7 +238,7 @@ export function effectiveCommand(s: ComposeService, image?: { Entrypoint?: strin
 /** The override file: traced copy, /codegraph, trace environment, wrapper and traced image builds. */
 export function composeOverride(
   plans: ServicePlan[],
-  o: { mirror: string; codegraph: string; maxEvents: number; values: boolean; dockerfiles?: Map<string, string> },
+  o: { mirror: string; codegraph: string; maxEvents: number; values: boolean; dockerfiles?: Map<string, string>; live?: boolean },
 ): { services: Record<string, unknown> } {
   const out: Record<string, unknown> = {};
   for (const p of plans) {
@@ -257,6 +258,7 @@ export function composeOverride(
         CODE_GRAPH_TRACE: `${MOUNT}/trace/${p.name}/{host}-{pid}.jsonl`,
         CODE_GRAPH_MAX_EVENTS: String(o.maxEvents),
         CODE_GRAPH_VALUES: o.values ? '1' : '0',
+        ...(o.live ? { CODE_GRAPH_LIVE: '1' } : {}),
         CODE_GRAPH_SERVICE: p.name,
         CODE_GRAPH_PY_ROOTS: [...new Set(p.roots.map((r) => r.target))].join(':'),
         ...(p.prebuild ? { CODE_GRAPH_PREBUILD: p.prebuild } : {}),
@@ -308,6 +310,10 @@ export interface ComposeRunInput {
   maxEvents: number;
   values: boolean;
   signal?: AbortSignal;
+  /** Ends the run now (stops the project) and keeps the traces (a Stop button); `signal` cancels. */
+  finish?: AbortSignal;
+  /** Follow the containers while they run (what runs right now, every 200 ms). */
+  live?: (u: LiveUpdate) => void;
   /** Containers of this project are running: may CodeGraph recreate (and afterwards stop) them? */
   confirmRecreate?: (running: string[]) => Promise<boolean>;
   onStage?: (stage: 'build' | 'run' | 'trace', message?: string) => void;
@@ -427,7 +433,7 @@ export async function runComposeTrace(o: ComposeRunInput): Promise<ComposeRunRes
   }
   const override = path.join(workDir, 'compose.codegraph.yaml');
   const writeOverride = () =>
-    fs.writeFileSync(override, JSON.stringify(composeOverride(plans, { mirror, codegraph: cgDir, maxEvents: o.maxEvents, values: o.values, dockerfiles }), null, 2));
+    fs.writeFileSync(override, JSON.stringify(composeOverride(plans, { mirror, codegraph: cgDir, maxEvents: o.maxEvents, values: o.values, dockerfiles, live: !!o.live }), null, 2));
   writeOverride();
   const files = [...base, '-f', override];
   const imaged = plans.filter((p) => p.image).map((p) => p.name);
@@ -491,6 +497,7 @@ export async function runComposeTrace(o: ComposeRunInput): Promise<ComposeRunRes
   let firstTrace = 0;
   let stopping: Promise<unknown> | undefined;
   let timedOut = false;
+  let stoppedByYou = false;
   const stop = (why: string) => {
     if (stopping) return;
     log(`codegraph: ${why} — stopping the project`);
@@ -505,7 +512,7 @@ export async function runComposeTrace(o: ComposeRunInput): Promise<ComposeRunRes
       firstTrace = Date.now();
       o.onStage?.('run', command);
     }
-    if (firstTrace && Date.now() - firstTrace > o.timeoutMs) {
+    if (firstTrace && o.timeoutMs > 0 && Date.now() - firstTrace > o.timeoutMs) {
       timedOut = true;
       stop(`time limit (${Math.round(o.timeoutMs / 1000)} s)`);
     } else if (!firstTrace && Date.now() - t0 > o.startTimeoutMs) stop(`no traced program started within ${Math.round(o.startTimeoutMs / 1000)} s`);
@@ -519,12 +526,39 @@ export async function runComposeTrace(o: ComposeRunInput): Promise<ComposeRunRes
     });
   }, 1000);
   const onAbort = () => stop('cancelled');
+  const onFinish = () => {
+    stoppedByYou = true;
+    stop('stopped by you');
+  };
   o.signal?.addEventListener('abort', onAbort);
-  const up = await streamed(docker, [...files, 'up', '--no-color'], { cwd, onLine: log, timeoutMs: o.startTimeoutMs + o.timeoutMs + 120_000 });
+  o.finish?.addEventListener('abort', onFinish);
+  // the containers as they run: every traced process's latest "what runs now"
+  const tail = o.live
+    ? new LiveTail({
+        graph: o.graph,
+        sources: () =>
+          plans.flatMap((p) =>
+            safeList(path.join(cgDir, 'trace', p.name))
+              .filter((f) => /\.jsonl(\.\d+)?$/.test(f))
+              .map((f) => ({
+                file: path.join(cgDir, 'trace', p.name, f),
+                proc: p.name,
+                fns: inst.fns,
+                mapFile: (h: Record<string, unknown>) => (typeof h.root === 'string' ? containerPaths(h.root, p.roots) : undefined),
+              })),
+          ),
+        onUpdate: o.live,
+      })
+    : undefined;
+  tail?.begin();
+  const up = await streamed(docker, [...files, 'up', '--no-color'], { cwd, onLine: log, timeoutMs: o.timeoutMs > 0 ? o.startTimeoutMs + o.timeoutMs + 120_000 : undefined });
   clearInterval(poll);
+  tail?.end();
   o.signal?.removeEventListener('abort', onAbort);
+  o.finish?.removeEventListener('abort', onFinish);
   await stopping;
   if (timedOut) notes.push(`stopped after ${Math.round(o.timeoutMs / 1000)} s (codeGraph.run.timeoutSeconds)`);
+  if (stoppedByYou) notes.push('stopped by you');
   if (up.error) notes.push(`docker compose up: ${up.error}`);
 
   // 8. how each container ended, the logs of services that never ran a traced program; then down
@@ -550,7 +584,7 @@ export async function runComposeTrace(o: ComposeRunInput): Promise<ComposeRunRes
       const text = fs.readFileSync(path.join(dir, f), 'utf8');
       const header = headerOf(text);
       const mapFile = header?.lang === 'python' && typeof header.root === 'string' ? containerPaths(header.root, p.roots) : undefined;
-      const tr = parseTrace(text, o.graph, { fns: inst.fns, command: p.name, started, exit: { code: null, timedOut }, mapFile });
+      const tr = parseTrace(text, o.graph, { fns: inst.fns, command: p.name, started, exit: { code: null, timedOut, stopped: stoppedByYou || undefined }, mapFile });
       if (!tr.spans.t.length) continue; // e.g. a Python helper that never touched workspace code
       loaded.push({ trace: tr, host: /^(.*)-\d+\.jsonl/.exec(f)?.[1] ?? '' });
     }
@@ -681,7 +715,7 @@ function safeList(dir: string): string[] {
 function streamed(
   cmd: string,
   args: string[],
-  o: { cwd: string; onLine?: (l: string) => void; signal?: AbortSignal; timeoutMs: number },
+  o: { cwd: string; onLine?: (l: string) => void; signal?: AbortSignal; timeoutMs?: number },
 ): Promise<{ code: number | null; output: string; error?: string }> {
   return new Promise((resolve) => {
     let output = '';
@@ -705,7 +739,7 @@ function streamed(
     child.stdout?.on('data', take);
     child.stderr?.on('data', take);
     const kill = () => child.kill('SIGTERM');
-    const timer = setTimeout(kill, o.timeoutMs);
+    const timer = o.timeoutMs ? setTimeout(kill, o.timeoutMs) : undefined;
     o.signal?.addEventListener('abort', kill);
     child.on('error', (e) => {
       clearTimeout(timer);

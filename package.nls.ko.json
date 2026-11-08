@@ -20,7 +20,7 @@
   "cmd.loadTrace": "추적 파일 불러오기…",
   "cmd.clearTrace": "추적 지우기",
   "welcome.open": "코드를 회로처럼 보여 줍니다. 폴더·파일·클래스·함수는 블록이 되고, 호출·스레드·데이터는 전류가 흐르는 전선이 됩니다.\n[회로도 열기](command:codeGraph.open)\n[현재 파일 보기](command:codeGraph.showFile)",
-  "welcome.check": "코드가 컴파일되는지 검사합니다. 깨진 곳만 빨갛게 표시되고, 전선을 따라 영향이 어디까지 가는지 보입니다.\n[검증 (컴파일 검사)](command:codeGraph.verify)\n프로그램을 실행해 스레드마다 한 일과 흘러간 값을 다시 재생합니다.\n[실행 & 추적](command:codeGraph.runTrace)",
+  "welcome.check": "코드가 컴파일되는지 검사합니다. 깨진 곳만 빨갛게 표시되고, 전선을 따라 영향이 어디까지 가는지 보입니다.\n[검증 (컴파일 검사)](command:codeGraph.verify)\n프로그램을 실행하며 스레드마다 하는 일을 실시간으로 보고, 언제든 멈춰서 한 일과 흘러간 값을 재생합니다.\n[실행 & 추적](command:codeGraph.runTrace)",
   "welcome.untrusted": "검증과 실행 & 추적은 컴파일러와 프로그램을 실제로 실행하므로 신뢰한 워크스페이스에서만 쓸 수 있습니다.\n[워크스페이스 신뢰 관리](command:workbench.trust.manage)",
   "welcome.more": "[추적 파일 불러오기…](command:codeGraph.loadTrace)\n팁: C, C++, Python 파일을 우클릭하거나 상태 표시줄의 CodeGraph를 누르면 그 파일을 회로도에서 바로 볼 수 있습니다.\n[설정](command:workbench.action.openSettings?%5B%22codeGraph%22%5D) · [사용법](https://github.com/21HoKim/code-graph/blob/main/docs/GUIDE.ko.md)",
   "trust.description": "정적 분석은 어디서나 동작합니다. 컴파일 검사와 실행 & 추적은 컴파일러와 프로그램을 실제로 실행하므로 신뢰한 워크스페이스에서만 켜집니다.",
@@ -41,11 +41,11 @@
   "cfg.runEnv": "추적 실행에 추가할 환경 변수.",
   "cfg.runBuildFlags": "추적용 C/C++ 빌드에 추가할 컴파일 플래그 (예: `-DUSE_THREADS`).",
   "cfg.runLinkFlags": "추적용 C/C++ 빌드에 추가할 링크 플래그/라이브러리 (예: `-lm`, `-lssl`). Linux/macOS에선 `-pthread`가 항상 들어갑니다.",
-  "cfg.runTimeout": "이 시간(초)이 지나면 추적 중인 프로그램을 멈춥니다 (그때까지의 추적은 남습니다).",
+  "cfg.runTimeout": "이 시간(초)이 지나면 추적 중인 프로그램을 멈춥니다. 0이면 프로그램이 끝나거나 **멈추기**를 누를 때까지. 그동안 회로도가 실시간으로 따라가고, 그때까지의 추적은 남습니다.",
   "cfg.runMaxEvents": "실행마다 자세히 기록할 이벤트 수. 넘으면 호출 횟수만 집계합니다.",
   "cfg.runValues": "인자/반환 값과 객체 식별자를 기록 (데이터 추적). 끄면 오버헤드가 줄어듭니다.",
   "cmd.runCompose": "Docker Compose로 실행 & 추적",
-  "welcome.compose": "이 워크스페이스에는 Compose 파일이 있습니다. 서비스를 각자의 컨테이너와 네트워크에서 실행하고, 모든 컨테이너를 한 타임라인에서 봅니다.\n[Docker Compose로 실행 & 추적](command:codeGraph.runCompose)",
+  "welcome.compose": "이 워크스페이스에는 Compose 파일이 있습니다. 서비스를 각자의 컨테이너와 네트워크에서 실행하고, 모든 컨테이너를 실시간으로 따라가며 한 타임라인으로 재생합니다.\n[Docker Compose로 실행 & 추적](command:codeGraph.runCompose)",
   "cfg.runUseBuildSystem": "C/C++ 프로그램을 프로젝트와 같은 방식으로 빌드합니다. 소스, 정의(-D), 라이브러리, 실행 위치를 makefile(`make -n`)이나 CMake(`CMakeFiles/*/link.txt`)에서 가져옵니다.",
   "cfg.runTarget": "진입 파일이 여러 프로그램에 들어갈 때(예: `main.cpp` 하나로 `node-a`, `node-b`) 실행할 프로그램. 비우면 물어봅니다.",
   "cfg.composeFile": "**Docker Compose로 실행 & 추적**에 쓸 Compose 파일(워크스페이스 기준 경로). 비우면 루트의 `compose.yaml` / `docker-compose.yml`과 그 override 파일. 여러 파일, 프로필, 서비스별 설정은 `.codegraph.json`에 적습니다.",
@@ -54,5 +54,6 @@
   "cfg.composeDocker": "사용할 docker CLI(Compose v2 포함).",
   "cmd.createConfig": ".codegraph.json 만들기 / 열기",
   "welcome.config": "CodeGraph가 빌드나 Docker 구성을 제대로 못 잡나요? 스스로 알 수 없는 것만 `.codegraph.json` 한 파일에 적어 주세요.\n[.codegraph.json 만들기](command:codeGraph.createConfig)",
-  "cmd.splitTrace": "컨테이너별로 회로도 열기"
+  "cmd.splitTrace": "컨테이너별로 회로도 열기",
+  "cmd.stopRun": "실행 멈추고 추적 보기"
 }

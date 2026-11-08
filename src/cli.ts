@@ -138,7 +138,7 @@ async function traceMain(argv: string[]): Promise<void> {
   if (configError) console.error(`warn: ${configError} — ignored`);
   const run = config.run ?? {};
   const cc = config.compose ?? {};
-  const secs = (v: unknown) => (typeof v === 'number' && v > 0 ? v : undefined);
+  const secs = (v: unknown) => (typeof v === 'number' && v >= 0 ? v : undefined);
   const pool = new ParsePool(path.join(__dirname, 'wasm'), path.join(__dirname, 'parseWorker.js'), defaultWorkerCount());
   const { files } = walk(root, { maxFiles: 5000 });
   const session = new AnalysisSession(root, pool);
