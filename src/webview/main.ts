@@ -374,6 +374,10 @@ class App {
       case 'peek':
         this.gotPeek(m.req, m.peek);
         break;
+      case 'peekReset':
+        this.peeks.clear();
+        this.peekWant = '';
+        break;
       case 'error':
         this.showNotice(m.message, 8000);
         break;
@@ -2103,7 +2107,8 @@ class App {
     if (!p?.lines.length) return hint;
     const rows = p.lines.map((l, i) => {
       const n = p.first + i;
-      const row = `<span class="ln">${n}</span>${esc(l) || ' '}`;
+      // html: the host's syntax colours, already escaped
+      const row = `<span class="ln">${n}</span>${p.html?.[i] || esc(l) || ' '}`;
       return n === src.line ? `<span class="hd">${row}</span>` : row;
     });
     if (p.more && !src.site) rows.push('<span class="ln"> </span>…');

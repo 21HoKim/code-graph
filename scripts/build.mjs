@@ -22,6 +22,8 @@ function copyAssets() {
     ['node_modules/tree-sitter-c/tree-sitter-c.wasm', 'dist/wasm/tree-sitter-c.wasm'],
     ['node_modules/tree-sitter-cpp/tree-sitter-cpp.wasm', 'dist/wasm/tree-sitter-cpp.wasm'],
     ['node_modules/tree-sitter-python/tree-sitter-python.wasm', 'dist/wasm/tree-sitter-python.wasm'],
+    // Oniguruma regex engine for the TextMate grammars of the source preview's syntax colours
+    ['node_modules/shiki/dist/onig.wasm', 'dist/wasm/onig.wasm'],
     ['node_modules/elkjs/lib/elk-worker.min.js', 'dist/webview/elk-worker.js'],
   ];
   for (const [from, to] of copies) fs.copyFileSync(from, to);

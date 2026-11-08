@@ -20,6 +20,8 @@ export interface Peek {
   lines: string[];
   /** The definition goes on below the last line shown. */
   more: boolean;
+  /** `lines` with syntax colours in the editor's theme (escaped HTML), when the host could colour them. */
+  html?: string[];
 }
 
 const PREPROCESSOR = /^#\s*(include|import|define|undef|if|ifdef|ifndef|elif|else|endif|pragma|error|warning|line)\b/;

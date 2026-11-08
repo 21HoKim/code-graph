@@ -40,6 +40,8 @@ export type HostMessage =
   | { type: 'replay'; t: number; playing: boolean; speed: number }
   /** Answer to a webview 'peek': the source lines for a hover preview (null: file not readable). */
   | { type: 'peek'; req: number; peek: Peek | null }
+  /** The colour theme changed: previews shown so far have the old colours. */
+  | { type: 'peekReset' }
   | { type: 'error'; message: string };
 
 export type WebviewMessage =

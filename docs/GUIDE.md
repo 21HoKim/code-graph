@@ -196,7 +196,7 @@ completes and explains every key.
 | `CodeGraph: Create / Open .codegraph.json` | project settings for unusual setups |
 | `CodeGraph: Load Trace File…` | open a trace written by the CLI or the tracers; several at once share one timeline |
 | click / double-click a block | show its wires · open it, or jump to the source |
-| hover a block / wire | its source: the definition's first lines · the line of the call |
+| hover a block / wire | its source in your colour theme: the definition's first lines · the line of the call |
 | `Ctrl`+click (`⌘`+click) · `F12` / `Enter` | jump to the code: a block's definition · a wire's call |
 | `1`…`5` · `/` · `F` · `Esc` | levels · search · fit · clear |
 | `Space` · `←` `→` | (with a trace) play / pause · previous / next call |

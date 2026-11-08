@@ -1,10 +1,11 @@
 /** The "circuit" webview panel. */
 import * as fs from 'node:fs';
 import * as vscode from 'vscode';
-import { peekLines } from '../core/peek';
+import { peekLines, type Peek } from '../core/peek';
 import { processTrace } from '../core/trace';
 import type { HostMessage, LevelSetting, ViewSettings, WebviewMessage } from '../shared/protocol';
 import type { AnalysisService } from './service';
+import { currentTheme } from './theme';
 
 export const VIEW_TYPE = 'codeGraph.circuit';
 /** Views of one process (container) of a trace: not restored after a reload (no serializer). */
@@ -27,6 +28,19 @@ async function sourceText(abs: string): Promise<string | undefined> {
     return await fs.promises.readFile(abs, 'utf8');
   } catch {
     return undefined;
+  }
+}
+
+/** Syntax colours in the editor's theme; the preview stays plain when the theme or the grammar is not at hand. */
+async function colour(peek: Peek, file: string): Promise<void> {
+  try {
+    // loaded on the first preview: the grammars are big and most sessions never hover
+    const { highlightLines, langOf } = await import('../core/highlight');
+    const lang = langOf(file);
+    const theme = lang && currentTheme();
+    if (lang && theme) peek.html = (await highlightLines(peek.lines, lang, theme)) ?? undefined;
+  } catch {
+    // plain text it is
   }
 }
 
@@ -291,6 +305,7 @@ export class CircuitPanel implements vscode.Disposable {
         const abs = this.service.abs(m.file);
         const text = abs ? await sourceText(abs) : undefined;
         const peek = text === undefined ? null : peekLines(text, m.line, { endLine: m.endLine, count: m.count, lead: m.count === 1 ? 0 : 4 });
+        if (peek) await colour(peek, m.file);
         this.post({ type: 'peek', req: m.req, peek });
         break;
       }
