@@ -440,7 +440,9 @@ function nameThreads(threads: Map<number, TraceThread>, fns: TraceFn[]): void {
   const total = new Map<string, number>();
   for (const th of threads.values()) if (generic.test(th.name) && base(th)) total.set(base(th), (total.get(base(th)) ?? 0) + 1);
   const seen = new Map<string, number>();
-  for (const th of [...threads.values()].sort((a, b) => a.start - b.start)) {
+  // number in the order the threads are listed (by id, as in the swimlanes), not by start time:
+  // two threads can start in one order and take their ids in the other
+  for (const th of [...threads.values()].sort((a, b) => a.id - b.id)) {
     const b = base(th);
     if (!generic.test(th.name) || !b) continue;
     const k = (seen.get(b) ?? 0) + 1;
