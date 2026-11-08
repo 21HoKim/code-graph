@@ -29,8 +29,11 @@ export type HostMessage =
   | { type: 'focusFile'; file: string }
   | { type: 'diagnostics'; set: DiagSet; diagnostics: Diagnostic[]; info?: VerifyInfo }
   | { type: 'task'; task: 'verify' | 'build' | 'run'; state: 'start' | 'progress' | 'done' | 'error'; message?: string; done?: number; total?: number }
-  | { type: 'trace'; trace: RunTrace | null; notes?: string[] }
+  /** `scope`: a view of one process (container) of a trace of several. */
+  | { type: 'trace'; trace: RunTrace | null; notes?: string[]; scope?: string }
   | { type: 'showProblems' }
+  /** Another view of the same run played, paused, jumped or changed speed: follow it. */
+  | { type: 'replay'; t: number; playing: boolean; speed: number }
   | { type: 'error'; message: string };
 
 export type WebviewMessage =
@@ -41,4 +44,8 @@ export type WebviewMessage =
   | { type: 'verify' }
   | { type: 'runTrace'; compose?: boolean }
   | { type: 'loadTrace' }
-  | { type: 'clearTrace' };
+  | { type: 'clearTrace' }
+  /** Open a view per process (container) of the trace, or of the one named. */
+  | { type: 'splitTrace'; proc?: string }
+  /** The replay was played, paused, moved or sped up here: the other views of the run follow. */
+  | { type: 'replay'; t: number; playing: boolean; speed: number };

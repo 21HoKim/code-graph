@@ -609,6 +609,65 @@ export function mergeTraces(input: { name: string; trace: RunTrace }[], g: CodeG
   return trace;
 }
 
+/**
+ * One process of a trace of several (a container of a Compose run, one file of several loaded): its
+ * threads, calls, values and failures only, on the same clock, so views of two processes line up.
+ * Undefined when the trace has no process of that name.
+ */
+export function processTrace(tr: RunTrace, name: string, g: CodeGraph): RunTrace | undefined {
+  const pi = tr.procs?.findIndex((p) => p.name === name) ?? -1;
+  if (pi < 0) return undefined;
+  const proc = tr.procs![pi];
+  const mine = new Set(proc.threads);
+  const prefix = `${name} · `;
+  const spanMap = new Map<number, number>();
+  const spans: Spans = { t: [], end: [], th: [], fn: [], parent: [], depth: [] };
+  const args: Record<number, ArgVal[]> = {};
+  const rets: Record<number, Val> = {};
+  const selfs: Record<number, string> = {};
+  for (let i = 0; i < tr.spans.t.length; i++) {
+    if (!mine.has(tr.spans.th[i])) continue;
+    const k = spans.t.length;
+    spanMap.set(i, k);
+    spans.t.push(tr.spans.t[i]);
+    spans.end.push(tr.spans.end[i]);
+    spans.th.push(tr.spans.th[i]);
+    spans.fn.push(tr.spans.fn[i]);
+    spans.parent.push(tr.spans.parent[i] >= 0 ? (spanMap.get(tr.spans.parent[i]) ?? -1) : -1);
+    spans.depth.push(tr.spans.depth[i]);
+    if (tr.args[i]) args[k] = tr.args[i];
+    if (tr.rets[i]) rets[k] = tr.rets[i];
+    if (tr.selfs[i]) selfs[k] = tr.selfs[i];
+  }
+  const edges = tr.edges.filter((e) => mine.has(e[2]));
+  const calls = new Map<number, number>();
+  for (const [, callee, , n] of edges) calls.set(callee, (calls.get(callee) ?? 0) + n);
+  const out: RunTrace = {
+    ...tr,
+    command: name,
+    exit: proc.exit,
+    pid: proc.pid,
+    threads: tr.threads
+      .filter((th) => mine.has(th.id))
+      .map((th) => ({ ...th, name: th.name.startsWith(prefix) ? th.name.slice(prefix.length) : th.name, proc: undefined })),
+    spans,
+    args,
+    rets,
+    selfs,
+    exceptions: tr.exceptions
+      .filter((x) => mine.has(x.th))
+      .map((x) => ({ ...x, span: x.span !== undefined ? spanMap.get(x.span) : undefined })),
+    calls: [...calls],
+    edges,
+    stacks: tr.stacks?.filter((st) => mine.has(st.th)),
+    events: spans.t.length * 2,
+    objects: [],
+    procs: undefined,
+  };
+  out.objects = collectObjects(out, objectLabeler(out, g));
+  return out;
+}
+
 /** Threads the OS left unnamed are called after the function they run: rxLoop, txLoop #1, txLoop #2 … */
 function nameThreads(threads: Map<number, TraceThread>, fns: TraceFn[]): void {
   const generic = /^(thread-\d+|Dummy-\d+)$/;

@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict';
+import { spawnSync } from 'node:child_process';
 import * as fs from 'node:fs';
 import * as os from 'node:os';
 import * as path from 'node:path';
@@ -8,9 +9,9 @@ import { loadParsers } from '../src/core/extract';
 import { instrumentSources } from '../src/core/instrument';
 import type { CodeGraph } from '../src/core/model';
 import { ParsePool } from '../src/core/pool';
-import { readMakeTargets } from '../src/core/buildinfo';
+import { libraryDirs, readMakeTargets } from '../src/core/buildinfo';
 import { findEntries, runAndTrace, selectUnits, type RunInput, type RunResult } from '../src/core/runner';
-import { mergeTraces, parseTrace } from '../src/core/trace';
+import { mergeTraces, parseTrace, processTrace } from '../src/core/trace';
 import { detectToolchain } from '../src/core/verify';
 
 const ROOT = path.resolve(__dirname, '..');
@@ -138,6 +139,58 @@ describe('traces of several processes', () => {
       [1, 4],
     ]);
   });
+
+  it('cuts one process out again, on the same clock, for a view per container', () => {
+    const m = mergeTraces(
+      [
+        { name: 'node-b', trace: one(1, 1_000_015, '0x10') },
+        { name: 'node-a', trace: one(1, 1_000_000, '0x20') },
+      ],
+      g,
+      { command: 'compose' },
+    );
+    const b = processTrace(m, 'node-b', g)!;
+    assert.equal(b.command, 'node-b');
+    assert.equal(b.procs, undefined);
+    assert.deepEqual(
+      b.threads.map((t) => [t.id, t.name]),
+      [[2, 'main']],
+    );
+    assert.deepEqual(b.spans.t, [25, 35, 55]);
+    assert.deepEqual(b.spans.parent, [-1, 0, 0]);
+    assert.ok(b.spans.th.every((th) => th === 2));
+    assert.equal(b.durationNs, m.durationNs, 'the views share one time axis');
+    assert.deepEqual(b.objects.map((o) => o.id), ['node-b/0x10']);
+    assert.deepEqual(b.calls.sort(), [
+      [0, 1],
+      [1, 2],
+    ]);
+    assert.equal(processTrace(m, 'nope', g), undefined);
+  });
+});
+
+describe('library folders of a link', () => {
+  it('reads -L and every spelling of -rpath, leaves out system and missing folders', () => {
+    const dir = tmp('libdirs');
+    const [a, b, c, d, e] = ['a', 'b', 'c', 'd', 'e'].map((x) => (fs.mkdirSync(path.join(dir, x)), path.join(dir, x)));
+    assert.deepEqual(
+      libraryDirs([
+        `-L${a}`,
+        '-L',
+        b,
+        `-Wl,-rpath,${c}:${a}`,
+        '-Wl,-rpath',
+        `-Wl,${d}`,
+        `-Wl,--rpath=${e}`,
+        '-L/usr/lib/x86_64-linux-gnu',
+        '-L/usr/lib64',
+        `-L${path.join(dir, 'missing')}`,
+        '-Wl,-rpath,$ORIGIN',
+        '-lboost_json',
+      ], a),
+      [a, b, c, d, e],
+    );
+  });
 });
 
 describe('C/C++ instrumentation', () => {
@@ -229,6 +282,25 @@ describe('Run & Trace (build system)', { skip: !native }, () => {
     // reading ../cfg/node-b.conf only works from src/, where make links node-b
     assert.ok([...ran].some((id) => id.endsWith('Config::load')), 'config loaded');
     assert.ok([...ran].some((id) => id.endsWith('Server::run')), 'ran as node-b');
+  });
+
+  it('runs a program whose libraries load libraries of their own from the same folder', async () => {
+    // liba.so needs libb.so: with -Wl,-rpath written as a RUNPATH (Ubuntu, Debian …) the loader finds
+    // liba for the program but not libb for liba, unless the folder is on the library path
+    const lib = tmp('libs');
+    fs.writeFileSync(path.join(lib, 'b.c'), 'int b(void) { return 7; }\n');
+    fs.writeFileSync(path.join(lib, 'a.c'), 'int b(void);\nint a(void) { return b() + 1; }\n');
+    const cc = (args: string[]) => assert.equal(spawnSync(tc.cc!, args, { cwd: lib, encoding: 'utf8' }).status, 0, args.join(' '));
+    cc(['-shared', '-fPIC', '-o', 'libb.so', 'b.c']);
+    cc(['-shared', '-fPIC', '-o', 'liba.so', 'a.c', '-L.', '-lb']);
+    const dir = tmp('libuser');
+    fs.writeFileSync(path.join(dir, 'main.c'), '#include <stdio.h>\nint a(void);\nint main(void) {\n  printf("a=%d\\n", a());\n  return 0;\n}\n');
+    fs.writeFileSync(path.join(dir, 'makefile'), `app: main.c\n\t${tc.cc} -o app main.c -L${lib} -Wl,-rpath,${lib} -la\n`);
+    const { targets } = await readMakeTargets(dir);
+    const { r } = await trace(dir, 'main.c', [], { target: targets.find((t) => t.name === 'app')!, timeoutMs: 5000 });
+    assert.ok(r.ok, [...r.notes, r.output].join('\n'));
+    assert.equal(r.trace!.exit.code, 0);
+    assert.match(r.trace!.output, /a=8/);
   });
 
   it('guesses the library when a link without build info misses its symbols', async () => {

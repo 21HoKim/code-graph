@@ -57,8 +57,14 @@ services:
 ```
 
 Click **Run & Trace with Docker Compose**: you see one node's request leave and the other node's handler pick it up.
+You don't need to attach VS Code to the containers; one run covers all of them.
 
 ![Two nodes in their own Compose network, traced in their containers and replayed on one timeline](docs/images/compose.gif)
+
+**⧉ A view per container** opens one circuit per container side by side. They play together, and each shows only
+what ran in its own container.
+
+![node-b and node-a side by side: node-b's Server and node-a's Client light up at the same moment](docs/images/per-container.png)
 
 ### What is broken
 

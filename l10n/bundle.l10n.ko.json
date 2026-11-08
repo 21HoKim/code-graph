@@ -11,7 +11,6 @@
   "Run failed.": "실행 실패.",
   "{0}: {1} threads, {2} calls traced": "{0}: 스레드 {1}개, 호출 {2}개 추적",
   "Trace": "추적",
-  "Open a CodeGraph trace": "CodeGraph 추적 파일 열기",
   "Not a CodeGraph trace: {0}": "CodeGraph 추적 파일이 아니에요: {0}",
   "The compile check found {0} error(s), shown in red on the circuit. Run anyway?": "컴파일 검사에서 오류 {0}개를 찾았어요 (회로도에 빨간색으로 표시). 그래도 실행할까요?",
   "Build failed: {0} error(s), shown in red.": "빌드 실패: 오류 {0}개 (빨간색으로 표시).",
@@ -30,5 +29,10 @@
   "Open {0}": "{0} 열기",
   "Show output": "출력 보기",
   "If your setup is unusual, tell CodeGraph how to build and run it in {0}.": "빌드나 실행 방식이 특이하다면 {0}에 적어 CodeGraph에 알려 주세요.",
-  "Some services were not traced ({0}). Tell CodeGraph about them in {1}.": "추적하지 못한 서비스가 있어요 ({0}). {1}에 그 서비스 정보를 적어 주세요."
+  "Some services were not traced ({0}). Tell CodeGraph about them in {1}.": "추적하지 못한 서비스가 있어요 ({0}). {1}에 그 서비스 정보를 적어 주세요.",
+  "A view per container": "컨테이너별로 보기",
+  "Run & Trace with Docker Compose": "Docker Compose로 실행 & 추적",
+  "{0} ran on this machine. If it needs its peers or its container, run the Compose project traced: every container on one timeline.": "{0}을(를) 이 컴퓨터에서 실행했어요. 상대 노드나 자기 컨테이너가 있어야 하는 프로그램이라면 Compose 프로젝트를 추적하며 실행하세요. 모든 컨테이너가 한 타임라인에 나와요.",
+  "The current trace has one process. Run & Trace with Docker Compose, or load several trace files at once, to get one per container.": "지금 추적에는 프로세스가 하나뿐이에요. Docker Compose로 실행 & 추적하거나 추적 파일 여러 개를 한 번에 불러오면 컨테이너마다 볼 수 있어요.",
+  "Open CodeGraph traces (several: one timeline, one process each)": "CodeGraph 추적 열기 (여러 개를 고르면 한 타임라인에 하나씩)"
 }

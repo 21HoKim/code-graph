@@ -53,5 +53,6 @@
   "cfg.composeStartTimeout": "Time allowed for image builds and the builds inside the containers, before the first traced program starts. `codeGraph.run.timeoutSeconds` counts from then.",
   "cfg.composeDocker": "The docker CLI (with Compose v2) to use.",
   "cmd.createConfig": "Create / Open .codegraph.json",
-  "welcome.config": "Build or Docker setup CodeGraph does not get right? Write what it cannot find out by itself in one file, `.codegraph.json`.\n[Create .codegraph.json](command:codeGraph.createConfig)"
+  "welcome.config": "Build or Docker setup CodeGraph does not get right? Write what it cannot find out by itself in one file, `.codegraph.json`.\n[Create .codegraph.json](command:codeGraph.createConfig)",
+  "cmd.splitTrace": "Open a View per Container"
 }

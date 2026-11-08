@@ -45,7 +45,7 @@ self=\${0##*/}
 ${FIND_REAL}
 real=$(find_real "$self") || { echo "codegraph: no $self on PATH" >&2; exit 127; }
 PATH=$clean; export PATH
-link=1; shared=0; static=0
+link=1; shared=0; static=0; rpath=0
 for a in "$@"; do
   case "$a" in
     --version|-v|-dumpversion|-dumpfullversion|-dumpmachine|-dumpspecs|-print-*|--print-*|-###|--help) exec "$real" "$@" ;;
@@ -53,6 +53,7 @@ for a in "$@"; do
     -c|-S) link=0 ;;
     -shared) shared=1 ;;
     -static|-static-pie) static=1 ;;
+    -Wl,-rpath*|-Wl,--rpath*|-Wl,-R*|-Wl,*,-rpath*) rpath=1 ;;
   esac
 done
 [ -n "\${CODE_GRAPH_SERVICE:-}" ] && : > "$CG/trace/$CODE_GRAPH_SERVICE/.compiled" 2>/dev/null
@@ -76,6 +77,8 @@ if [ $cxx = 1 ]; then
 fi
 # shared libraries built with probes find the runtime in the program
 dyn=; [ $static = 0 ] && dyn="-Wl,--dynamic-list=$CG/rt/cgt.dynlist"
+# an -rpath as RPATH, not RUNPATH: libraries found there load theirs from there too (Boost.JSON → Boost.Container)
+[ $rpath = 1 ] && [ "$(uname -s 2>/dev/null)" = Linux ] && dyn="$dyn -Wl,--disable-new-dtags"
 exec "$real" -include "$CG/rt/cg_trace.h" "$@" $objs -pthread $dyn
 `;
 }

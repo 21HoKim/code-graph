@@ -244,6 +244,10 @@ class App {
   private rtmap?: RuntimeMap;
   private timeline?: Timeline;
   private traceNotes: string[] = [];
+  /** This view shows one process (container) of a trace of several. */
+  private traceScope?: string;
+  /** Applying another view's replay state: do not send it back. */
+  private syncing = false;
   private replay = { t: 0, playing: false, speed: 1, raf: 0, wall: 0 };
   private live: { node: string; text: string; color: string; born: number; up?: boolean }[] = [];
   private follow: string | null = null;
@@ -339,10 +343,14 @@ class App {
         this.updateToolbarState();
         break;
       case 'trace':
+        this.traceScope = m.trace ? m.scope : undefined;
         this.setTrace(m.trace, m.notes ?? []);
         break;
       case 'showProblems':
         this.showProblems();
+        break;
+      case 'replay':
+        this.followReplay(m.t, m.playing, m.speed);
         break;
       case 'error':
         this.showNotice(m.message, 8000);
@@ -704,9 +712,15 @@ class App {
     tb.append(h('span', { class: 'spacer' }));
     if (this.trace) {
       const tr = this.trace.tr;
-      const chip = h('button', { class: 'btn trace-chip', title: t('traceHint') }, `◉ ${esc(t('traceChip', { n: tr.threads.length }))}`);
+      const label = this.traceScope ? t('traceChipScope', { name: this.traceScope, n: tr.threads.length }) : t('traceChip', { n: tr.threads.length });
+      const chip = h('button', { class: 'btn trace-chip', title: t('traceHint') }, `◉ ${esc(label)}`);
       chip.onclick = () => this.showTraceSummary();
       tb.append(chip);
+      if (this.settings?.host !== false && tr.procs && tr.procs.length > 1) {
+        const split = h('button', { class: 'btn', 'data-role': 'split', title: t('splitHint') }, `⧉ ${esc(t('split'))}`);
+        split.onclick = () => api.postMessage({ type: 'splitTrace' });
+        tb.append(split);
+      }
     }
     if (this.settings?.host !== false) {
       const verify = h('button', { class: 'btn', 'data-role': 'verify', title: t('verifyHint') }, `✓ ${esc(t('verify'))}`);
@@ -1389,6 +1403,7 @@ class App {
         setSpeed: (x) => {
           this.replay.speed = x;
           this.timeline?.setSpeed(x);
+          this.shareReplay();
         },
         selectSpan: (sp) => this.selectSpan(sp),
         soloThread: (th) => this.setSolo(th, false),
@@ -1438,6 +1453,7 @@ class App {
     this.flow.setMode('off');
     this.timeline?.setPlaying(true);
     this.replay.raf = requestAnimationFrame(this.tick);
+    this.shareReplay();
   }
 
   private stopPlay(): void {
@@ -1446,6 +1462,29 @@ class App {
     this.replay.playing = false;
     this.timeline?.setPlaying(false);
     this.flow.setMode(this.state.flow);
+    this.shareReplay();
+  }
+
+  /** Views of one run (one per container) play together: tell the others where this one is. */
+  private shareReplay(): void {
+    if (this.syncing || !this.trace || this.settings?.host === false) return;
+    api.postMessage({ type: 'replay', t: this.replay.t, playing: this.replay.playing, speed: this.replay.speed });
+  }
+
+  private followReplay(t: number, playing: boolean, speed: number): void {
+    if (!this.trace) return;
+    this.syncing = true;
+    try {
+      if (speed !== this.replay.speed) {
+        this.replay.speed = speed;
+        this.timeline?.setSpeed(speed);
+      }
+      this.seek(t);
+      if (playing && !this.replay.playing) this.startPlay();
+      else if (!playing && this.replay.playing) this.stopPlay();
+    } finally {
+      this.syncing = false;
+    }
   }
 
   /** ns of program time per ms of replay: the whole run takes ~15 s at 1×. */
@@ -1558,6 +1597,7 @@ class App {
     this.live = [];
     this.applyReplay();
     this.timeline?.setTime(this.replay.t);
+    this.shareReplay();
   }
 
   /** Jump to the next / previous call (of the soloed thread) and show it. */
@@ -1762,7 +1802,10 @@ class App {
     else if (ex.timedOut) html += `<span class="flag warn">⏱ ${esc(t('stopped'))}</span>`;
     else html += `<span class="flag ${ex.code ? 'bad' : ''}">${esc(ex.code ? t('exitCode', { n: ex.code }) : t('exitOk'))}</span>`;
     html += `<span class="flag">${fmtNs(tr.durationNs)}</span><span class="flag">${esc(t('callsN', { n: tr.spans.t.length }))}</span></div>`;
-    if (this.settings?.host !== false) html += `<div class="row"><button class="btn" data-act="rerun">▶ ${esc(t('runAgain'))}</button></div>`;
+    if (this.settings?.host !== false) {
+      const split = tr.procs && tr.procs.length > 1 ? `<button class="btn" data-act="split" title="${esc(t('splitHint'))}">⧉ ${esc(t('split'))}</button>` : '';
+      html += `<div class="row"><button class="btn" data-act="rerun">▶ ${esc(t('runAgain'))}</button>${split}</div>`;
+    }
     // processes (containers of a Compose run): how each ended, which threads are theirs
     if (tr.procs && tr.procs.length > 1) {
       html += `<h3>▣ ${esc(t('processes'))} (${tr.procs.length})</h3><ul class="lst">`;
@@ -1777,8 +1820,9 @@ class App {
               : x.code === null
                 ? ''
                 : `<span class="flag ${x.code ? 'bad' : ''}">${esc(x.code ? t('exitCode', { n: x.code }) : t('exitOk'))}</span>`;
+        const name = this.settings?.host !== false ? `<a data-proc="${esc(p.name)}" title="${esc(t('splitOne'))}">${esc(p.name)}</a>` : esc(p.name);
         html +=
-          `<li><span class="dot" style="background:var(--cc-call)"></span><b>${esc(p.name)}</b>${flag}` +
+          `<li><span class="dot" style="background:var(--cc-call)"></span><b>${name}</b>${flag}` +
           `<span class="cnt">${p.threads.map((id) => `<span style="color:${threadColor(id)}">●</span>`).join('')}</span>` +
           (p.pid !== undefined ? `<span class="args">pid ${p.pid}</span>` : '') +
           `</li>`;
@@ -1838,7 +1882,9 @@ class App {
     this.details.innerHTML = html;
     this.details.hidden = false;
     this.wireDetails(null);
-    this.details.querySelector<HTMLElement>('[data-act=rerun]')?.addEventListener('click', () => api.postMessage({ type: 'runTrace', compose: !!tr.procs }));
+    this.details.querySelector<HTMLElement>('[data-act=rerun]')?.addEventListener('click', () => api.postMessage({ type: 'runTrace', compose: !!tr.procs || !!this.traceScope }));
+    this.details.querySelector<HTMLElement>('[data-act=split]')?.addEventListener('click', () => api.postMessage({ type: 'splitTrace' }));
+    for (const a of this.details.querySelectorAll<HTMLElement>('[data-proc]')) a.onclick = () => api.postMessage({ type: 'splitTrace', proc: a.dataset.proc });
     for (const a of this.details.querySelectorAll<HTMLElement>('[data-span-t]')) a.onclick = () => this.seek(Number(a.dataset.spanT));
   }
 

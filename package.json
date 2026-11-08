@@ -117,6 +117,12 @@
         "enablement": "isWorkspaceTrusted"
       },
       {
+        "command": "codeGraph.splitTrace",
+        "title": "%cmd.splitTrace%",
+        "category": "CodeGraph",
+        "icon": "$(split-horizontal)"
+      },
+      {
         "command": "codeGraph.createConfig",
         "title": "%cmd.createConfig%",
         "category": "CodeGraph",
@@ -232,6 +238,12 @@
           "command": "codeGraph.runTrace",
           "when": "editorLangId =~ /^(c|cpp|python)$/ && isWorkspaceTrusted",
           "group": "navigation@91"
+        }
+      ],
+      "commandPalette": [
+        {
+          "command": "codeGraph.splitTrace",
+          "when": "codeGraph.multiProcess"
         }
       ]
     },

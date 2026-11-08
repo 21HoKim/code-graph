@@ -78,8 +78,11 @@ Compose v2 for containers.
   (`-DNODE_A`), include and library flags, and the folder it runs from come from a `make -n` dry run or CMake's
   link files, so relative paths like `../cfg` resolve. Without a build system, the units `main` needs are found
   from the graph. A link that still misses symbols is retried with the libraries that usually provide them
-  (OpenSSL, Boost.JSON, libm, …). Any other build (a script, Meson, Bazel…) goes in `.codegraph.json`: `run.build`
-  and `run.program`. It runs in a traced copy of the workspace with every compiler wrapped.
+  (OpenSSL, Boost.JSON, libm, …). The link's library folders (`-L`, `-rpath`) are on the library path when the
+  program runs, so a library found there loads its own dependencies from there too (Boost.JSON → Boost.Container),
+  even where `-rpath` is written as a RUNPATH (Ubuntu, Debian). Any other build (a script, Meson, Bazel…) goes in
+  `.codegraph.json`: `run.build` and `run.program`. It runs in a traced copy of the workspace with every compiler
+  wrapped.
 - **Python**: a standard-library tracer (`sys.monitoring` on 3.12+, `sys.setprofile` before) records calls,
   returns, exceptions, values and object identities per thread, for workspace code only.
 - **Replay**: thread swimlanes with play, scrub and step. Blocks on each thread's call stack glow in the thread's
@@ -98,6 +101,14 @@ Compose v2 for containers.
 addresses and healthchecks. Every traced process writes its own trace, and all of them are merged on one clock
 with each container's threads as lanes. Your workspace is never touched: everything is built from a traced copy,
 and the project is taken down at the end.
+
+**One circuit per container**: **⧉ A view per container** (toolbar, run summary, or *CodeGraph: Open a View per
+Container*) opens one view per container side by side, each with only that container's threads, calls and data.
+They share one clock and play together; click a container in the run summary to open just that one. No need to
+attach VS Code to each container: one Compose run traces them all. Trace files written elsewhere (one per machine
+or container) can be loaded together with **Load Trace File…**; they are merged onto one timeline the same way.
+
+![node-b and node-a side by side, playing together](images/per-container.png)
 
 **Which compose files**: `compose.yaml` / `docker-compose.yml` (and the `.yml` / `.yaml` variants) at the
 workspace root plus its override file, as `docker compose` reads them, or `compose.files` (and `profiles`) in
@@ -174,8 +185,9 @@ completes and explains every key.
 | `CodeGraph: Verify (compile check)` | check again now (toolbar **✓ Verify**) |
 | `CodeGraph: Run & Trace` | build, run and replay (toolbar **▶ Run**) |
 | `CodeGraph: Run & Trace with Docker Compose` | the compose project with its services traced in their containers |
+| `CodeGraph: Open a View per Container` | one circuit per container of the current trace, side by side, playing together |
 | `CodeGraph: Create / Open .codegraph.json` | project settings for unusual setups |
-| `CodeGraph: Load Trace File…` | open a trace written by the CLI or the tracers |
+| `CodeGraph: Load Trace File…` | open a trace written by the CLI or the tracers; several at once share one timeline |
 | click / double-click a block | show its wires · open it, or jump to the source |
 | `1`…`5` · `/` · `F` · `Esc` | levels · search · fit · clear |
 | `Space` · `←` `→` | (with a trace) play / pause · previous / next call |

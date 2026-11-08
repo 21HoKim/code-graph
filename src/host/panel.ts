@@ -1,9 +1,12 @@
 /** The "circuit" webview panel. */
 import * as vscode from 'vscode';
+import { processTrace } from '../core/trace';
 import type { HostMessage, LevelSetting, ViewSettings, WebviewMessage } from '../shared/protocol';
 import type { AnalysisService } from './service';
 
 export const VIEW_TYPE = 'codeGraph.circuit';
+/** Views of one process (container) of a trace: not restored after a reload (no serializer). */
+const SCOPED_VIEW_TYPE = 'codeGraph.circuitOfProcess';
 
 function nonce(): string {
   const chars = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789';
@@ -31,6 +34,10 @@ export const verifyMode = (): VerifyMode => vscode.workspace.getConfiguration('c
 
 export class CircuitPanel implements vscode.Disposable {
   static current?: CircuitPanel;
+  /** One view per process (container) of the current trace, by process name. */
+  static scoped = new Map<string, CircuitPanel>();
+  /** Set for a view of one process: the trace it shows is that process's part of the current one. */
+  private scope?: string;
   private disposables: vscode.Disposable[] = [];
   private ready = false;
   private queue: HostMessage[] = [];
@@ -50,6 +57,36 @@ export class CircuitPanel implements vscode.Disposable {
     return p;
   }
 
+  /** A view of one process (container) of the current trace, in `column`. */
+  static showScoped(ctx: vscode.ExtensionContext, service: AnalysisService, name: string, column: vscode.ViewColumn): CircuitPanel {
+    const open = CircuitPanel.scoped.get(name);
+    if (open) {
+      open.panel.reveal(column, true);
+      return open;
+    }
+    const panel = vscode.window.createWebviewPanel(SCOPED_VIEW_TYPE, `CodeGraph · ${name}`, { viewColumn: column, preserveFocus: true }, CircuitPanel.options(ctx));
+    const p = new CircuitPanel(panel, ctx, service, name);
+    CircuitPanel.scoped.set(name, p);
+    return p;
+  }
+
+  /** The current trace changed: the main view shows it, each process view its part (or closes). */
+  static publishTrace(service: AnalysisService): void {
+    const last = service.lastTrace;
+    CircuitPanel.current?.post({ type: 'trace', trace: last?.trace ?? null, notes: last?.notes });
+    for (const p of [...CircuitPanel.scoped.values()]) p.postScopedTrace();
+  }
+
+  private postScopedTrace(): void {
+    const last = this.service.lastTrace;
+    const part = last && this.service.graph ? processTrace(last.trace, this.scope!, this.service.graph) : undefined;
+    if (!part) {
+      this.panel.dispose();
+      return;
+    }
+    this.post({ type: 'trace', trace: part, notes: last!.notes, scope: this.scope });
+  }
+
   static revive(panel: vscode.WebviewPanel, ctx: vscode.ExtensionContext, service: AnalysisService): void {
     panel.webview.options = CircuitPanel.options(ctx);
     CircuitPanel.current = new CircuitPanel(panel, ctx, service);
@@ -67,7 +104,9 @@ export class CircuitPanel implements vscode.Disposable {
     readonly panel: vscode.WebviewPanel,
     private ctx: vscode.ExtensionContext,
     private service: AnalysisService,
+    scope?: string,
   ) {
+    this.scope = scope;
     panel.iconPath = vscode.Uri.joinPath(ctx.extensionUri, 'media', 'icon.png');
     panel.webview.html = this.html();
     this.disposables.push(
@@ -79,6 +118,7 @@ export class CircuitPanel implements vscode.Disposable {
   dispose(): void {
     this.verifyAbort?.abort();
     if (CircuitPanel.current === this) CircuitPanel.current = undefined;
+    if (this.scope && CircuitPanel.scoped.get(this.scope) === this) CircuitPanel.scoped.delete(this.scope);
     for (const d of this.disposables) d.dispose();
     this.disposables = [];
   }
@@ -198,9 +238,10 @@ export class CircuitPanel implements vscode.Disposable {
           }
           const v = this.service.verified;
           if (v) this.post({ type: 'diagnostics', set: 'compile', diagnostics: v.diagnostics, info: v.info });
-          else this.afterGraph('initial');
+          else if (!this.scope) this.afterGraph('initial');
           const tr = this.service.lastTrace;
-          if (tr) this.post({ type: 'trace', trace: tr.trace, notes: tr.notes });
+          if (this.scope) this.postScopedTrace();
+          else if (tr) this.post({ type: 'trace', trace: tr.trace, notes: tr.notes });
         } else await this.refresh('initial');
         this.postEditorDiagnostics();
         break;
@@ -215,7 +256,16 @@ export class CircuitPanel implements vscode.Disposable {
         await vscode.commands.executeCommand('codeGraph.loadTrace');
         break;
       case 'clearTrace':
-        await vscode.commands.executeCommand('codeGraph.clearTrace');
+        // closing the trace of one process's view closes that view
+        if (this.scope) this.panel.dispose();
+        else await vscode.commands.executeCommand('codeGraph.clearTrace');
+        break;
+      case 'splitTrace':
+        await vscode.commands.executeCommand('codeGraph.splitTrace', m.proc);
+        break;
+      case 'replay':
+        // views of one run play together: the containers' calls line up across them
+        for (const p of [CircuitPanel.current, ...CircuitPanel.scoped.values()]) if (p && p !== this) p.post({ type: 'replay', t: m.t, playing: m.playing, speed: m.speed });
         break;
       case 'open': {
         const abs = this.service.abs(m.file);

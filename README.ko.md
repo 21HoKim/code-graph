@@ -56,8 +56,14 @@ services:
 ```
 
 **Docker Compose로 실행 & 추적**을 누르면 한 노드가 보낸 요청을 다른 노드의 핸들러가 받는 장면까지 볼 수 있어요.
+VS Code를 컨테이너마다 붙일 필요 없이, 한 번 실행하면 모든 컨테이너가 추적돼요.
 
 ![각자 Compose 네트워크 안의 두 노드를 컨테이너에서 추적해 한 타임라인으로 재생](docs/images/compose.gif)
+
+**⧉ 컨테이너별로 보기**를 누르면 컨테이너마다 회로도가 하나씩 나란히 열려요. 함께 재생되고, 각 회로도에는 그
+컨테이너에서 실행된 것만 보여요.
+
+![node-b와 node-a를 나란히: 같은 순간 node-b의 Server와 node-a의 Client가 빛남](docs/images/per-container.png)
 
 ### 어디가 깨졌는지
 

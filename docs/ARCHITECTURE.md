@@ -245,7 +245,10 @@ methods of used classes, excluding units with another `main`), with `compile_com
 unit whose instrumented copy does not compile is rebuilt untouched (it just is not traced). Link retries add the
 workspace units that define missing symbols, then the libraries that usually provide them (`guessLibraries`:
 OpenSSL, Boost, libm, … with `-L` for e.g. `/opt/boost-1.87/lib` when found); what is still missing is reported
-on `main` in one line. The compile check runs before any build.
+on `main` in one line. The compile check runs before any build. The program runs with the link's library folders
+(`-L`, every spelling of `-rpath`) on `LD_LIBRARY_PATH` (`DYLD_LIBRARY_PATH` on macOS): `-rpath` is a RUNPATH on most
+distributions, which the loader does not use for the libraries a library loads (Boost.JSON → Boost.Container). For
+the same reason the compiler shim adds `--disable-new-dtags` to program links that set an `-rpath`.
 
 **Project settings** (`config.ts`): `.codegraph.json` at the workspace root (JSON with comments) has a `run` and a
 `compose` section; a key there wins over the matching VS Code setting, so the host (`host/project.ts`) and the CLI
@@ -298,7 +301,10 @@ compiler errors, with container paths mapped back to the workspace.
 (containers share the host's clock), so spans are shifted onto one clock and re-sorted; threads are renumbered
 across processes and named `<service> · <thread>`; object identities get the process name in front (the same
 address in two processes is not one object); `procs` keeps each process's threads and exit. A stop by `SIGTERM` /
-`SIGINT` (time limit, `docker stop`) ends the open spans but is not a failure.
+`SIGINT` (time limit, `docker stop`) ends the open spans but is not a failure. `processTrace` cuts one process back
+out (its threads, spans, values, exceptions, call counts from its edges; the merged duration, so all views share one
+time axis) for a view per container; those views relay play, pause, seek and speed through the host, so they replay
+together.
 
 **Model** (`RunTrace`): calls become spans per thread (`t`, `end`, `parent`, `depth`) as parallel arrays; thread
 parents for C/C++ are inferred from the static spawn relation running in another thread when the thread started;

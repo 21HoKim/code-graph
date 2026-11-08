@@ -199,6 +199,25 @@ describe('Compose: what runs inside the container', () => {
     assert.deepEqual(r.stdout.trim().split('\n'), [path.basename(real), path.join(home, path.basename(real))]);
   });
 
+  it('writes -rpath as an RPATH, so libraries found there load theirs from there too', { skip: !(tc.cc && process.platform === 'linux') }, () => {
+    const dir = tmp('rpath');
+    const lib = path.join(dir, 'lib');
+    fs.mkdirSync(lib);
+    fs.writeFileSync(path.join(lib, 'b.c'), 'int b(void) { return 7; }\n');
+    fs.writeFileSync(path.join(lib, 'a.c'), 'int b(void);\nint a(void) { return b() + 1; }\n');
+    fs.writeFileSync(path.join(dir, 'main.c'), '#include <stdio.h>\nint a(void);\nint main(void) { printf("a=%d\\n", a()); return 0; }\n');
+    const cg = path.join(dir, 'cg');
+    writeCodegraphDir(cg, path.join(ROOT, 'runtime'), 1, ['svc'], cg);
+    const env: NodeJS.ProcessEnv = { ...process.env, CODE_GRAPH_SHIM_HOME: path.join(dir, 'shims') };
+    delete env.LD_LIBRARY_PATH;
+    const sh = (cmd: string) => spawnSync(path.join(cg, 'bin', 'cg-run'), ['sh', '-c', cmd], { cwd: dir, env, encoding: 'utf8' });
+    const b = sh(`cd lib && cc -shared -fPIC -o libb.so b.c && cc -shared -fPIC -o liba.so a.c -L. -lb && cd .. && cc -o app main.c -Llib -Wl,-rpath,${lib} -la`);
+    assert.equal(b.status, 0, b.stderr);
+    const r = spawnSync(path.join(dir, 'app'), [], { env, encoding: 'utf8' });
+    assert.equal(r.status, 0, r.stderr);
+    assert.equal(r.stdout.trim(), 'a=8');
+  });
+
   it('builds with the project makefile through the shims and traces every program it starts', { skip: !(tc.cc && tc.cxx && has('make', ['--version'])) }, async () => {
     const { g, files } = await analyze(PAIR);
     const dir = tmp('shim');

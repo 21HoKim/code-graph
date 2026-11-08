@@ -507,6 +507,50 @@ export function libraryFlags(guesses: LibraryGuess[], existing: string[]): strin
 }
 
 /**
+ * Folders a link takes libraries from (`-L`, `-Wl,-rpath` …), for running the program from here: a
+ * library found there at link time may load others from the same folder (Boost.JSON → Boost.Container),
+ * which a RUNPATH — what `-Wl,-rpath` writes on most distributions — does not cover for it. System
+ * folders and folders that do not exist are left out; `$ORIGIN` is the folder the program is linked to.
+ */
+export function libraryDirs(flags: string[], origin?: string): string[] {
+  const out: string[] = [];
+  const add = (list: string | undefined) => {
+    for (let d of (list ?? '').split(':')) {
+      d = d.trim();
+      if (origin) d = d.replace(/\$(\{ORIGIN\}|ORIGIN)/g, origin);
+      if (!d || !path.isAbsolute(d) || d.includes('$')) continue;
+      d = path.normalize(d).replace(/\/+$/, '') || '/';
+      if (/^\/(usr\/)?lib(32|64)?(\/[^/]+-linux-[^/]+)?$/.test(d)) continue;
+      if (!out.includes(d) && fs.existsSync(d)) out.push(d);
+    }
+  };
+  let pending = false; // -Wl,-rpath -Wl,/dir
+  for (let i = 0; i < flags.length; i++) {
+    const f = flags[i];
+    if (f === '-L') add(flags[++i]);
+    else if (f.startsWith('-L')) add(f.slice(2));
+    else if (f === '-Xlinker') {
+      const v = flags[++i] ?? '';
+      if (pending) (add(v), (pending = false));
+      else if (v === '-rpath' || v === '-R') pending = true;
+      else if (/^--?rpath=/.test(v)) add(v.slice(v.indexOf('=') + 1));
+    } else if (f.startsWith('-Wl,')) {
+      const parts = f.slice(4).split(',');
+      for (let j = 0; j < parts.length; j++) {
+        const x = parts[j];
+        if (pending) (add(x), (pending = false));
+        else if (x === '-rpath' || x === '--rpath' || x === '-R') {
+          if (j + 1 < parts.length) add(parts[++j]);
+          else pending = true;
+        } else if (/^--?rpath=/.test(x)) add(x.slice(x.indexOf('=') + 1));
+        else if (/^-R\//.test(x)) add(x.slice(2));
+      }
+    }
+  }
+  return out;
+}
+
+/**
  * Directories outside the default search path that hold these libraries (e.g. /opt/boost-1.87/lib),
  * as -L / -rpath flags. Looks in /opt/*\/lib*, /usr/local/*\/lib*.
  */

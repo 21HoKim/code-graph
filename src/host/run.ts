@@ -11,7 +11,7 @@ import { CONFIG_FILE } from '../core/config';
 import { loadParsers } from '../core/extract';
 import type { Diagnostic } from '../core/model';
 import { findEntries, runAndTrace, type EntryPoint } from '../core/runner';
-import { parseTrace, traceDiagnostics, type RunTrace } from '../core/trace';
+import { mergeTraces, parseTrace, traceDiagnostics, type RunTrace } from '../core/trace';
 import { loadCompileCommands } from '../core/verify';
 import { CircuitPanel } from './panel';
 import { options, type Options } from './project';
@@ -25,14 +25,22 @@ export function lastRunOutput(): vscode.OutputChannel {
   return output;
 }
 
+/** The current trace: the circuit shows it, process views their part; the palette offers a view per process. */
+function setTrace(svc: AnalysisService, trace: RunTrace | undefined, notes: string[] = []): void {
+  svc.lastTrace = trace ? { trace, notes } : undefined;
+  CircuitPanel.publishTrace(svc);
+  void vscode.commands.executeCommand('setContext', 'codeGraph.multiProcess', (trace?.procs?.length ?? 0) > 1);
+}
+
 /** After a run CodeGraph could not set up by itself: offer `.codegraph.json` (create or open) and the log. */
-async function offerConfig(root: string, message: string): Promise<void> {
+async function offerConfig(root: string, message: string, also?: { label: string; command: string }): Promise<void> {
   const exists = fs.existsSync(path.join(root, CONFIG_FILE));
   const act = exists ? vscode.l10n.t('Open {0}', CONFIG_FILE) : vscode.l10n.t('Create {0}', CONFIG_FILE);
   const out = vscode.l10n.t('Show output');
-  const pick = await vscode.window.showWarningMessage(message, act, out);
+  const pick = await vscode.window.showWarningMessage(message, ...(also ? [also.label] : []), act, out);
   if (pick === act) await vscode.commands.executeCommand('codeGraph.createConfig');
   else if (pick === out) lastRunOutput().show(true);
+  else if (also && pick === also.label) await vscode.commands.executeCommand(also.command);
 }
 
 async function pickEntry(ctx: vscode.ExtensionContext, svc: AnalysisService, entries: EntryPoint[], want: string): Promise<EntryPoint | undefined> {
@@ -99,6 +107,7 @@ function showRun(
   r: { trace?: RunTrace; notes: string[]; output: string; buildDiagnostics: Diagnostic[]; runtimeDiagnostics: Diagnostic[] },
   task: (state: 'start' | 'progress' | 'done' | 'error', message?: string, done?: number, total?: number, kind?: 'build' | 'run') => void,
   showOutput: boolean,
+  also?: { label: string; command: string },
 ): void {
   const out = lastRunOutput();
   if (r.output && showOutput) {
@@ -113,19 +122,53 @@ function showRun(
     const msg = n ? vscode.l10n.t('Build failed: {0} error(s), shown in red.', n) : (r.notes[r.notes.length - 1] ?? vscode.l10n.t('Run failed.'));
     task('error', msg, undefined, undefined, 'build');
     out.show(true);
-    void offerConfig(svc.root, `${msg} ${vscode.l10n.t('If your setup is unusual, tell CodeGraph how to build and run it in {0}.', CONFIG_FILE)}`);
+    void offerConfig(svc.root, `${msg} ${vscode.l10n.t('If your setup is unusual, tell CodeGraph how to build and run it in {0}.', CONFIG_FILE)}`, also);
     return;
   }
-  svc.lastTrace = { trace: r.trace, notes: r.notes };
-  panel.post({ type: 'trace', trace: r.trace, notes: r.notes });
+  setTrace(svc, r.trace, r.notes);
   task('done');
   const tr = r.trace;
   const failed = r.runtimeDiagnostics.length;
-  const summary = tr.procs && tr.procs.length > 1
-    ? vscode.l10n.t('{0}: {1} processes, {2} threads, {3} calls traced', label, tr.procs.length, tr.threads.length, tr.spans.t.length)
+  const multi = !!tr.procs && tr.procs.length > 1;
+  const summary = multi
+    ? vscode.l10n.t('{0}: {1} processes, {2} threads, {3} calls traced', label, tr.procs!.length, tr.threads.length, tr.spans.t.length)
     : vscode.l10n.t('{0}: {1} threads, {2} calls traced', label, tr.threads.length, tr.spans.t.length);
-  if (failed) void vscode.window.showWarningMessage(`${summary} — ${vscode.l10n.t('{0} runtime failure(s), shown in red.', failed)}`);
+  const split = vscode.l10n.t('A view per container');
+  if (multi) {
+    // every container on one timeline; one circuit per container is a click away
+    const msg = failed ? `${summary} — ${vscode.l10n.t('{0} runtime failure(s), shown in red.', failed)}` : summary;
+    void (failed ? vscode.window.showWarningMessage(msg, split) : vscode.window.showInformationMessage(msg, split)).then((pick) => {
+      if (pick === split) void vscode.commands.executeCommand('codeGraph.splitTrace');
+    });
+  } else if (failed) void vscode.window.showWarningMessage(`${summary} — ${vscode.l10n.t('{0} runtime failure(s), shown in red.', failed)}`);
   else void vscode.window.setStatusBarMessage(`$(pulse) ${summary}`, 6000);
+}
+
+/** A program run here that exited badly in a workspace with a compose file: it may need its peers. */
+function offerCompose(svc: AnalysisService, label: string, tr: RunTrace): void {
+  if (options(svc.root).compose.files.length === 0) return;
+  if (!tr.exit.code && !(tr.exit.crash && tr.exit.crash !== 'SIGTERM')) return;
+  const go = vscode.l10n.t('Run & Trace with Docker Compose');
+  void vscode.window
+    .showInformationMessage(vscode.l10n.t('{0} ran on this machine. If it needs its peers or its container, run the Compose project traced: every container on one timeline.', label), go)
+    .then((pick) => {
+      if (pick === go) void vscode.commands.executeCommand('codeGraph.runCompose');
+    });
+}
+
+/** One circuit view per process (container) of the current trace, side by side — or only `only`. */
+export function splitTraceCommand(ctx: vscode.ExtensionContext, svc: AnalysisService, only?: string): void {
+  const tr = svc.lastTrace?.trace;
+  if (!tr?.procs || tr.procs.length < 2) {
+    void vscode.window.showInformationMessage(
+      vscode.l10n.t('The current trace has one process. Run & Trace with Docker Compose, or load several trace files at once, to get one per container.'),
+    );
+    return;
+  }
+  const names = only ? [only] : tr.procs.map((p) => p.name);
+  // the first one where the circuit is (as a tab), the others in the columns to its right
+  const base = CircuitPanel.current?.panel.viewColumn ?? vscode.ViewColumn.One;
+  names.forEach((name, i) => CircuitPanel.showScoped(ctx, svc, name, Math.min(vscode.ViewColumn.Nine, base + (only ? 1 : i))));
 }
 
 export async function runTraceCommand(ctx: vscode.ExtensionContext, svc: AnalysisService): Promise<void> {
@@ -207,7 +250,10 @@ export async function runTraceCommand(ctx: vscode.ExtensionContext, svc: Analysi
         }),
     );
     if (ctl.signal.aborted) return;
-    showRun(svc, panel, label, r, task, true);
+    // a networked program may only work next to its peers: the Compose run is one click away
+    const compose = o.compose.files.length ? { label: vscode.l10n.t('Run & Trace with Docker Compose'), command: 'codeGraph.runCompose' } : undefined;
+    showRun(svc, panel, label, r, task, true, compose);
+    if (r.trace) offerCompose(svc, label, r.trace);
   } catch (e) {
     const msg = String((e as Error)?.message ?? e);
     out.appendLine('run failed: ' + ((e as Error)?.stack ?? msg));
@@ -298,42 +344,45 @@ export async function runComposeCommand(ctx: vscode.ExtensionContext, svc: Analy
   }
 }
 
-/** Open a trace written by the tracers (.jsonl) or by `code-graph trace` (.json). */
+/**
+ * Open a trace written by the tracers (.jsonl) or by `code-graph trace` (.json). Several files (e.g. one
+ * per container or machine) are merged onto one timeline, one process each.
+ */
 export async function loadTraceCommand(ctx: vscode.ExtensionContext, svc: AnalysisService): Promise<void> {
   const pick = await vscode.window.showOpenDialog({
-    canSelectMany: false,
+    canSelectMany: true,
     filters: { [vscode.l10n.t('Trace')]: ['jsonl', 'json'] },
-    title: vscode.l10n.t('Open a CodeGraph trace'),
+    title: vscode.l10n.t('Open CodeGraph traces (several: one timeline, one process each)'),
   });
-  if (!pick?.[0]) return;
+  if (!pick?.length) return;
   const panel = CircuitPanel.show(ctx, svc);
   const graph = svc.graph ?? (await svc.analyze());
-  const text = await fs.promises.readFile(pick[0].fsPath, 'utf8');
-  let trace: RunTrace;
-  let diagnostics;
-  try {
-    const first = text.trimStart();
-    if (first.startsWith('{"schema":1') || (first.startsWith('{') && !first.includes('\n') && first.includes('"spans"'))) {
-      trace = JSON.parse(text) as RunTrace;
-      diagnostics = (trace as RunTrace & { diagnostics?: [] }).diagnostics ?? traceDiagnostics(trace, graph);
-    } else {
-      trace = parseTrace(text, graph, { command: path.basename(pick[0].fsPath) });
-      diagnostics = traceDiagnostics(trace, graph);
+  const parts: { name: string; trace: RunTrace }[] = [];
+  for (const uri of pick) {
+    const text = await fs.promises.readFile(uri.fsPath, 'utf8');
+    const name = path.basename(uri.fsPath).replace(/\.(jsonl|json)$/, '');
+    try {
+      const first = text.trimStart();
+      const trace =
+        first.startsWith('{"schema":1') || (first.startsWith('{') && !first.includes('\n') && first.includes('"spans"'))
+          ? (JSON.parse(text) as RunTrace)
+          : parseTrace(text, graph, { command: path.basename(uri.fsPath) });
+      parts.push({ name, trace });
+    } catch (e) {
+      void vscode.window.showErrorMessage(vscode.l10n.t('Not a CodeGraph trace: {0}', `${path.basename(uri.fsPath)}: ${String((e as Error)?.message ?? e)}`));
+      return;
     }
-  } catch (e) {
-    void vscode.window.showErrorMessage(vscode.l10n.t('Not a CodeGraph trace: {0}', String((e as Error)?.message ?? e)));
-    return;
   }
-  svc.lastTrace = { trace, notes: [] };
+  const trace = parts.length === 1 ? parts[0].trace : mergeTraces(parts, graph, { command: parts.map((p) => p.name).join(' + ') });
+  const diagnostics = parts.length === 1 ? ((trace as RunTrace & { diagnostics?: [] }).diagnostics ?? traceDiagnostics(trace, graph)) : traceDiagnostics(trace, graph);
   panel.post({ type: 'diagnostics', set: 'runtime', diagnostics });
-  panel.post({ type: 'trace', trace });
+  setTrace(svc, trace);
 }
 
 export function clearTraceCommand(svc: AnalysisService): void {
-  svc.lastTrace = undefined;
+  setTrace(svc, undefined);
   const p = CircuitPanel.current;
   if (!p) return;
-  p.post({ type: 'trace', trace: null });
   p.post({ type: 'diagnostics', set: 'runtime', diagnostics: [] });
   p.post({ type: 'diagnostics', set: 'build', diagnostics: [] });
 }

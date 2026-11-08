@@ -3,6 +3,16 @@
 From 0.2.1 on, every change to the extension pushed to `main` is published automatically as the next patch
 version; the notes for each one are on the [Releases](https://github.com/21HoKim/code-graph/releases) page.
 
+## 0.4.1
+
+- **A view per container**: after a Compose run (or loading several trace files at once), one circuit per
+  container opens side by side, each with only what ran in that container. They play together on one clock.
+- Run & Trace puts the link's library folders on the library path, so a library found there loads its own
+  dependencies from there too. This fixes `error while loading shared libraries: libboost_container…` for programs
+  linked with `-Wl,-rpath`, which most distributions write as a RUNPATH. In containers the compiler wrapper writes
+  `-rpath` as an RPATH for the same reason.
+- A program that fails here in a workspace with a compose file gets a button to run the Compose project instead.
+
 ## 0.4.0
 
 **Traces your setup as it is**

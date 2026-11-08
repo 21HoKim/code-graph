@@ -13,7 +13,7 @@ import { spawn, type ChildProcess } from 'child_process';
 import * as fs from 'fs';
 import * as os from 'os';
 import * as path from 'path';
-import { guessLibraries, libraryDirFlags, libraryFlags, type BuildTarget, type LibraryGuess } from './buildinfo';
+import { guessLibraries, libraryDirFlags, libraryDirs, libraryFlags, type BuildTarget, type LibraryGuess } from './buildinfo';
 import type { Parsers } from './extract';
 import { instrumentSources } from './instrument';
 import { mirrorWorkspace } from './mirror';
@@ -134,6 +134,13 @@ export async function runAndTrace(o: RunInput): Promise<RunResult> {
     cmd = b.exe;
     runDir = b.runDir;
     args = [...o.args];
+    if (b.libDirs?.length && process.platform !== 'win32') {
+      // `-Wl,-rpath` is a RUNPATH on most distributions: it finds libboost_json, but not the
+      // libboost_container that libboost_json loads in turn — the library path covers both
+      const name = process.platform === 'darwin' ? 'DYLD_LIBRARY_PATH' : 'LD_LIBRARY_PATH';
+      env[name] = [...b.libDirs, ...(env[name] ? [env[name]!] : [])].join(':');
+      o.log?.(`run: ${name} += ${b.libDirs.join(':')}   (the link's library folders)`);
+    }
     env.CODE_GRAPH_TRACE = traceFile;
     env.CODE_GRAPH_MAX_EVENTS = String(o.maxEvents);
     env.CODE_GRAPH_VALUES = o.values ? '1' : '0';
@@ -155,6 +162,8 @@ export async function runAndTrace(o: RunInput): Promise<RunResult> {
   try {
     text = fs.readFileSync(traceFile, 'utf8');
   } catch {
+    const lib = /error while loading shared libraries: (\S+?):/.exec(output)?.[1];
+    if (lib) notes.push(`the program cannot load ${lib}: put the folder that has it on LD_LIBRARY_PATH in run.env (.codegraph.json), or in its link flags (-L…)`);
     return fail('run', `the program exited (${r.signal ?? r.code}) without writing a trace`, output);
   }
   const trace = parseTrace(text, o.graph, {
@@ -187,6 +196,8 @@ interface NativeBuild {
   log: string;
   /** Where the program should run (custom builds: the traced copy). */
   runDir?: string;
+  /** Library folders of the link: on the library path when it runs, so their libraries find theirs. */
+  libDirs?: string[];
 }
 
 /** `.codegraph.json` run.build: the project's own build command, in a traced copy, compilers wrapped. */
@@ -397,7 +408,7 @@ async function buildNative(o: RunInput): Promise<NativeBuild> {
         notes.push(msg);
         o.log?.('link: ' + msg);
       }
-      return { exe, fns: inst.fns, diagnostics, notes, log };
+      return { exe, fns: inst.fns, diagnostics, notes, log, libDirs: libraryDirs([...baseFlags, ...guessed], path.dirname(target?.output ?? exe)) };
     }
     log += `$ ${path.basename(linker)} ${linkArgs.map((a) => (a.startsWith(o.workDir) ? path.relative(o.workDir, a) : a)).join(' ')}\n${clip(r.stderr)}\n`;
     const missing = parseLinkerErrors(r.stderr + r.stdout);
