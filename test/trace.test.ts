@@ -245,10 +245,12 @@ describe('Run & Trace (C++ threads)', { skip: !native }, () => {
     assert.ok(r.ok, r.notes.join('\n'));
     const tr = r.trace!;
     assert.equal(tr.exit.code, 0);
+    // threads are listed as they first ran: rx may start after some tx threads
     assert.deepEqual(
-      tr.threads.map((t) => t.name),
+      tr.threads.map((t) => t.name).sort(),
       ['main', 'rxLoop', 'txLoop #1', 'txLoop #2', 'txLoop #3', 'txLoop #4'],
     );
+    assert.equal(tr.threads[0].name, 'main');
     assert.ok(tr.threads.slice(1).every((t) => t.parent === 1), 'worker threads were started by main');
     assert.ok(tr.fns.every((f) => f.id), 'all probes map to entities');
     const shared = tr.objects.filter((o) => o.threads.length > 1).map((o) => o.label);
