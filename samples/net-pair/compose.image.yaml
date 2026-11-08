@@ -1,0 +1,40 @@
+# The same two nodes, built into their images instead of mounting the sources:
+# docker/Dockerfile.image compiles them in a build stage and copies the programs into a slim stage.
+#
+#   docker compose -f compose.image.yaml up --build     run it
+#   CodeGraph traces it too: name this file in .codegraph.json ("compose": { "files": [...] })
+
+x-node: &node
+  build:
+    context: .
+    dockerfile: docker/Dockerfile.image
+  image: net-pair-image:local
+
+services:
+  node-b:
+    <<: *node
+    command: ["./node-b"]
+    networks:
+      pair-net:
+        ipv4_address: 198.51.100.20
+    healthcheck:
+      test: ["CMD-SHELL", "grep -qi ':1B58 00000000:0000 0A' /proc/net/tcp"]
+      interval: 1s
+      timeout: 1s
+      retries: 120
+
+  node-a:
+    <<: *node
+    command: ["./node-a"]
+    networks:
+      pair-net:
+        ipv4_address: 198.51.100.10
+    depends_on:
+      node-b:
+        condition: service_healthy
+
+networks:
+  pair-net:
+    ipam:
+      config:
+        - subnet: 198.51.100.0/24

@@ -38,10 +38,14 @@ ELK_CDN=https://cdn.jsdelivr.net/npm/elkjs@0.12.1/lib/ node scripts/build-demo.m
 - `runtime/` — the tracers that run inside the user's program (Python stdlib only; C99 + pthreads, C++11).
   Keep them dependency-free and never let them change what the program does when tracing is off.
 - `samples/` — small projects used by tests and the demo (`broken-*` fail on purpose; `net-pair` is a client and
-  a server with a makefile and a compose file).
+  a server with a makefile and two compose files — mounted, and built into the image; `py-pipeline` has a compose
+  file too).
+- `schemas/codegraph.schema.json` — `.codegraph.json` for the editor; keep it in step with `src/core/config.ts`
+  (a test compares their keys).
 
-The Docker Compose test runs real containers and is skipped unless `CODE_GRAPH_DOCKER_TEST=1` and Docker is
-running (CI sets it): `CODE_GRAPH_DOCKER_TEST=1 npm test`.
+The Docker Compose tests run real containers and are skipped unless `CODE_GRAPH_DOCKER_TEST=1` and Docker is
+running (CI sets it): `CODE_GRAPH_DOCKER_TEST=1 npm test`. The GIFs in the README are recorded from code-server with
+Playwright (a drawn cursor, segments cut with ffmpeg, compressed with gifsicle).
 
 ## Releases
 

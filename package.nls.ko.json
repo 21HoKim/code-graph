@@ -22,7 +22,7 @@
   "welcome.open": "코드를 회로처럼 보여 줍니다. 폴더·파일·클래스·함수는 블록이 되고, 호출·스레드·데이터는 전류가 흐르는 전선이 됩니다.\n[회로도 열기](command:codeGraph.open)\n[현재 파일 보기](command:codeGraph.showFile)",
   "welcome.check": "코드가 컴파일되는지 검사합니다. 깨진 곳만 빨갛게 표시되고, 전선을 따라 영향이 어디까지 가는지 보입니다.\n[검증 (컴파일 검사)](command:codeGraph.verify)\n프로그램을 실행해 스레드마다 한 일과 흘러간 값을 다시 재생합니다.\n[실행 & 추적](command:codeGraph.runTrace)",
   "welcome.untrusted": "검증과 실행 & 추적은 컴파일러와 프로그램을 실제로 실행하므로 신뢰한 워크스페이스에서만 쓸 수 있습니다.\n[워크스페이스 신뢰 관리](command:workbench.trust.manage)",
-  "welcome.more": "[추적 파일 불러오기…](command:codeGraph.loadTrace)\n팁: C, C++, Python 파일을 우클릭하거나 상태 표시줄의 CodeGraph를 누르면 그 파일을 회로도에서 바로 볼 수 있습니다.\n[설정](command:workbench.action.openSettings?%5B%22codeGraph%22%5D) · [사용법](https://github.com/21HoKim/code-graph/blob/main/README.ko.md#%EC%82%AC%EC%9A%A9%EB%B2%95)",
+  "welcome.more": "[추적 파일 불러오기…](command:codeGraph.loadTrace)\n팁: C, C++, Python 파일을 우클릭하거나 상태 표시줄의 CodeGraph를 누르면 그 파일을 회로도에서 바로 볼 수 있습니다.\n[설정](command:workbench.action.openSettings?%5B%22codeGraph%22%5D) · [사용법](https://github.com/21HoKim/code-graph/blob/main/docs/GUIDE.ko.md)",
   "trust.description": "정적 분석은 어디서나 동작합니다. 컴파일 검사와 실행 & 추적은 컴파일러와 프로그램을 실제로 실행하므로 신뢰한 워크스페이스에서만 켜집니다.",
   "cfg.verifyMode": "실제 툴체인(`gcc`/`clang -fsyntax-only`, Python `compile()`)으로 컴파일 검사하는 시점. 깨진 블록은 빨간색, 영향은 전선을 따라 퍼집니다.",
   "cfg.verifyMode.onOpenAndSave": "열 때 검사하고, 저장할 때마다 영향받는 번역 단위만 다시 검사.",
@@ -35,7 +35,7 @@
   "cfg.verifyCcdb": "프로젝트의 빌드 플래그를 씁니다. `compile_commands.json`이 있으면 그것을, 없으면 makefile이 넘기는 플래그(`make -n` 드라이런으로 읽음)를 씁니다.",
   "cfg.verifyEditor": "언어 서버(C/C++, clangd, Pylance…)가 보고한 오류도 표시.",
   "cfg.verifyTimeout": "번역 단위 하나당 제한 시간(초).",
-  "cfg.runEntry": "실행 & 추적이 시작할 대상: Python 파일, 또는 `main`이 있는 C/C++ 파일. 비우면 현재 에디터의 진입점, 없으면 목록에서 선택.",
+  "cfg.runEntry": "실행 & 추적이 시작할 대상: Python 파일, 또는 `main`이 있는 C/C++ 파일. 비우면 현재 에디터의 진입점, 없으면 목록에서 선택. `.codegraph.json`에 적은 값이 이 설정들보다 우선합니다.",
   "cfg.runArgs": "실행 & 추적 때 넘길 프로그램 인자.",
   "cfg.runCwd": "작업 디렉터리(워크스페이스 기준). 비우면 워크스페이스 루트.",
   "cfg.runEnv": "추적 실행에 추가할 환경 변수.",
@@ -48,8 +48,10 @@
   "welcome.compose": "이 워크스페이스에는 Compose 파일이 있습니다. 서비스를 각자의 컨테이너와 네트워크에서 실행하고, 모든 컨테이너를 한 타임라인에서 봅니다.\n[Docker Compose로 실행 & 추적](command:codeGraph.runCompose)",
   "cfg.runUseBuildSystem": "C/C++ 프로그램을 프로젝트와 같은 방식으로 빌드합니다. 소스, 정의(-D), 라이브러리, 실행 위치를 makefile(`make -n`)이나 CMake(`CMakeFiles/*/link.txt`)에서 가져옵니다.",
   "cfg.runTarget": "진입 파일이 여러 프로그램에 들어갈 때(예: `main.cpp` 하나로 `node-a`, `node-b`) 실행할 프로그램. 비우면 물어봅니다.",
-  "cfg.composeFile": "**Docker Compose로 실행 & 추적**에 쓸 Compose 파일(워크스페이스 기준 경로). 비우면 루트의 `compose.yaml` / `docker-compose.yml`.",
-  "cfg.composeServices": "추적할 서비스. 비우면 워크스페이스를 마운트하는(예: `- ./:/app`) 모든 서비스. 나머지 서비스도 함께 실행됩니다.",
+  "cfg.composeFile": "**Docker Compose로 실행 & 추적**에 쓸 Compose 파일(워크스페이스 기준 경로). 비우면 루트의 `compose.yaml` / `docker-compose.yml`과 그 override 파일. 여러 파일, 프로필, 서비스별 설정은 `.codegraph.json`에 적습니다.",
+  "cfg.composeServices": "추적할 서비스. 비우면 워크스페이스를 마운트하거나(예: `- ./:/app`) 워크스페이스로 이미지를 빌드하는 모든 서비스. 나머지 서비스도 함께 실행됩니다.",
   "cfg.composeStartTimeout": "첫 추적 프로그램이 시작되기 전까지 이미지 빌드와 컨테이너 안 빌드에 허용하는 시간. `codeGraph.run.timeoutSeconds`는 그때부터 셉니다.",
-  "cfg.composeDocker": "사용할 docker CLI(Compose v2 포함)."
+  "cfg.composeDocker": "사용할 docker CLI(Compose v2 포함).",
+  "cmd.createConfig": ".codegraph.json 만들기 / 열기",
+  "welcome.config": "CodeGraph가 빌드나 Docker 구성을 제대로 못 잡나요? 스스로 알 수 없는 것만 `.codegraph.json` 한 파일에 적어 주세요.\n[.codegraph.json 만들기](command:codeGraph.createConfig)"
 }

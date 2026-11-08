@@ -5,8 +5,9 @@
  * environment variable CODE_GRAPH_TRACE names an output file, so the
  * instrumented binary behaves exactly like the original otherwise.
  *
- *   CODE_GRAPH_TRACE       output path (JSON lines, schema code-graph-trace/1); "{pid}" in it
- *                          becomes the process id, so several processes can share one setting
+ *   CODE_GRAPH_TRACE       output path (JSON lines, schema code-graph-trace/1); "{pid}" and "{host}"
+ *                          in it become the process id and host name, so several processes (and
+ *                          containers) can share one setting; an existing file is never overwritten
  *   CODE_GRAPH_MAX_EVENTS  detailed events to record (default 200000); call counts continue after that
  *   CODE_GRAPH_VALUES      0 = do not record argument values
  *
@@ -19,6 +20,8 @@
 #ifndef _GNU_SOURCE
 #define _GNU_SOURCE
 #endif
+#include <errno.h>
+#include <fcntl.h>
 #include <pthread.h>
 #include <signal.h>
 #include <stdint.h>
@@ -145,18 +148,39 @@ static void cgt_finish_impl(int lock);
 static void cgt_on_signal(int sig);
 static char g_main_name[64];
 
-/* CODE_GRAPH_TRACE with "{pid}" replaced */
+/* CODE_GRAPH_TRACE with "{pid}" and "{host}" (the container's name, by default) replaced */
 static void cgt_trace_path(const char *in, char *out, size_t cap) {
   size_t n = 0;
+  char host[128] = "host";
+  if (gethostname(host, sizeof host - 1) != 0) strcpy(host, "host");
+  host[sizeof host - 1] = 0;
+  char *dot = strchr(host, '.');
+  if (dot) *dot = 0;
   for (const char *p = in; *p && n + 1 < cap;) {
     if (strncmp(p, "{pid}", 5) == 0) {
       n += (size_t)snprintf(out + n, cap - n, "%d", (int)getpid());
-      if (n >= cap) n = cap - 1;
       p += 5;
+    } else if (strncmp(p, "{host}", 6) == 0) {
+      n += (size_t)snprintf(out + n, cap - n, "%s", host);
+      p += 6;
     } else
       out[n++] = *p++;
+    if (n >= cap) n = cap - 1;
   }
   out[n] = 0;
+}
+
+/* a new file: path, or path.1, path.2 … when another process already wrote there */
+static FILE *cgt_open_new(const char *path) {
+  char p[1100];
+  for (int i = 0; i < 1000; i++) {
+    if (i == 0) snprintf(p, sizeof p, "%s", path);
+    else snprintf(p, sizeof p, "%s.%d", path, i);
+    int fd = open(p, O_WRONLY | O_CREAT | O_EXCL, 0666);
+    if (fd >= 0) return fdopen(fd, "w");
+    if (errno != EEXIST) break;
+  }
+  return fopen(path, "w");
 }
 
 /* program file name, for telling processes apart ("" when unknown) */
@@ -185,7 +209,7 @@ static void cgt_init(void) {
   if (v && (*v == '0' || *v == 'f' || *v == 'o')) g_values = 0;
   char file[1024];
   cgt_trace_path(path, file, sizeof file);
-  g_out = fopen(file, "w");
+  g_out = cgt_open_new(file);
   if (!g_out) return;
   struct timespec ts, wall;
   clock_gettime(CLOCK_MONOTONIC, &ts);

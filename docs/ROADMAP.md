@@ -14,18 +14,26 @@ focus, follow-cursor, incremental re-analysis, CLI.
 - Run & Trace for Python and C/C++: threads, values, object identities, crashes; swimlane replay, data trail,
   shared objects, runtime-only wires, CLI `trace`.
 
-## v0.3 — real projects (this release)
+## v0.3 — real projects
 
 - Run & Trace builds programs from the project's makefile (`make -n`) or CMake link files: flags, libraries,
   run directory, a pick when one `main` goes into several programs; library guesses for failed links.
 - Run & Trace with Docker Compose: services traced inside their own containers and network, merged on one
   timeline per container.
 
+## v0.4 — any setup (this release)
+
+- Compose services traced however they get the code: mounted, or copied in by the Dockerfile (images rebuilt
+  from the traced copy, multi-stage included); any compiler on `PATH`, Python however it is started.
+- `.codegraph.json` for what CodeGraph cannot find out by itself: build scripts, programs, compose files and
+  profiles, per-service builds and source paths. Offered when a run cannot be set up, with completion in the
+  editor.
+
 ## Next — distributed runs
 
 - **Messages between processes**: pair a `send` in one container with the `recv` in another (socket addresses,
   payload digests) and draw the hop as a wire between their blocks.
-- **Python services** in Compose (an interpreter shim), images that bake the sources in, Kubernetes pods.
+- **Kubernetes pods** and dev containers, with the same wrappers as Compose.
 
 ## Next — precision
 

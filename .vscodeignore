@@ -8,6 +8,7 @@
 !media/icon.png
 !media/activitybar.svg
 !l10n/**
+!schemas/**
 !package.json
 !package.nls.json
 !package.nls.ko.json

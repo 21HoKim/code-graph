@@ -1,0 +1,85 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://raw.githubusercontent.com/21HoKim/code-graph/main/schemas/codegraph.schema.json",
+  "title": ".codegraph.json",
+  "description": "CodeGraph project settings: only what CodeGraph cannot find out by itself. Every key is optional; a key here wins over the matching VS Code setting.",
+  "type": "object",
+  "allowComments": true,
+  "allowTrailingCommas": true,
+  "additionalProperties": false,
+  "properties": {
+    "$schema": { "type": "string" },
+    "run": {
+      "type": "object",
+      "description": "Run & Trace on this machine.",
+      "additionalProperties": false,
+      "properties": {
+        "entry": {
+          "type": "string",
+          "markdownDescription": "What to run: a C/C++ file with `main()` or a Python script / package (workspace-relative). Default: the active editor's entry point, or pick from a list."
+        },
+        "target": {
+          "type": "string",
+          "markdownDescription": "Program to run when the makefile / CMake builds the entry into several (e.g. `node-a` and `node-b` from one `main.cpp`). Default: ask."
+        },
+        "args": { "type": "array", "items": { "type": "string" }, "description": "Program arguments." },
+        "cwd": {
+          "type": "string",
+          "description": "Directory to run in (workspace-relative). Default: where the build links the program, else the workspace."
+        },
+        "env": { "type": "object", "additionalProperties": { "type": "string" }, "description": "Extra environment for the program." },
+        "build": {
+          "type": "string",
+          "markdownDescription": "Shell command that builds the program, for builds CodeGraph does not read by itself (scripts, Meson, Bazel…). Runs in a traced copy of the workspace with every C/C++ compiler wrapped; needs `program`.",
+          "examples": ["./build.sh", "meson setup out && ninja -C out", "make -C src release"]
+        },
+        "program": {
+          "type": "string",
+          "markdownDescription": "What `build` produces (workspace-relative), started after the build.",
+          "examples": ["out/app", "build/server"]
+        },
+        "buildFlags": { "type": "array", "items": { "type": "string" }, "description": "Extra compile flags (e.g. -DDEBUG)." },
+        "linkFlags": { "type": "array", "items": { "type": "string" }, "description": "Extra link flags and libraries (e.g. -lssl)." },
+        "timeoutSeconds": { "type": "number", "minimum": 1, "description": "Stop the program after this many seconds (the trace so far is kept)." }
+      },
+      "dependencies": { "build": ["program"], "program": ["build"] }
+    },
+    "compose": {
+      "type": "object",
+      "description": "Run & Trace with Docker Compose.",
+      "additionalProperties": false,
+      "properties": {
+        "files": {
+          "markdownDescription": "Compose files, in order (workspace-relative). Default: `compose.yaml` / `docker-compose.yml` plus its override file, as `docker compose` reads them.",
+          "oneOf": [{ "type": "string" }, { "type": "array", "items": { "type": "string" }, "minItems": 1 }]
+        },
+        "profiles": { "type": "array", "items": { "type": "string" }, "description": "Compose profiles to enable." },
+        "services": {
+          "type": "array",
+          "items": { "type": "string" },
+          "description": "Services to trace. Default: every service that mounts the workspace or builds its image from it; the others still run."
+        },
+        "build": {
+          "type": "object",
+          "additionalProperties": { "type": "string" },
+          "markdownDescription": "Per service: a shell command run in its container before its own command, through the compiler wrappers — for images that only run a program built elsewhere.",
+          "examples": [{ "server": "make -C /app server" }]
+        },
+        "sourcePath": {
+          "type": "object",
+          "additionalProperties": { "type": "string", "pattern": "^/" },
+          "markdownDescription": "Per service: where the workspace is inside its container, when it is neither mounted (`- ./:/app`) nor copied in by the Dockerfile. The traced copy is mounted there.",
+          "examples": [{ "server": "/srv/app" }]
+        },
+        "env": {
+          "type": "object",
+          "additionalProperties": { "type": "object", "additionalProperties": { "type": "string" } },
+          "markdownDescription": "Per service: extra environment for the traced run (e.g. `CXX` for the build).",
+          "examples": [{ "server": { "CXX": "g++-12" } }]
+        },
+        "timeoutSeconds": { "type": "number", "minimum": 1, "description": "How long the programs may run, counted from the first traced start." },
+        "startTimeoutSeconds": { "type": "number", "minimum": 10, "description": "Time allowed for image builds and the builds inside the containers." }
+      }
+    }
+  }
+}

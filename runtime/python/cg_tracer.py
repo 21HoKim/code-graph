@@ -11,8 +11,14 @@ threads. Python 3.12+ uses ``sys.monitoring`` (code outside ROOT is disabled
 after its first call, so libraries cost almost nothing); older versions fall
 back to ``sys.setprofile``.
 
+``start_auto()`` (called by the sitecustomize next to this file) traces a
+whole process however it was started, with the settings from the environment
+(CODE_GRAPH_TRACE, CODE_GRAPH_PY_ROOTS, …); its trace file is only created
+once code under a root runs. Forked children get a trace of their own.
+
 Output: JSON lines (schema code-graph-trace/1), see src/core/trace.ts.
 """
+import atexit
 import json
 import os
 import runpy
@@ -28,27 +34,83 @@ _SKIP_DIRS = {"site-packages", "dist-packages", ".venv", "venv", "env", "__pycac
 _PRIM = (int, float, str, bool, type(None))
 
 
+def _hostname():
+    try:
+        import socket
+
+        return socket.gethostname().split(".")[0] or "host"
+    except Exception:  # noqa: BLE001
+        return "host"
+
+
+def _open_new(path):
+    """A new file: path, or path.1, path.2 … when another process already wrote there."""
+    for i in range(1000):
+        p = path if i == 0 else f"{path}.{i}"
+        try:
+            return open(p, "x", encoding="utf-8")
+        except FileExistsError:
+            continue
+    return open(path, "w", encoding="utf-8")
+
+
 class Tracer:
-    def __init__(self, root, out, max_events, values):
-        self.root = os.path.realpath(root) + os.sep
+    def __init__(self, root, out, max_events, values, lazy=False):
+        roots = list(root) if isinstance(root, (list, tuple)) else [root]
+        self.roots = [os.path.realpath(r).rstrip(os.sep) + os.sep for r in roots if r]
+        # file paths are relative to the one root, or to / when there are several
+        self.root = self.roots[0] if len(self.roots) == 1 else os.sep
         self.self_file = os.path.realpath(__file__)
         self.max_events = max_events
         self.values = values
-        self.out = open(out.replace("{pid}", str(os.getpid())), "w", encoding="utf-8")
+        self.pattern = out
+        self.lazy = lazy
         # re-entrant: sys.monitoring also fires for code that the callbacks themselves run (json, os.path …)
         self.lock = threading.RLock()
+        self.out = None if lazy else self.open()
+        self.reset()
+        if hasattr(os, "register_at_fork"):
+            os.register_at_fork(before=self.before_fork, after_in_child=self.after_fork)
+
+    def reset(self):
         self.buf = []
         self.n = 0
         self.dropped = 0
-        self.code_fid = {}
+        # cleared in place: the installed hooks hold this dict
+        if hasattr(self, "code_fid"):
+            self.code_fid.clear()
+        else:
+            self.code_fid = {}
         self.nfn = 0
+        self.keep = False
         self.threads = {}
         self.stacks = {}
         self.calls = {}
         self.edges = {}
         self.done = False
-        self.write({"k": "h", "schema": "code-graph-trace/1", "lang": "python", "root": self.root[:-1], "clock": "ns",
-                    "pid": os.getpid(), "python": sys.version.split()[0], "argv": sys.argv[1:], "mono": _T0, "wall": _WALL0})
+        head = {"k": "h", "schema": "code-graph-trace/1", "lang": "python", "root": self.root[:-1] or "/", "clock": "ns",
+                "pid": os.getpid(), "ppid": os.getppid(), "python": sys.version.split()[0], "argv": sys.argv[1:], "mono": _T0, "wall": _WALL0}
+        if len(self.roots) > 1:
+            head["roots"] = [r[:-1] for r in self.roots]
+        self.write(head)
+
+    def open(self):
+        return _open_new(self.pattern.replace("{pid}", str(os.getpid())).replace("{host}", _hostname()))
+
+    # -- fork: the child writes a trace of its own --------------------------------
+    def before_fork(self):
+        try:
+            self.flush()
+            if self.out is not None and not self.out.closed:
+                self.out.flush()
+        except Exception:
+            pass
+
+    def after_fork(self):
+        self.lock = threading.RLock()
+        self.out = None  # the parent's (flushed) file; the child opens its own once it runs workspace code
+        self.lazy = True
+        self.reset()
 
     # -- output ---------------------------------------------------------------
     def write(self, obj):
@@ -61,7 +123,18 @@ class Tracer:
 
     def flush(self):
         with self.lock:
-            if self.buf and not self.out.closed:
+            if not self.buf:
+                return
+            if self.out is None:
+                if not self.nfn and not self.keep:
+                    # no workspace code ran yet: no file; keep the header, forget the threads seen so far
+                    if len(self.buf) >= 4000:
+                        del self.buf[1:]
+                        self.threads = {}
+                        self.stacks = {}
+                    return
+                self.out = self.open()
+            if not self.out.closed:
                 lines, self.buf = self.buf, []
                 self.out.write("\n".join(lines) + "\n")
 
@@ -74,7 +147,7 @@ class Tracer:
         name = code.co_filename
         if name and not name.startswith("<"):
             real = os.path.realpath(name)
-            if real.startswith(self.root) and real != self.self_file:
+            if real != self.self_file and any(real.startswith(r) for r in self.roots):
                 rel = real[len(self.root):].replace(os.sep, "/")
                 if not any(part in _SKIP_DIRS for part in rel.split("/")[:-1]):
                     info = rel
@@ -344,10 +417,11 @@ class Tracer:
         # a module that does not compile has no frame of its own: point at the bad line itself
         if isinstance(exc, SyntaxError) and exc.filename:
             real = os.path.realpath(exc.filename)
-            if real.startswith(self.root):
+            if any(real.startswith(r) for r in self.roots):
                 rec["file"] = real[len(self.root):].replace(os.sep, "/")
                 rec["line"] = exc.lineno or 1
                 rec["msg"] = str(exc.msg)
+                self.keep = True  # a workspace file that does not compile: worth a trace file
         self.write(rec)
 
     def finish(self, exit_code, stopped=None):
@@ -362,7 +436,22 @@ class Tracer:
             end["stopped"] = stopped
         self.write(end)
         self.flush()
-        self.out.close()
+        if self.out is not None:
+            self.out.close()
+
+
+def _finish_on_hard_exit(tracer):
+    """Programs (and forked children: multiprocessing, fork + _exit) that end with os._exit still finish their trace."""
+    orig = os._exit
+
+    def _exit(code):
+        try:
+            tracer.finish(code)
+        except Exception:
+            pass
+        orig(code)
+
+    os._exit = _exit
 
 
 def main():
@@ -404,6 +493,7 @@ def main():
 
     tracer = Tracer(opts["root"], opts["out"], opts["max"], opts["values"])
     tracer.patch_threading()
+    _finish_on_hard_exit(tracer)
 
     import signal
 
@@ -448,6 +538,58 @@ def main():
                 pass
     tracer.finish(code)
     return code
+
+
+def start_auto():
+    """Traces this whole process (however it was started) with the settings from the environment."""
+    env = os.environ
+    out, roots = env.get("CODE_GRAPH_TRACE"), env.get("CODE_GRAPH_PY_ROOTS")
+    if not out or not roots or env.get("CODE_GRAPH_PY_SHIM_PID") == str(os.getpid()):
+        return None  # not traced, or started by the shim through main() above
+    try:
+        max_events = int(env.get("CODE_GRAPH_MAX_EVENTS") or 200000)
+    except ValueError:
+        max_events = 200000
+    values = env.get("CODE_GRAPH_VALUES", "1") not in ("0", "false", "off")
+    tracer = Tracer([r for r in roots.split(":") if r], out, max_events, values, lazy=True)
+    tracer.patch_threading()
+    _finish_on_hard_exit(tracer)
+    tracer.exit_code = 0
+
+    orig_exit = sys.exit
+
+    def exit(code=None):
+        tracer.exit_code = code if isinstance(code, int) else (0 if code is None else 1)
+        orig_exit(code)
+
+    sys.exit = exit
+    orig_hook = sys.excepthook
+
+    def hook(t, v, tb):
+        tracer.exit_code = 1
+        try:
+            tracer.exception(v, uncaught=True)
+        except Exception:
+            pass
+        orig_hook(t, v, tb)
+
+    sys.excepthook = hook
+    # non-daemon threads are joined before atexit handlers run
+    atexit.register(lambda: tracer.finish(tracer.exit_code))
+    import signal
+
+    try:
+        if signal.getsignal(signal.SIGTERM) == signal.SIG_DFL:
+            def on_term(signum, _frame):
+                tracer.finish(128 + signum, stopped="SIGTERM")
+                os._exit(128 + signum)
+
+            signal.signal(signal.SIGTERM, on_term)
+    except (ValueError, OSError, AttributeError):
+        pass
+    if not (sys.version_info >= (3, 12) and tracer.install_monitoring()):
+        tracer.install_profile()
+    return tracer
 
 
 if __name__ == "__main__":

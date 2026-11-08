@@ -1,0 +1,19 @@
+# Both nodes built into the image (see ../compose.image.yaml): a build stage copies the sources in
+# and compiles them, a slim stage gets only the programs and their config.
+FROM debian:bookworm-slim AS build
+RUN apt-get update \
+ && apt-get install -y --no-install-recommends g++ make libssl-dev \
+ && rm -rf /var/lib/apt/lists/*
+WORKDIR /src
+COPY makefile ./
+COPY src/ src/
+RUN make -C src all
+
+FROM debian:bookworm-slim
+RUN apt-get update \
+ && apt-get install -y --no-install-recommends libssl3 \
+ && rm -rf /var/lib/apt/lists/*
+WORKDIR /opt/pair
+COPY --from=build /src/build/ bin/
+COPY cfg/ cfg/
+WORKDIR /opt/pair/bin

@@ -16,6 +16,8 @@ import * as path from 'path';
 import { guessLibraries, libraryDirFlags, libraryFlags, type BuildTarget, type LibraryGuess } from './buildinfo';
 import type { Parsers } from './extract';
 import { instrumentSources } from './instrument';
+import { mirrorWorkspace } from './mirror';
+import { writeCodegraphDir } from './shims';
 import type { CodeGraph, Diagnostic, Entity } from './model';
 import { parseTrace, traceDiagnostics, type RunTrace, type TraceFn } from './trace';
 import { diagFlags, parseCompilerOutput, parseLinkerErrors, run, type CompileCommand, type Toolchain } from './verify';
@@ -49,6 +51,11 @@ export interface RunInput {
    * libraries, and the directory it runs from. Without it the units come from the static graph.
    */
   target?: BuildTarget;
+  /**
+   * `.codegraph.json` run.build / run.program: a build CodeGraph does not read by itself. The command
+   * runs in a traced copy of the workspace with the compilers wrapped; the program then runs there.
+   */
+  customBuild?: { command: string; program: string };
   /** Directory holding python/cg_tracer.py and c/cg_trace.{h,c} + c/cg_trace_cxx.cpp. */
   runtimeDir: string;
   /** Scratch directory for the instrumented build and the trace (wiped). */
@@ -106,6 +113,7 @@ export async function runAndTrace(o: RunInput): Promise<RunResult> {
   let fns: TraceFn[] | undefined;
   let cmd: string;
   let args: string[];
+  let runDir: string | undefined;
   const env: NodeJS.ProcessEnv = { ...process.env, ...(o.env ?? {}) };
 
   if (o.entry.kind === 'python') {
@@ -119,11 +127,12 @@ export async function runAndTrace(o: RunInput): Promise<RunResult> {
     env.PYTHONUNBUFFERED = '1';
   } else {
     o.onStage?.('build', 'instrumenting');
-    const b = await buildNative(o);
+    const b = o.customBuild ? await buildCustom(o, o.customBuild) : await buildNative(o);
     notes.push(...b.notes);
     if (!b.exe) return { ok: false, stage: 'build', buildDiagnostics: b.diagnostics, runtimeDiagnostics: [], notes, output: b.log, command: '' };
     fns = b.fns;
     cmd = b.exe;
+    runDir = b.runDir;
     args = [...o.args];
     env.CODE_GRAPH_TRACE = traceFile;
     env.CODE_GRAPH_MAX_EVENTS = String(o.maxEvents);
@@ -134,7 +143,8 @@ export async function runAndTrace(o: RunInput): Promise<RunResult> {
   o.onStage?.('run', command);
   o.log?.(`$ ${command}`);
   const started = new Date().toISOString();
-  const cwd = o.cwd ? path.resolve(o.root, o.cwd) : (o.target?.dir ?? o.root);
+  // a custom build runs its program in the traced copy; a make/CMake program where it is linked
+  const cwd = runDir ? path.join(runDir, ...(o.cwd ?? '').split('/').filter(Boolean)) : o.cwd ? path.resolve(o.root, o.cwd) : (o.target?.dir ?? o.root);
   const r = await runProgram(cmd, args, { cwd, env, timeoutMs: o.timeoutMs, signal: o.signal });
   const output = r.output;
   if (r.error) return fail('run', `could not start ${cmd}: ${r.error}`, output);
@@ -175,6 +185,45 @@ interface NativeBuild {
   diagnostics: Diagnostic[];
   notes: string[];
   log: string;
+  /** Where the program should run (custom builds: the traced copy). */
+  runDir?: string;
+}
+
+/** `.codegraph.json` run.build: the project's own build command, in a traced copy, compilers wrapped. */
+async function buildCustom(o: RunInput, b: { command: string; program: string }): Promise<NativeBuild> {
+  const notes: string[] = [];
+  if (process.platform === 'win32') return { fns: [], diagnostics: [], notes: ['run.build needs a POSIX shell (Linux, macOS)'], log: '' };
+  const mirror = path.join(o.workDir, 'src');
+  const cg = path.join(o.workDir, 'codegraph');
+  mirrorWorkspace(o.root, mirror, [o.workDir]);
+  const native = o.files.filter((f): f is { abs: string; rel: string; lang: 'c' | 'cpp' } => f.lang !== 'python');
+  const inst = instrumentSources({ files: native, outDir: mirror, graph: o.graph, parsers: await o.parsers() });
+  o.log?.(`instrumented ${inst.fns.length} functions in ${inst.instrumented} files`);
+  writeCodegraphDir(cg, o.runtimeDir, inst.fns.length, ['local'], cg);
+  o.log?.(`build: ${b.command}   (in a traced copy of the workspace, compilers wrapped)`);
+  o.onStage?.('build', b.command);
+  const env: NodeJS.ProcessEnv = { ...process.env, CODE_GRAPH_SHIM_HOME: path.join(cg, 'shims'), CODE_GRAPH_SERVICE: 'local' };
+  delete env.CODE_GRAPH_TRACE; // tools the build runs are not the program
+  const r = await run(path.join(cg, 'bin', 'cg-run'), ['sh', '-c', b.command], { cwd: mirror, timeoutMs: 900_000, signal: o.signal, env });
+  const out = (r.stdout + '\n' + r.stderr).trim();
+  let log = `$ ${b.command}\n${clip(out, 80)}\n`;
+  const inMirror = (abs: string) => {
+    const rel = path.relative(mirror, abs);
+    return rel.startsWith('..') || path.isAbsolute(rel) ? undefined : rel.split(path.sep).join('/');
+  };
+  if (r.code !== 0) {
+    const parsed = parseCompilerOutput(out, mirror, mirror, 'compiler', inMirror);
+    notes.push(`the build command failed (exit ${r.code ?? r.error})`);
+    return { fns: inst.fns, diagnostics: dedupe(parsed.diags), notes, log };
+  }
+  if (!fs.existsSync(path.join(cg, 'trace', 'local', '.compiled'))) notes.push('the build compiled nothing through CodeGraph (already built, or compilers called by full path?): the program may not be traced');
+  const exe = path.join(mirror, ...b.program.split('/').filter(Boolean));
+  if (!fs.existsSync(exe)) {
+    notes.push(`run.program ${b.program} is not there after the build`);
+    log += `(no ${b.program})\n`;
+    return { fns: inst.fns, diagnostics: [], notes, log };
+  }
+  return { exe, fns: inst.fns, diagnostics: [], notes, log, runDir: mirror };
 }
 
 async function buildNative(o: RunInput): Promise<NativeBuild> {

@@ -134,6 +134,8 @@ export interface RunTrace {
 export interface ParseTraceOptions {
   /** C/C++: function table produced by the instrumenter (fid → entity). */
   fns?: TraceFn[];
+  /** Python: maps the tracer's root-relative paths to workspace paths (a container's root is elsewhere). */
+  mapFile?: (file: string) => string;
   command?: string;
   exit?: RunTrace['exit'];
   output?: string;
@@ -235,7 +237,7 @@ export function parseTrace(text: string, g: CodeGraph, opts: ParseTraceOptions =
         header = l;
         break;
       case 'f': {
-        const file = String(l.file ?? '');
+        const file = opts.mapFile && l.file ? opts.mapFile(String(l.file)) : String(l.file ?? '');
         const line = Number(l.line ?? 0);
         const name = String(l.name ?? '?');
         const id = locator.locate(file, line, name, typeof l.q === 'string' ? l.q : undefined);
@@ -257,7 +259,7 @@ export function parseTrace(text: string, g: CodeGraph, opts: ParseTraceOptions =
           msg: String(l.msg ?? ''),
           uncaught: !!l.uncaught,
           frames: Array.isArray(l.frames) ? (l.frames as [number, number][]) : undefined,
-          file: typeof l.file === 'string' ? l.file : undefined,
+          file: typeof l.file === 'string' ? (opts.mapFile ? opts.mapFile(l.file) : l.file) : undefined,
           line: typeof l.line === 'number' ? l.line : undefined,
         });
         break;

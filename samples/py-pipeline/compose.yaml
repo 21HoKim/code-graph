@@ -1,0 +1,12 @@
+# The pipeline in a container: the workspace is mounted and Python runs it as it is.
+#
+#   docker compose up                              run it
+#   CodeGraph: Run & Trace with Docker Compose     run it traced
+
+services:
+  pipeline:
+    image: python:3.12-slim
+    volumes:
+      - ./:/work
+    working_dir: /work
+    command: ["python", "main.py", "--sensors", "3", "--seconds", "1.5"]

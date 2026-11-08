@@ -1,51 +1,69 @@
 /**
- * Run & Trace with Docker Compose: the project's own containers, network and build, traced.
+ * Run & Trace with Docker Compose: the project's own containers, network and builds, traced.
  *
- * Programs that talk to each other (a client and its server, nodes of a protocol) only run
- * together, often only inside the network their compose file sets up. This runs that compose
- * project with an override instead of a separate setup:
+ * Programs that talk to each other (a client and its server, nodes of a protocol) only run together,
+ * often only inside the network their compose file sets up. This runs that compose project with an
+ * override instead of a separate setup. A service is traced when its container sees workspace
+ * sources; whatever it builds, it builds from a traced copy of the workspace (probes in its C/C++
+ * sources), with every compiler and Python interpreter wrapped:
  *
- *   1. copy the workspace (the folder services mount, e.g. `- ./:/app`) and put probes into the
- *      C/C++ sources of the copy — the workspace itself is never touched
- *   2. mount the copy where the workspace was mounted, plus /codegraph: the tracer runtime,
- *      compiler shims and a trace folder
- *   3. start each traced service with /codegraph/bin first on PATH: its own command (make, cmake,
- *      a shell script…) then calls gcc / g++ / cc / c++ / clang through the shims, which add the
- *      tracer header to every compile and the runtime to every program it links
- *   4. every traced process writes /codegraph/trace/<service>/<pid>.jsonl; when the programs end
- *      (or after the time limit) the project is stopped and taken down, and the traces are merged
- *      into one timeline, threads named after their container
+ *   mounted     a service that mounts the workspace (`- ./:/app`) gets the copy mounted there instead
+ *   image       a service whose image copies workspace files in (`COPY . .`, then maybe `RUN make`) is
+ *               built from the copy, with the shims inserted before the first COPY of each build stage
+ *   configured  `.codegraph.json` says where the workspace is in a container, or what to build first
  *
- * Needs the docker CLI with Compose v2 on the machine VS Code runs on. Node-only; no vscode import.
+ * Its command runs under /codegraph/bin/cg-run (compilers wrapped for builds at start, every Python
+ * process traced). Every traced process writes /codegraph/trace/<service>/<host>-<pid>.jsonl; when
+ * the programs end (or after the time limit) the project is stopped and taken down, and the traces
+ * are merged into one timeline with each container's threads as lanes. Services that see no
+ * workspace source (a database, a proxy) run as they are. The workspace itself is never touched.
+ *
+ * Needs the docker CLI with Compose v2 (2.17+ for image builds) talking to the local engine.
+ * Node-only; no vscode import.
  */
 import { spawn } from 'child_process';
 import * as fs from 'fs';
 import * as path from 'path';
+import type { ProjectConfig } from './config';
+import { analyzeDockerfile, copiedBy, traceDockerfile, type DockerfileCopy } from './dockerfile';
 import type { Parsers } from './extract';
 import { instrumentSources } from './instrument';
+import { mirrorWorkspace } from './mirror';
 import type { CodeGraph, Diagnostic } from './model';
+import { MOUNT, writeCodegraphDir } from './shims';
 import { mergeTraces, parseTrace, traceDiagnostics, type RunTrace } from './trace';
 import { parseCompilerOutput, run } from './verify';
 
+export { mirrorWorkspace };
+
 export const COMPOSE_FILES = ['compose.yaml', 'compose.yml', 'docker-compose.yaml', 'docker-compose.yml'];
-const MOUNT = '/codegraph';
-const SKIP_DIRS = new Set(['.git', 'node_modules', '.venv', 'venv', '__pycache__', '.tox', '.mypy_cache', '.cache']);
+const OVERRIDE_FILES = ['compose.override.yaml', 'compose.override.yml', 'docker-compose.override.yaml', 'docker-compose.override.yml'];
+const BUILD_CONTEXT = 'codegraph_trace';
 
 export interface ComposeVolume {
   type: string;
   source?: string;
   target: string;
   read_only?: boolean;
+  bind?: Record<string, unknown>;
+}
+
+export interface ComposeBuild {
+  context?: string;
+  dockerfile?: string;
+  dockerfile_inline?: string;
+  target?: string;
 }
 
 export interface ComposeService {
   image?: string;
-  build?: unknown;
+  build?: ComposeBuild;
   command?: string[] | null;
   entrypoint?: string[] | null;
   working_dir?: string;
   volumes?: ComposeVolume[];
   environment?: Record<string, string | null>;
+  hostname?: string;
 }
 
 export interface ComposeProject {
@@ -53,26 +71,58 @@ export interface ComposeProject {
   services: Record<string, ComposeService>;
 }
 
-export interface TracedService {
+/** How one service is traced. */
+export interface ServicePlan {
   name: string;
-  /** Bind mounts of the workspace (or folders in it): host folder relative to the workspace → container path. */
-  mounts: { rel: string; target: string }[];
+  /** Workspace folders the container sees: copy mounted at `target` (`rel` '' = the workspace). */
+  mounts: { rel: string; target: string; bind?: Record<string, unknown> }[];
+  /**
+   * Its image copies workspace files in: rebuilt from the traced copy. `copies` are workspace-relative;
+   * `builds`: a stage compiles after copying (the shims go in there).
+   */
+  image?: { contextRel: string; dockerfile?: string; inline?: string; copies: DockerfileCopy[]; builds: boolean; tag: string };
+  /** `.codegraph.json` compose.build: run in the container before its own command. */
+  prebuild?: string;
+  env?: Record<string, string>;
+  /** Container paths that hold workspace files: Python roots, and error paths mapped back. */
+  roots: { rel: string; target: string }[];
+  /** Which kinds of workspace sources the container sees. */
+  native: boolean;
+  python: boolean;
+  /** Entry point wrapped by cg-run (false when nothing says what the container runs). */
+  wrap: boolean;
+  /** [entrypoint…, command…] it runs, for wrapped services. */
+  command?: string[];
 }
 
-/** The compose file of the workspace: a setting, or compose.yaml / docker-compose.yml … at the root. */
-export function findComposeFile(root: string, setting?: string): string | undefined {
-  if (setting) {
-    const p = path.resolve(root, setting);
-    return fs.existsSync(p) ? p : undefined;
-  }
-  for (const f of COMPOSE_FILES) if (fs.existsSync(path.join(root, f))) return path.join(root, f);
-  return undefined;
+export interface SourceFile {
+  rel: string;
+  lang: 'c' | 'cpp' | 'python';
 }
+
+/**
+ * The compose files to use: configured ones, else what `docker compose` itself would read
+ * (compose.yaml or docker-compose.yml, plus its override file).
+ */
+export function findComposeFiles(root: string, configured?: string[]): string[] {
+  if (configured?.length) return configured.map((f) => path.resolve(root, f)).filter((f) => fs.existsSync(f));
+  const main = COMPOSE_FILES.map((f) => path.join(root, f)).find((f) => fs.existsSync(f));
+  if (!main) return [];
+  const over = OVERRIDE_FILES.map((f) => path.join(root, f)).find((f) => fs.existsSync(f));
+  return over ? [main, over] : [main];
+}
+
+/** The workspace's main compose file (for showing the Compose button), if any. */
+export function findComposeFile(root: string, setting?: string): string | undefined {
+  return findComposeFiles(root, setting ? [setting] : undefined)[0];
+}
+
+const fileArgs = (files: string[], profiles: string[] = []) => [...files.flatMap((f) => ['-f', f]), ...profiles.flatMap((p) => ['--profile', p])];
 
 /** `docker compose config`: the project as Compose resolves it (paths absolute, defaults filled in). */
-export async function composeConfig(docker: string, files: string[], o: { signal?: AbortSignal } = {}): Promise<ComposeProject> {
+export async function composeConfig(docker: string, files: string[], o: { profiles?: string[]; signal?: AbortSignal } = {}): Promise<ComposeProject> {
   const cwd = path.dirname(files[0]);
-  const r = await run(docker, ['compose', ...files.flatMap((f) => ['-f', f]), 'config', '--format', 'json'], { cwd, timeoutMs: 60_000, signal: o.signal });
+  const r = await run(docker, ['compose', ...fileArgs(files, o.profiles), 'config', '--format', 'json'], { cwd, timeoutMs: 60_000, signal: o.signal });
   if (r.error) throw new Error(/ENOENT/.test(r.error) ? `${docker} not found — Run & Trace with Docker Compose needs the docker CLI` : r.error);
   if (r.code !== 0) {
     const msg = r.stderr.trim().split('\n').pop() ?? '';
@@ -83,22 +133,97 @@ export async function composeConfig(docker: string, files: string[], o: { signal
   return p;
 }
 
-/** Services that mount the workspace or a folder inside it: their builds can be swapped for the traced copy. */
-export function tracedServices(project: ComposeProject, root: string, only?: string[]): TracedService[] {
-  const out: TracedService[] = [];
-  const rootAbs = path.resolve(root);
+const inside = (root: string, p: string): string | undefined => {
+  const rel = path.relative(path.resolve(root), path.resolve(p));
+  return rel.startsWith('..') || path.isAbsolute(rel) ? undefined : rel.split(path.sep).join('/');
+};
+
+/**
+ * Which services can be traced, and how. With `sources` (the workspace's C, C++ and Python files) a
+ * service is only traced when its container sees some of them; the others (databases, proxies…)
+ * run as they are, unless `.codegraph.json` names them.
+ */
+export function planServices(
+  project: ComposeProject,
+  root: string,
+  o: { only?: string[]; config?: ProjectConfig['compose']; sources?: SourceFile[] } = {},
+): { plans: ServicePlan[]; skipped: { name: string; why: string }[] } {
+  const plans: ServicePlan[] = [];
+  const skipped: { name: string; why: string }[] = [];
+  const cfg = o.config ?? {};
   for (const [name, s] of Object.entries(project.services)) {
-    if (only?.length && !only.includes(name)) continue;
-    const mounts: TracedService['mounts'] = [];
+    if (o.only?.length && !o.only.includes(name)) continue;
+    const asked = !!(o.only?.includes(name) || cfg.services?.includes(name) || cfg.build?.[name] || cfg.sourcePath?.[name] || cfg.env?.[name]);
+    const mounts: ServicePlan['mounts'] = [];
     for (const v of s.volumes ?? []) {
       if (v.type !== 'bind' || !v.source) continue;
-      const rel = path.relative(rootAbs, path.resolve(v.source));
-      if (rel.startsWith('..') || path.isAbsolute(rel)) continue;
-      mounts.push({ rel: rel.split(path.sep).join('/'), target: v.target });
+      const rel = inside(root, v.source);
+      if (rel !== undefined) mounts.push({ rel, target: v.target, ...(v.bind && Object.keys(v.bind).length ? { bind: v.bind } : {}) });
     }
-    if (mounts.length) out.push({ name, mounts });
+    const configured = cfg.sourcePath?.[name];
+    if (configured && !mounts.some((m) => m.target === configured)) mounts.push({ rel: '', target: configured });
+    const mounted = (rel: string) => mounts.some((m) => m.rel === '' || rel === m.rel || rel.startsWith(m.rel + '/'));
+
+    let image: ServicePlan['image'];
+    const ctxRel = s.build?.context ? inside(root, s.build.context) : undefined;
+    if (s.build && ctxRel !== undefined) {
+      const ctxAbs = path.join(root, ...ctxRel.split('/').filter(Boolean));
+      let text: string | undefined = s.build.dockerfile_inline;
+      let dockerfile: string | undefined;
+      if (text === undefined) {
+        dockerfile = path.resolve(ctxAbs, s.build.dockerfile ?? 'Dockerfile');
+        try {
+          text = fs.readFileSync(dockerfile, 'utf8');
+        } catch {
+          text = undefined;
+        }
+      }
+      if (text !== undefined) {
+        const info = analyzeDockerfile(text, ctxAbs);
+        const copies = info.copies.map((c) => ({ ...c, src: [ctxRel, c.src].filter(Boolean).join('/') }));
+        // rebuilt only when it copies sources in (not just a requirements.txt or a config file)
+        if (info.contextCopies && (!o.sources || o.sources.some((f) => copiedBy(copies, f.rel)))) {
+          const tag = `codegraph-trace/${`${project.name}-${name}`.toLowerCase().replace(/[^a-z0-9._-]/g, '-')}:latest`;
+          image = {
+            contextRel: ctxRel,
+            dockerfile: s.build.dockerfile_inline === undefined ? dockerfile : undefined,
+            inline: s.build.dockerfile_inline,
+            copies,
+            builds: info.buildStages.length > 0,
+            tag,
+          };
+        }
+      }
+    }
+    if (!mounts.length && !image) {
+      if (asked) skipped.push({ name, why: 'neither mounts the workspace nor copies it into its image — set compose.sourcePath for it in .codegraph.json' });
+      continue;
+    }
+    const seen = o.sources?.filter((f) => mounted(f.rel) || (image && copiedBy(image.copies, f.rel)));
+    if (seen && !seen.length) {
+      if (asked) skipped.push({ name, why: 'its container has none of the workspace’s C, C++ or Python sources — set compose.sourcePath for it in .codegraph.json' });
+      continue; // a database, a proxy…: runs as it is
+    }
+    const system = /^\/(usr|bin|sbin|lib|lib64|etc|var|proc|sys|dev)(\/|$)/;
+    const roots = [
+      ...mounts.map((m) => ({ rel: m.rel, target: m.target })),
+      ...(image?.copies ?? [])
+        .filter((c) => !c.file || !system.test(c.dest))
+        .map((c) => ({ rel: c.file ? path.posix.dirname(c.src).replace(/^\.$/, '') : c.src, target: c.dest })),
+    ];
+    plans.push({
+      name,
+      mounts,
+      image,
+      prebuild: cfg.build?.[name],
+      env: cfg.env?.[name],
+      roots,
+      native: seen ? seen.some((f) => f.lang !== 'python') : true,
+      python: seen ? seen.some((f) => f.lang === 'python') : true,
+      wrap: true,
+    });
   }
-  return out;
+  return { plans, skipped };
 }
 
 /** What a container runs: [entrypoint…, command…] the way Docker combines compose and image settings. */
@@ -109,166 +234,49 @@ export function effectiveCommand(s: ComposeService, image?: { Entrypoint?: strin
   return all.length ? all : undefined;
 }
 
-// ---------------------------------------------------------------------------
-// the traced copy and the /codegraph mount
-// ---------------------------------------------------------------------------
-
-/** Copies the workspace for the traced build; CMake caches are dropped so the build reconfigures with the shims. */
-export function mirrorWorkspace(root: string, dest: string, skip: string[] = []): { files: number; bytes: number } {
-  let files = 0;
-  let bytes = 0;
-  const skipAbs = skip.map((s) => path.resolve(s));
-  fs.cpSync(root, dest, {
-    recursive: true,
-    dereference: false,
-    verbatimSymlinks: true,
-    filter: (src) => {
-      const base = path.basename(src);
-      if (SKIP_DIRS.has(base) && src !== root) return false;
-      if (skipAbs.some((s) => src === s || src.startsWith(s + path.sep))) return false;
-      if (base === 'CMakeCache.txt') return false;
-      try {
-        const st = fs.lstatSync(src);
-        if (st.isFile()) {
-          if (st.size > 256 * 1024 * 1024) return false;
-          files++;
-          bytes += st.size;
-        }
-      } catch {
-        return false;
-      }
-      return true;
-    },
-  });
-  // a CMake build folder configured with /usr/bin/c++ would bypass the shims: reconfigure from scratch
-  const stack = [dest];
-  while (stack.length) {
-    const d = stack.pop()!;
-    let entries: fs.Dirent[] = [];
-    try {
-      entries = fs.readdirSync(d, { withFileTypes: true });
-    } catch {
-      continue;
-    }
-    if (entries.some((e) => e.name === 'CMakeFiles') && fs.existsSync(path.join(d, 'cmake_install.cmake'))) {
-      fs.rmSync(path.join(d, 'CMakeFiles'), { recursive: true, force: true });
-    }
-    for (const e of entries) if (e.isDirectory() && e.name !== 'CMakeFiles') stack.push(path.join(d, e.name));
-  }
-  return { files, bytes };
-}
-
-/** Compiler shim: same name as the compiler it stands in for (gcc, g++, cc, c++, clang, clang++). */
-export function shimScript(nfn: number, base = MOUNT): string {
-  return `#!/bin/sh
-# CodeGraph Run & Trace: stands in for the compiler of the same name. Compiles with the tracer
-# header (${base}/rt/cg_trace.h) and links the tracer runtime into every program, then runs the
-# real compiler. Version queries, preprocessing and shared libraries pass through.
-CG=${base}
-self=\${0##*/}
-find_real() {
-  _ifs=$IFS; IFS=:
-  for _d in $PATH; do
-    case "$_d" in "$CG/bin"|"$CG/bin/") continue ;; esac
-    if [ -x "$_d/$1" ] && [ ! -d "$_d/$1" ]; then IFS=$_ifs; echo "$_d/$1"; return 0; fi
-  done
-  IFS=$_ifs; return 1
-}
-real=$(find_real "$self") || { echo "codegraph: no $self on PATH" >&2; exit 127; }
-link=1; shared=0; static=0
-for a in "$@"; do
-  case "$a" in
-    --version|-v|-dumpversion|-dumpfullversion|-dumpmachine|-print-*|--print-*|-###) exec "$real" "$@" ;;
-    -E|-M|-MM) exec "$real" "$@" ;;
-    -c|-S) link=0 ;;
-    -shared) shared=1 ;;
-    -static|-static-pie) static=1 ;;
-  esac
-done
-if [ $link = 0 ] || [ $shared = 1 ]; then exec "$real" -include "$CG/rt/cg_trace.h" "$@"; fi
-
-# linking a program: build the runtime once per container (C++ links get the C++ part too)
-case "$self" in *++*|*xx*) cxx=1 ;; *) cxx=0 ;; esac
-rt=/tmp/codegraph-rt; mkdir -p "$rt" 2>/dev/null || rt=$(mktemp -d)
-cc=$(find_real gcc || find_real cc || find_real clang) || cc=
-if [ $cxx = 1 ]; then rtc="$rt/cg_trace_cpp.o"; lang=-DCGT_LANG_CPP; else rtc="$rt/cg_trace_c.o"; lang=; fi
-if [ ! -f "$rtc" ]; then
-  if [ -n "$cc" ]; then "$cc" -O2 -c "$CG/rt/cg_trace.c" -o "$rtc.$$" -DCGT_NFN=${Math.max(1, nfn)} $lang
-  else "$real" -x c -O2 -c "$CG/rt/cg_trace.c" -o "$rtc.$$" -DCGT_NFN=${Math.max(1, nfn)} $lang; fi && mv -f "$rtc.$$" "$rtc"
-fi
-objs="$rtc"
-if [ $cxx = 1 ]; then
-  if [ ! -f "$rt/cg_trace_cxx.o" ]; then
-    "$real" -O2 -std=c++11 -c "$CG/rt/cg_trace_cxx.cpp" -o "$rt/cg_trace_cxx.o.$$" && mv -f "$rt/cg_trace_cxx.o.$$" "$rt/cg_trace_cxx.o"
-  fi
-  objs="$objs $rt/cg_trace_cxx.o"
-fi
-# shared libraries built with probes find the runtime in the program
-dyn=; [ $static = 0 ] && dyn="-Wl,--dynamic-list=$CG/rt/cgt.dynlist"
-exec "$real" -include "$CG/rt/cg_trace.h" "$@" $objs -pthread $dyn
-`;
-}
-
-/** Entrypoint wrapper: the service's own command with the shims first on PATH. */
-export function runScript(base = MOUNT): string {
-  return `#!/bin/sh
-# CodeGraph Run & Trace: run the service's own command with the compiler shims first on PATH
-PATH="${base}/bin:\${PATH:-/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin}"
-export PATH
-# files the build creates in the traced copy stay removable from the host (containers often run as root)
-umask 0000
-exec "$@"
-`;
-}
-
-const SHIM_NAMES = ['gcc', 'g++', 'cc', 'c++', 'clang', 'clang++'];
-
-/**
- * Writes the /codegraph folder: runtime sources, shims, entrypoint wrapper and one trace folder per
- * service. `base` is where it will be mounted (tests use it where it is).
- */
-export function writeCodegraphDir(dir: string, runtimeDir: string, nfn: number, services: string[], base = MOUNT): void {
-  const rt = path.join(dir, 'rt');
-  const bin = path.join(dir, 'bin');
-  fs.mkdirSync(rt, { recursive: true });
-  fs.mkdirSync(bin, { recursive: true });
-  for (const f of ['cg_trace.h', 'cg_trace.c', 'cg_trace_cxx.cpp']) fs.copyFileSync(path.join(runtimeDir, 'c', f), path.join(rt, f));
-  fs.writeFileSync(path.join(rt, 'cgt.dynlist'), '{ cgt_*; };\n');
-  fs.writeFileSync(path.join(bin, 'cg-cc'), shimScript(nfn, base), { mode: 0o755 });
-  fs.writeFileSync(path.join(bin, 'cg-run'), runScript(base), { mode: 0o755 });
-  for (const n of SHIM_NAMES) {
-    const p = path.join(bin, n);
-    fs.rmSync(p, { force: true });
-    fs.symlinkSync('cg-cc', p);
-  }
-  for (const s of services) {
-    const t = path.join(dir, 'trace', s);
-    fs.mkdirSync(t, { recursive: true });
-    fs.chmodSync(t, 0o777); // containers may run as another user
-  }
-  fs.chmodSync(path.join(dir, 'trace'), 0o777);
-}
-
-/** The override file: each traced service gets the traced copy, /codegraph, the trace env and the wrapper. */
+/** The override file: traced copy, /codegraph, trace environment, wrapper and traced image builds. */
 export function composeOverride(
-  services: { name: string; mounts: { rel: string; target: string }[]; command: string[] }[],
-  o: { mirror: string; codegraph: string; maxEvents: number; values: boolean },
+  plans: ServicePlan[],
+  o: { mirror: string; codegraph: string; maxEvents: number; values: boolean; dockerfiles?: Map<string, string> },
 ): { services: Record<string, unknown> } {
   const out: Record<string, unknown> = {};
-  for (const s of services) {
-    out[s.name] = {
+  for (const p of plans) {
+    const selinux = p.mounts.find((m) => m.bind?.selinux)?.bind?.selinux;
+    const svc: Record<string, unknown> = {
       volumes: [
-        ...s.mounts.map((m) => ({ type: 'bind', source: m.rel ? path.join(o.mirror, ...m.rel.split('/')) : o.mirror, target: m.target })),
-        { type: 'bind', source: o.codegraph, target: MOUNT },
+        ...p.mounts.map((m) => ({
+          type: 'bind',
+          source: m.rel ? path.join(o.mirror, ...m.rel.split('/')) : o.mirror,
+          target: m.target,
+          ...(m.bind ? { bind: m.bind } : {}),
+        })),
+        { type: 'bind', source: o.codegraph, target: MOUNT, ...(selinux ? { bind: { selinux: 'z' } } : {}) },
       ],
-      entrypoint: [`${MOUNT}/bin/cg-run`],
-      command: s.command,
       environment: {
-        CODE_GRAPH_TRACE: `${MOUNT}/trace/${s.name}/{pid}.jsonl`,
+        ...(p.env ?? {}),
+        CODE_GRAPH_TRACE: `${MOUNT}/trace/${p.name}/{host}-{pid}.jsonl`,
         CODE_GRAPH_MAX_EVENTS: String(o.maxEvents),
         CODE_GRAPH_VALUES: o.values ? '1' : '0',
+        CODE_GRAPH_SERVICE: p.name,
+        CODE_GRAPH_PY_ROOTS: [...new Set(p.roots.map((r) => r.target))].join(':'),
+        ...(p.prebuild ? { CODE_GRAPH_PREBUILD: p.prebuild } : {}),
       },
     };
+    if (p.wrap) {
+      svc.entrypoint = [`${MOUNT}/bin/cg-run`];
+      if (p.command) svc.command = p.command;
+    }
+    if (p.image) {
+      const ctx = path.join(o.mirror, ...p.image.contextRel.split('/').filter(Boolean));
+      const traced = o.dockerfiles?.get(p.name);
+      svc.image = p.image.tag;
+      svc.build = {
+        context: ctx,
+        ...(p.image.inline !== undefined ? { dockerfile_inline: traced ?? p.image.inline } : { dockerfile: traced ?? '.codegraph.Dockerfile' }),
+        additional_contexts: { [BUILD_CONTEXT]: o.codegraph },
+      };
+    }
+    out[p.name] = svc;
   }
   return { services: out };
 }
@@ -281,9 +289,13 @@ export interface ComposeRunInput {
   root: string;
   graph: CodeGraph;
   files: { abs: string; rel: string; lang: 'c' | 'cpp' | 'python' }[];
-  composeFile: string;
-  /** Services to trace (default: every service that mounts the workspace). */
+  /** Compose files (absolute), in order. */
+  composeFiles: string[];
+  profiles?: string[];
+  /** Services to trace (default: every service whose code CodeGraph can reach). */
   services?: string[];
+  /** `.codegraph.json` compose section (pre-builds, source paths, environment). */
+  config?: ProjectConfig['compose'];
   docker?: string;
   runtimeDir: string;
   /** Scratch folder for the traced copy, /codegraph and the override (wiped). */
@@ -291,7 +303,7 @@ export interface ComposeRunInput {
   parsers: () => Promise<Parsers>;
   /** How long the programs may run, counted from the first traced program's start. */
   timeoutMs: number;
-  /** How long images and in-container builds may take before the first traced program starts. */
+  /** How long image builds and in-container builds may take before the first traced program starts. */
   startTimeoutMs: number;
   maxEvents: number;
   values: boolean;
@@ -304,6 +316,9 @@ export interface ComposeRunInput {
 
 export interface ServiceRun {
   name: string;
+  /** Container name and id (one service may have several containers). */
+  container?: string;
+  id?: string;
   exit: number | null;
   state: string;
   traces: number;
@@ -318,6 +333,8 @@ export interface ComposeRunResult {
   output: string;
   command: string;
   services: ServiceRun[];
+  /** Something about this project needs `.codegraph.json` (CodeGraph could not tell it by itself). */
+  needsConfig?: boolean;
 }
 
 const OUTPUT_MAX = 96 * 1024;
@@ -325,6 +342,7 @@ const OUTPUT_MAX = 96 * 1024;
 export async function runComposeTrace(o: ComposeRunInput): Promise<ComposeRunResult> {
   const docker = o.docker || 'docker';
   const notes: string[] = [];
+  let needsConfig = false;
   const result = (extra: Partial<ComposeRunResult>): ComposeRunResult => ({
     ok: false,
     buildDiagnostics: [],
@@ -333,78 +351,45 @@ export async function runComposeTrace(o: ComposeRunInput): Promise<ComposeRunRes
     output: '',
     command: '',
     services: [],
+    needsConfig,
     ...extra,
   });
   const log = (l: string) => o.log?.(l);
-  const cwd = path.dirname(o.composeFile);
+  if (!o.composeFiles.length) {
+    notes.push('no compose file');
+    return result({ needsConfig: true });
+  }
+  const cwd = path.dirname(o.composeFiles[0]);
 
-  // 1. the project as Compose sees it
+  // 1. the project as Compose sees it, and an engine to run it
   o.onStage?.('build', 'docker compose config');
   let project: ComposeProject;
   try {
-    project = await composeConfig(docker, [o.composeFile], o);
+    project = await composeConfig(docker, o.composeFiles, o);
   } catch (e) {
     notes.push(String((e as Error).message ?? e));
     return result({});
   }
   const daemon = await run(docker, ['version', '--format', '{{.Server.Version}}'], { cwd, timeoutMs: 30_000, signal: o.signal });
   if (daemon.code !== 0) {
-    notes.push(`cannot reach the Docker daemon (is Docker running, and may this user use it?): ${(daemon.stderr || daemon.error || '').trim().split('\n').pop()}`);
+    notes.push(`cannot reach the Docker engine (is Docker running, and may this user use it without sudo?): ${(daemon.stderr || daemon.error || '').trim().split('\n').pop()}`);
     return result({});
   }
-  const traced = tracedServices(project, o.root, o.services);
-  if (!traced.length) {
-    const names = Object.keys(project.services);
+
+  // 2. which services, and how
+  const { plans, skipped } = planServices(project, o.root, { only: o.services, config: o.config, sources: o.files });
+  for (const s of skipped) notes.push(`${s.name}: ${s.why}`);
+  if (skipped.length) needsConfig = true;
+  if (!plans.length) {
     notes.push(
-      `no service mounts this workspace (${names.join(', ') || 'no services'}): CodeGraph builds the traced copy inside a container by mounting it where the workspace is mounted (e.g. volumes: - ./:/app)`,
+      `no service has this workspace's sources (${Object.keys(project.services).join(', ') || 'no services'}): CodeGraph traces services that mount it (volumes: - ./:/app) or copy it into their image (COPY . …) — or tell it where the code is with compose.sourcePath in .codegraph.json`,
     );
-    return result({});
+    return result({ needsConfig: true });
   }
   const pname = project.name;
-  const base = ['compose', '-p', pname, '-f', o.composeFile];
+  const base = ['compose', '-p', pname, ...fileArgs(o.composeFiles, o.profiles)];
 
-  // 2. what each traced container runs (image entrypoint/cmd when the compose file does not say)
-  const imageConfig = new Map<string, { Entrypoint?: string[] | null; Cmd?: string[] | null }>();
-  const inspect = async (image: string) => {
-    const r = await run(docker, ['image', 'inspect', image, '--format', '{{json .Config}}'], { cwd, timeoutMs: 30_000, signal: o.signal });
-    if (r.code !== 0) return undefined;
-    try {
-      return JSON.parse(r.stdout) as { Entrypoint?: string[] | null; Cmd?: string[] | null };
-    } catch {
-      return undefined;
-    }
-  };
-  for (const s of traced) {
-    const svc = project.services[s.name];
-    if (svc.entrypoint && svc.command) continue;
-    const image = svc.image ?? `${pname}-${s.name}`;
-    let cfg = await inspect(image);
-    if (!cfg) {
-      // not built / pulled yet
-      const args = svc.build ? [...base, 'build', s.name] : ['pull', image];
-      o.onStage?.('build', `docker ${args.slice(svc.build ? 5 : 0).join(' ')}`);
-      log(`$ docker ${svc.build ? `compose build ${s.name}` : `pull ${image}`}`);
-      const b = await streamed(docker, args, { cwd, signal: o.signal, timeoutMs: o.startTimeoutMs, onLine: log });
-      if (b.code !== 0) {
-        notes.push(`${svc.build ? `docker compose build ${s.name}` : `docker pull ${image}`} failed (exit ${b.code}) — see the CodeGraph Run output`);
-        return result({ output: b.output });
-      }
-      cfg = await inspect(image);
-    }
-    if (cfg) imageConfig.set(s.name, cfg);
-  }
-  const plan: { name: string; mounts: TracedService['mounts']; command: string[] }[] = [];
-  for (const s of traced) {
-    const cmd = effectiveCommand(project.services[s.name], imageConfig.get(s.name));
-    if (!cmd) {
-      notes.push(`${s.name}: no command to run (neither the compose file nor the image says) — skipped`);
-      continue;
-    }
-    plan.push({ ...s, command: cmd });
-  }
-  if (!plan.length) return result({});
-
-  // 3. the traced copy, /codegraph and the override
+  // 3. the traced copy and the CodeGraph folder
   let workDir = o.workDir;
   try {
     fs.rmSync(workDir, { recursive: true, force: true });
@@ -422,12 +407,74 @@ export async function runComposeTrace(o: ComposeRunInput): Promise<ComposeRunRes
   o.onStage?.('build', 'instrumenting');
   const inst = instrumentSources({ files: native, outDir: mirror, graph: o.graph, parsers: await o.parsers() });
   log(`traced copy: ${copied.files} files (${(copied.bytes / 1048576).toFixed(1)} MB), probes in ${inst.fns.length} functions of ${inst.instrumented} files`);
-  writeCodegraphDir(cgDir, o.runtimeDir, inst.fns.length, plan.map((s) => s.name));
-  const override = path.join(workDir, 'compose.codegraph.yaml');
-  fs.writeFileSync(override, JSON.stringify(composeOverride(plan, { mirror, codegraph: cgDir, maxEvents: o.maxEvents, values: o.values }), null, 2));
-  const files = [...base, '-f', override];
+  log(
+    `tracing ${plans.map((p) => `${p.name} (${[p.mounts.length ? `mounted at ${p.mounts.map((m) => m.target).join(', ')}` : '', p.image ? `image rebuilt from the copy${p.image.builds ? ', compiles in its Dockerfile' : ''}` : '', p.prebuild ? 'pre-build' : ''].filter(Boolean).join(', ')})`).join(', ')}`,
+  );
+  writeCodegraphDir(cgDir, o.runtimeDir, inst.fns.length, plans.map((p) => p.name));
 
-  // 4. containers of this project already up get recreated: ask first
+  // 4. images built from the workspace: rebuilt from the copy, shims in their Dockerfile
+  const dockerfiles = new Map<string, string>();
+  for (const p of plans) {
+    if (!p.image) continue;
+    const ctx = path.join(mirror, ...p.image.contextRel.split('/').filter(Boolean));
+    const original = p.image.inline ?? fs.readFileSync(p.image.dockerfile!, 'utf8');
+    const traced = traceDockerfile(original, BUILD_CONTEXT, ctx);
+    if (p.image.inline !== undefined) dockerfiles.set(p.name, traced.text);
+    else {
+      fs.writeFileSync(path.join(ctx, '.codegraph.Dockerfile'), traced.text);
+      dockerfiles.set(p.name, '.codegraph.Dockerfile');
+    }
+  }
+  const override = path.join(workDir, 'compose.codegraph.yaml');
+  const writeOverride = () =>
+    fs.writeFileSync(override, JSON.stringify(composeOverride(plans, { mirror, codegraph: cgDir, maxEvents: o.maxEvents, values: o.values, dockerfiles }), null, 2));
+  writeOverride();
+  const files = [...base, '-f', override];
+  const imaged = plans.filter((p) => p.image).map((p) => p.name);
+  let buildOutput = '';
+  if (imaged.length) {
+    o.onStage?.('build', `building ${imaged.join(', ')}`);
+    log(`$ docker compose build ${imaged.join(' ')}   (from the traced copy)`);
+    const b = await streamed(docker, [...files, 'build', ...imaged], { cwd, signal: o.signal, timeoutMs: o.startTimeoutMs, onLine: log });
+    buildOutput = b.output;
+    if (b.code !== 0) {
+      notes.push(
+        /additional_contexts|additional contexts/i.test(b.output)
+          ? 'building the traced image needs Docker Compose 2.17+ with BuildKit'
+          : `docker compose build ${imaged.join(' ')} failed (exit ${b.code}) — see the CodeGraph Run output`,
+      );
+      return result({ output: b.output, buildDiagnostics: buildErrors(b.output, plans, mirror, project) });
+    }
+  }
+
+  // 5. what each wrapped container runs (the image's entrypoint/cmd when the compose file does not say)
+  for (const p of plans) {
+    if (!p.wrap) continue;
+    const svc = project.services[p.name];
+    let cfg: { Entrypoint?: string[] | null; Cmd?: string[] | null } | undefined;
+    if (!(svc.entrypoint && svc.command)) {
+      const image = p.image?.tag ?? svc.image ?? `${pname}-${p.name}`;
+      cfg = await inspectImage(docker, image, cwd, o.signal);
+      if (!cfg) {
+        const args = svc.build ? [...base, 'build', p.name] : ['pull', image];
+        log(`$ docker ${svc.build ? `compose build ${p.name}` : `pull ${image}`}`);
+        const b = await streamed(docker, args, { cwd, signal: o.signal, timeoutMs: o.startTimeoutMs, onLine: log });
+        if (b.code !== 0) {
+          notes.push(`${svc.build ? `docker compose build ${p.name}` : `docker pull ${image}`} failed (exit ${b.code}) — see the CodeGraph Run output`);
+          return result({ output: b.output });
+        }
+        cfg = await inspectImage(docker, image, cwd, o.signal);
+      }
+    }
+    p.command = effectiveCommand(svc, cfg);
+    if (!p.command) {
+      notes.push(`${p.name}: no command to run (neither the compose file nor the image says) — its wrapper is left out`);
+      p.wrap = false;
+    }
+  }
+  writeOverride();
+
+  // 6. containers of this project already up get recreated: ask first
   const ps0 = await run(docker, [...base, 'ps', '--format', '{{.Service}}'], { cwd, timeoutMs: 30_000, signal: o.signal });
   const running = ps0.code === 0 ? [...new Set(ps0.stdout.split('\n').map((l) => l.trim()).filter(Boolean))] : [];
   if (running.length && o.confirmRecreate && !(await o.confirmRecreate(running))) {
@@ -435,11 +482,11 @@ export async function runComposeTrace(o: ComposeRunInput): Promise<ComposeRunRes
     return result({});
   }
 
-  // 5. up; stop when every traced container has ended, or at the time limit counted from the
-  //    first traced program (image pulls and in-container builds do not count)
-  const command = `docker compose up · ${plan.map((s) => s.name).join(', ')}`;
+  // 7. up; stop when every traced container has ended, or at the time limit counted from the first
+  //    traced program (image pulls and in-container builds do not count)
+  const command = `docker compose up · ${plans.map((p) => p.name).join(', ')}`;
   o.onStage?.('build', 'docker compose up');
-  log(`$ docker compose -p ${pname} -f ${path.relative(o.root, o.composeFile) || o.composeFile} -f <codegraph override> up`);
+  log(`$ docker compose -p ${pname} ${o.composeFiles.map((f) => `-f ${path.relative(o.root, f) || f}`).join(' ')} -f <codegraph override> up`);
   const started = new Date().toISOString();
   let firstTrace = 0;
   let stopping: Promise<unknown> | undefined;
@@ -449,7 +496,7 @@ export async function runComposeTrace(o: ComposeRunInput): Promise<ComposeRunRes
     log(`codegraph: ${why} — stopping the project`);
     stopping = run(docker, [...files, 'stop', '-t', '5'], { cwd, timeoutMs: 90_000 });
   };
-  const tracesNow = () => plan.reduce((n, s) => n + safeList(path.join(cgDir, 'trace', s.name)).length, 0);
+  const tracesNow = () => plans.reduce((n, p) => n + safeList(path.join(cgDir, 'trace', p.name)).filter((f) => f.endsWith('.jsonl')).length, 0);
   const t0 = Date.now();
   let checking = false;
   let seenUp = false;
@@ -466,7 +513,7 @@ export async function runComposeTrace(o: ComposeRunInput): Promise<ComposeRunRes
     checking = true;
     void serviceStates(docker, files, cwd).then((st) => {
       checking = false;
-      const mine = st.filter((x) => plan.some((p) => p.name === x.name));
+      const mine = st.filter((x) => plans.some((p) => p.name === x.name));
       if (mine.some((x) => x.state === 'running')) seenUp = true;
       if (seenUp && mine.length && mine.every((x) => x.state === 'exited' || x.state === 'dead')) stop('the traced services have ended');
     });
@@ -480,72 +527,136 @@ export async function runComposeTrace(o: ComposeRunInput): Promise<ComposeRunRes
   if (timedOut) notes.push(`stopped after ${Math.round(o.timeoutMs / 1000)} s (codeGraph.run.timeoutSeconds)`);
   if (up.error) notes.push(`docker compose up: ${up.error}`);
 
-  // 6. how each container ended; the log of any that never ran a traced program; then take the project down
+  // 8. how each container ended, the logs of services that never ran a traced program; then down
   const services = await serviceStates(docker, files, cwd);
-  const perService = new Map(plan.map((s) => [s.name, safeList(path.join(cgDir, 'trace', s.name)).filter((f) => f.endsWith('.jsonl')).length]));
+  const traceFiles = new Map(plans.map((p) => [p.name, safeList(path.join(cgDir, 'trace', p.name)).filter((f) => /\.jsonl(\.\d+)?$/.test(f))]));
   const logsOf = new Map<string, string>();
-  for (const s of plan) {
-    if (perService.get(s.name)) continue;
-    const r = await run(docker, [...files, 'logs', '--no-color', '--no-log-prefix', s.name], { cwd, timeoutMs: 30_000 });
-    logsOf.set(s.name, r.stdout + r.stderr);
+  for (const p of plans) {
+    if (traceFiles.get(p.name)!.length) continue;
+    const r = await run(docker, [...files, 'logs', '--no-color', '--no-log-prefix', p.name], { cwd, timeoutMs: 30_000 });
+    logsOf.set(p.name, r.stdout + r.stderr);
   }
   await run(docker, [...files, 'down', '--timeout', '5'], { cwd, timeoutMs: 120_000 });
   log('codegraph: project taken down');
 
-  // 7. traces → one timeline
+  // 9. traces → one timeline; processes named after their container
   o.onStage?.('trace');
   const parts: { name: string; trace: RunTrace }[] = [];
-  for (const s of plan) {
-    const dir = path.join(cgDir, 'trace', s.name);
-    const tracesOf = safeList(dir).filter((f) => f.endsWith('.jsonl'));
-    const st = services.find((x) => x.name === s.name);
-    for (const f of tracesOf) {
+  for (const p of plans) {
+    const dir = path.join(cgDir, 'trace', p.name);
+    const mine = services.filter((s) => s.name === p.name);
+    const loaded: { trace: RunTrace; host: string }[] = [];
+    for (const f of traceFiles.get(p.name)!) {
       const text = fs.readFileSync(path.join(dir, f), 'utf8');
-      const tr = parseTrace(text, o.graph, { fns: inst.fns, command: s.name, started, exit: { code: null, timedOut } });
-      // the container's exit code is its main process's: PID 1, or the only traced program
-      if (st && (tr.pid === 1 || tracesOf.length === 1)) tr.exit = { ...tr.exit, code: st.exit };
-      parts.push({ name: tracesOf.length > 1 ? `${s.name}/${tr.exe ?? 'pid'}#${tr.pid ?? f}` : s.name, trace: tr });
+      const header = headerOf(text);
+      const mapFile = header?.lang === 'python' && typeof header.root === 'string' ? containerPaths(header.root, p.roots) : undefined;
+      const tr = parseTrace(text, o.graph, { fns: inst.fns, command: p.name, started, exit: { code: null, timedOut }, mapFile });
+      if (!tr.spans.t.length) continue; // e.g. a Python helper that never touched workspace code
+      loaded.push({ trace: tr, host: /^(.*)-\d+\.jsonl/.exec(f)?.[1] ?? '' });
+    }
+    const byContainer = new Map<string, { trace: RunTrace; host: string }[]>();
+    for (const l of loaded) (byContainer.get(l.host) ?? byContainer.set(l.host, []).get(l.host)!).push(l);
+    for (const [host, list] of byContainer) {
+      const c = mine.find((s) => (s.id && host && s.id.startsWith(host)) || s.container === host) ?? (mine.length === 1 ? mine[0] : undefined);
+      const label = mine.length > 1 && c?.container ? c.container.replace(new RegExp(`^${escapeRe(pname)}[-_]`), '') : p.name;
+      for (const l of list) {
+        // the container's exit code is its main process's: PID 1, or its only traced program
+        if (c && (l.trace.pid === 1 || list.length === 1)) l.trace.exit = { ...l.trace.exit, code: c.exit };
+        parts.push({ name: list.length > 1 ? `${label}/${l.trace.exe ?? (l.trace.lang === 'python' ? 'python' : 'pid')}#${l.trace.pid ?? '?'}` : label, trace: l.trace });
+      }
     }
   }
-  for (const s of services) s.traces = perService.get(s.name) ?? 0;
-  const output = up.output;
+  for (const s of services) s.traces = parts.filter((x) => x.name === s.name || x.name.startsWith(s.name + '/')).length;
+  const output = (buildOutput ? buildOutput + '\n' : '') + up.output;
 
-  // in-container build errors → red blocks (paths are the container's: map them back to the workspace)
+  // services that never ran a traced program: their build errors in red, and what to do about it
   const buildDiagnostics: Diagnostic[] = [];
-  for (const s of plan) {
-    if (perService.get(s.name)) continue;
-    const st = services.find((x) => x.name === s.name);
-    const svc = project.services[s.name];
-    const toMirror = (text: string) => {
-      let t = text;
-      for (const m of [...s.mounts].sort((a, b) => b.target.length - a.target.length)) t = t.split(m.target.replace(/\/$/, '') + '/').join(path.join(mirror, ...m.rel.split('/').filter(Boolean)) + '/');
-      return t;
-    };
-    const wd = svc.working_dir ? toMirror(svc.working_dir.replace(/\/$/, '') + '/').replace(/\/$/, '') : mirror;
-    const parsed = parseCompilerOutput(toMirror(logsOf.get(s.name) ?? ''), wd, mirror, 'compiler', (abs) => {
-      const rel = path.relative(mirror, abs);
-      return rel.startsWith('..') || path.isAbsolute(rel) ? undefined : rel.split(path.sep).join('/');
-    });
-    buildDiagnostics.push(...parsed.diags);
-    const errs = parsed.diags.filter((d) => d.severity === 'error').length;
-    notes.push(
-      `${s.name}: ${st ? (st.state === 'exited' ? `exited ${st.exit ?? '?'}` : st.state) : 'did not start'} without running a traced program${errs ? ` — ${errs} build error(s)` : ''} (its log is in the CodeGraph Run output)`,
-    );
+  for (const p of plans) {
+    if (parts.some((x) => x.name === p.name || x.name.startsWith(p.name + '/') || x.name.startsWith(p.name + '-'))) continue;
+    const st = services.find((x) => x.name === p.name);
+    const own = logsOf.get(p.name) ?? '';
+    const diags = errorsIn(own, p, mirror, project);
+    buildDiagnostics.push(...diags);
+    const errs = diags.filter((d) => d.severity === 'error').length;
+    const compiled = fs.existsSync(path.join(cgDir, 'trace', p.name, '.compiled'));
+    let why = '';
+    if (errs) why = ` — ${errs} build error(s)`;
+    else if (p.native && !compiled && !p.image?.builds) {
+      why = ' — it compiled nothing in its container (does it run a program built elsewhere, or call the compiler by full path? set compose.build for it in .codegraph.json)';
+      needsConfig = true;
+    } else if (p.python && !p.native) {
+      why = ` — no workspace Python code ran in it (looked under ${[...new Set(p.roots.map((r) => r.target))].join(', ')}; is its code somewhere else? set compose.sourcePath for it in .codegraph.json)`;
+      needsConfig = true;
+    }
+    notes.push(`${p.name}: ${st ? (st.state === 'exited' ? `exited ${st.exit ?? '?'}` : st.state) : 'did not start'} without running a traced program${why}`);
   }
   if (!parts.length) {
-    notes.push('no traced program ran: did the services build their C/C++ programs with gcc/g++/clang inside the container?');
+    notes.push('no traced program ran (see the CodeGraph Run output for the containers’ logs)');
     return result({ output, command, services, buildDiagnostics });
   }
   const trace = mergeTraces(parts, o.graph, { command, output: output.length > OUTPUT_MAX ? '…' + output.slice(-OUTPUT_MAX) : output, started });
   if (trace.truncated) notes.push(`recorded the first ${o.maxEvents.toLocaleString('en')} events per process in detail; counts cover the whole run`);
-  return { ok: true, trace, buildDiagnostics, runtimeDiagnostics: traceDiagnostics(trace, o.graph), notes, output, command, services };
+  return { ok: true, trace, buildDiagnostics, runtimeDiagnostics: traceDiagnostics(trace, o.graph), notes, output, command, services, needsConfig };
 }
 
-/** Exit code and state of every service's container (`docker compose ps -a`). */
+const escapeRe = (s: string) => s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+
+function headerOf(text: string): Record<string, unknown> | undefined {
+  try {
+    const first = text.slice(0, text.indexOf('\n') >>> 0 || undefined);
+    const h = JSON.parse(first) as Record<string, unknown>;
+    return h && h.k === 'h' ? h : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+/** Python traces record paths relative to their root (a container path, `/` for several): back to the workspace. */
+export function containerPaths(root: string, roots: ServicePlan['roots']): (f: string) => string {
+  const sorted = roots.map((r) => ({ rel: r.rel, target: r.target.replace(/\/+$/, '') })).sort((a, b) => b.target.length - a.target.length);
+  return (f: string) => {
+    const abs = path.posix.join(root || '/', f);
+    const r = sorted.find((x) => abs === x.target || abs.startsWith(x.target + '/'));
+    if (!r) return f;
+    return [r.rel, abs.slice(r.target.length).replace(/^\//, '')].filter(Boolean).join('/');
+  };
+}
+
+/** Compiler errors in a container's output, with its paths mapped back to the workspace. */
+function errorsIn(text: string, p: ServicePlan, mirror: string, project: ComposeProject): Diagnostic[] {
+  if (!text) return [];
+  const svc = project.services[p.name];
+  const toMirror = (t: string) => {
+    let out = t;
+    for (const m of [...p.roots].sort((a, b) => b.target.length - a.target.length))
+      out = out.split(m.target.replace(/\/$/, '') + '/').join(path.join(mirror, ...m.rel.split('/').filter(Boolean)) + '/');
+    return out;
+  };
+  const wd = svc.working_dir ? toMirror(svc.working_dir.replace(/\/$/, '') + '/').replace(/\/$/, '') : mirror;
+  return parseCompilerOutput(toMirror(text), wd, mirror, 'compiler', (abs) => inside(mirror, abs)).diags;
+}
+
+/** Build output of traced images (BuildKit prefixes lines with step numbers): errors mapped back. */
+function buildErrors(text: string, plans: ServicePlan[], mirror: string, project: ComposeProject): Diagnostic[] {
+  const lines = text.split('\n').map((l) => l.replace(/^#\d+\s+[\d.]+\s+/, ''));
+  return plans.filter((p) => p.image).flatMap((p) => errorsIn(lines.join('\n'), p, mirror, project));
+}
+
+async function inspectImage(docker: string, image: string, cwd: string, signal?: AbortSignal): Promise<{ Entrypoint?: string[] | null; Cmd?: string[] | null } | undefined> {
+  const r = await run(docker, ['image', 'inspect', image, '--format', '{{json .Config}}'], { cwd, timeoutMs: 30_000, signal });
+  if (r.code !== 0) return undefined;
+  try {
+    return JSON.parse(r.stdout);
+  } catch {
+    return undefined;
+  }
+}
+
+/** Exit code and state of every container of the project (`docker compose ps -a`). */
 async function serviceStates(docker: string, files: string[], cwd: string): Promise<ServiceRun[]> {
   const r = await run(docker, [...files, 'ps', '-a', '--format', 'json'], { cwd, timeoutMs: 30_000 });
   if (r.code !== 0) return [];
-  const rows: { Service?: string; ExitCode?: number; State?: string }[] = [];
+  const rows: { Service?: string; Name?: string; ID?: string; ExitCode?: number; State?: string }[] = [];
   const text = r.stdout.trim();
   try {
     if (text.startsWith('[')) rows.push(...(JSON.parse(text) as typeof rows));
@@ -553,7 +664,9 @@ async function serviceStates(docker: string, files: string[], cwd: string): Prom
   } catch {
     return [];
   }
-  return rows.filter((x) => x.Service).map((x) => ({ name: x.Service!, exit: typeof x.ExitCode === 'number' ? x.ExitCode : null, state: x.State ?? '', traces: 0 }));
+  return rows
+    .filter((x) => x.Service)
+    .map((x) => ({ name: x.Service!, container: x.Name, id: x.ID, exit: typeof x.ExitCode === 'number' ? x.ExitCode : null, state: x.State ?? '', traces: 0 }));
 }
 
 function safeList(dir: string): string[] {

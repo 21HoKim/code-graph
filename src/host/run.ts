@@ -6,13 +6,15 @@ import * as fs from 'fs';
 import * as path from 'path';
 import * as vscode from 'vscode';
 import { targetsFor, type BuildTarget } from '../core/buildinfo';
-import { findComposeFile, runComposeTrace } from '../core/compose';
+import { runComposeTrace } from '../core/compose';
+import { CONFIG_FILE } from '../core/config';
 import { loadParsers } from '../core/extract';
 import type { Diagnostic } from '../core/model';
 import { findEntries, runAndTrace, type EntryPoint } from '../core/runner';
 import { parseTrace, traceDiagnostics, type RunTrace } from '../core/trace';
 import { loadCompileCommands } from '../core/verify';
 import { CircuitPanel } from './panel';
+import { options, type Options } from './project';
 import type { AnalysisService } from './service';
 
 let running: AbortController | undefined;
@@ -23,13 +25,21 @@ export function lastRunOutput(): vscode.OutputChannel {
   return output;
 }
 
-async function pickEntry(ctx: vscode.ExtensionContext, svc: AnalysisService, entries: EntryPoint[]): Promise<EntryPoint | undefined> {
-  const cfg = vscode.workspace.getConfiguration('codeGraph.run');
-  const want = cfg.get<string>('entry', '').trim();
+/** After a run CodeGraph could not set up by itself: offer `.codegraph.json` (create or open) and the log. */
+async function offerConfig(root: string, message: string): Promise<void> {
+  const exists = fs.existsSync(path.join(root, CONFIG_FILE));
+  const act = exists ? vscode.l10n.t('Open {0}', CONFIG_FILE) : vscode.l10n.t('Create {0}', CONFIG_FILE);
+  const out = vscode.l10n.t('Show output');
+  const pick = await vscode.window.showWarningMessage(message, act, out);
+  if (pick === act) await vscode.commands.executeCommand('codeGraph.createConfig');
+  else if (pick === out) lastRunOutput().show(true);
+}
+
+async function pickEntry(ctx: vscode.ExtensionContext, svc: AnalysisService, entries: EntryPoint[], want: string): Promise<EntryPoint | undefined> {
   if (want) {
     const hit = entries.find((e) => e.file === want || e.label === want || e.module === want || e.file.endsWith('/' + want));
     if (hit) return hit;
-    void vscode.window.showWarningMessage(vscode.l10n.t('codeGraph.run.entry "{0}" is not an entry point; pick one.', want));
+    void vscode.window.showWarningMessage(vscode.l10n.t('run entry "{0}" is not an entry point; pick one.', want));
   }
   const active = vscode.window.activeTextEditor?.document.uri;
   const rel = active && svc.isSupported(active) ? svc.rel(active) : undefined;
@@ -48,17 +58,16 @@ async function pickEntry(ctx: vscode.ExtensionContext, svc: AnalysisService, ent
  * The program as the project builds it (make / CMake) when the entry file goes into one; several
  * (e.g. node-a and node-b from one main.cpp with different -D) → ask. null = cancelled.
  */
-async function pickTarget(ctx: vscode.ExtensionContext, svc: AnalysisService, entry: EntryPoint): Promise<BuildTarget | undefined | null> {
-  const cfg = vscode.workspace.getConfiguration('codeGraph.run');
-  if (entry.kind !== 'native' || !cfg.get<boolean>('useBuildSystem', true)) return undefined;
+async function pickTarget(ctx: vscode.ExtensionContext, svc: AnalysisService, entry: EntryPoint, o: Options): Promise<BuildTarget | undefined | null> {
+  if (entry.kind !== 'native' || !o.useBuildSystem || o.customBuild) return undefined;
   const { targets } = await svc.buildTargets();
   const mine = targetsFor(targets, path.join(svc.root, ...entry.file.split('/')));
   if (!mine.length) return undefined;
-  const want = cfg.get<string>('target', '').trim();
+  const want = o.target;
   if (want) {
     const hit = mine.find((t) => t.name === want);
     if (hit) return hit;
-    void vscode.window.showWarningMessage(vscode.l10n.t('codeGraph.run.target "{0}" is not built from {1}; pick one.', want, entry.file));
+    void vscode.window.showWarningMessage(vscode.l10n.t('run target "{0}" is not built from {1}; pick one.', want, entry.file));
   }
   if (mine.length === 1) return mine[0];
   const last = ctx.workspaceState.get<string>('codeGraph.lastTarget');
@@ -104,6 +113,7 @@ function showRun(
     const msg = n ? vscode.l10n.t('Build failed: {0} error(s), shown in red.', n) : (r.notes[r.notes.length - 1] ?? vscode.l10n.t('Run failed.'));
     task('error', msg, undefined, undefined, 'build');
     out.show(true);
+    void offerConfig(svc.root, `${msg} ${vscode.l10n.t('If your setup is unusual, tell CodeGraph how to build and run it in {0}.', CONFIG_FILE)}`);
     return;
   }
   svc.lastTrace = { trace: r.trace, notes: r.notes };
@@ -130,7 +140,8 @@ export async function runTraceCommand(ctx: vscode.ExtensionContext, svc: Analysi
     void vscode.window.showInformationMessage(vscode.l10n.t('No entry point found: a C/C++ main() or a Python file with if __name__ == "__main__".'));
     return;
   }
-  const entry = await pickEntry(ctx, svc, entries);
+  const o = options(svc.root);
+  const entry = await pickEntry(ctx, svc, entries, o.entry);
   if (!entry) return;
 
   // 1. compile check first: a program that does not compile cannot run
@@ -148,9 +159,9 @@ export async function runTraceCommand(ctx: vscode.ExtensionContext, svc: Analysi
     if (choice !== runAnyway) return;
   }
 
-  const target = await pickTarget(ctx, svc, entry);
+  const target = await pickTarget(ctx, svc, entry, o);
   if (target === null) return;
-  const label = target ? `${entry.label} · ${target.name}` : entry.label;
+  const label = o.customBuild && entry.kind === 'native' ? `${entry.label} · ${o.customBuild.program}` : target ? `${entry.label} · ${target.name}` : entry.label;
 
   running?.abort();
   const ctl = (running = new AbortController());
@@ -171,21 +182,22 @@ export async function runTraceCommand(ctx: vscode.ExtensionContext, svc: Analysi
           graph,
           files: svc.sourceFiles(),
           entry,
-          args: cfg.get<string[]>('run.args', []),
-          cwd: cfg.get<string>('run.cwd', '') || undefined,
-          env: cfg.get<Record<string, string>>('run.env', {}),
+          args: o.args,
+          cwd: o.cwd,
+          env: o.env,
           toolchain: svc.toolchainFor(),
           includePaths: svc.includePaths,
           compileCommands: cfg.get<boolean>('verify.useCompileCommands', true) ? loadCompileCommands(svc.root) : undefined,
-          buildFlags: cfg.get<string[]>('run.buildFlags', []),
-          linkFlags: cfg.get<string[]>('run.linkFlags', []),
+          buildFlags: o.buildFlags,
+          linkFlags: o.linkFlags,
           target,
+          customBuild: o.customBuild,
           runtimeDir: vscode.Uri.joinPath(ctx.extensionUri, 'dist', 'runtime').fsPath,
           workDir,
           parsers: () => loadParsers(wasm),
-          timeoutMs: Math.max(1, cfg.get<number>('run.timeoutSeconds', 20)) * 1000,
-          maxEvents: Math.max(1000, cfg.get<number>('run.maxEvents', 200000)),
-          values: cfg.get<boolean>('run.captureValues', true),
+          timeoutMs: o.timeoutMs,
+          maxEvents: o.maxEvents,
+          values: o.values,
           signal: ctl.signal,
           log: (l) => out.appendLine(l),
           onStage: (stage, message, done, total) => {
@@ -214,10 +226,10 @@ export async function runComposeCommand(ctx: vscode.ExtensionContext, svc: Analy
     void vscode.window.showWarningMessage(vscode.l10n.t('Run & Trace is disabled in untrusted workspaces.'));
     return;
   }
-  const cfg = vscode.workspace.getConfiguration('codeGraph');
-  const file = findComposeFile(svc.root, cfg.get<string>('run.compose.file', '') || undefined);
+  const o = options(svc.root);
+  const file = o.compose.files[0];
   if (!file) {
-    void vscode.window.showInformationMessage(vscode.l10n.t('No compose file in the workspace (compose.yaml, docker-compose.yml): set codeGraph.run.compose.file.'));
+    void offerConfig(svc.root, vscode.l10n.t('No compose file in the workspace (compose.yaml, docker-compose.yml): name yours in {0}.', CONFIG_FILE));
     return;
   }
   const panel = CircuitPanel.show(ctx, svc);
@@ -241,16 +253,18 @@ export async function runComposeCommand(ctx: vscode.ExtensionContext, svc: Analy
           root: svc.root,
           graph,
           files: svc.sourceFiles(),
-          composeFile: file,
-          services: cfg.get<string[]>('run.compose.services', []),
-          docker: cfg.get<string>('run.compose.docker', 'docker') || 'docker',
+          composeFiles: o.compose.files,
+          profiles: o.compose.profiles,
+          services: o.compose.services,
+          config: o.config.compose,
+          docker: o.compose.docker,
           runtimeDir: vscode.Uri.joinPath(ctx.extensionUri, 'dist', 'runtime').fsPath,
           workDir: path.join((ctx.storageUri ?? ctx.globalStorageUri).fsPath, 'compose'),
           parsers: () => loadParsers(wasm),
-          timeoutMs: Math.max(1, cfg.get<number>('run.timeoutSeconds', 20)) * 1000,
-          startTimeoutMs: Math.max(10, cfg.get<number>('run.compose.startTimeoutSeconds', 600)) * 1000,
-          maxEvents: Math.max(1000, cfg.get<number>('run.maxEvents', 200000)),
-          values: cfg.get<boolean>('run.captureValues', true),
+          timeoutMs: o.compose.timeoutMs,
+          startTimeoutMs: o.compose.startTimeoutMs,
+          maxEvents: o.maxEvents,
+          values: o.values,
           signal: ctl.signal,
           confirmRecreate: async (up) => {
             const go = vscode.l10n.t('Restart with tracing');
@@ -274,6 +288,7 @@ export async function runComposeCommand(ctx: vscode.ExtensionContext, svc: Analy
       return;
     }
     showRun(svc, panel, label, r, task, false);
+    if (r.trace && r.needsConfig) void offerConfig(svc.root, vscode.l10n.t('Some services were not traced ({0}). Tell CodeGraph about them in {1}.', r.notes[0] ?? '', CONFIG_FILE));
   } catch (e) {
     const msg = String((e as Error)?.message ?? e);
     out.appendLine('run failed: ' + ((e as Error)?.stack ?? msg));

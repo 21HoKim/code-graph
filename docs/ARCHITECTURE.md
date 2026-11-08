@@ -26,12 +26,16 @@ dependency (the same code runs in the CLI and the tests), and the **webview** th
 | `instrument.ts` | copies C/C++ sources with one probe per function body |
 | `buildinfo.ts` | the project's programs from `make -nBwk` / CMake link files; libraries behind undefined symbols |
 | `runner.ts` | builds (C/C++) or starts (Python) the program with a tracer and collects the result |
-| `compose.ts` | Run & Trace with Docker Compose: traced copy, compiler shims, override file, collecting traces |
+| `compose.ts` | Run & Trace with Docker Compose: which services to trace, override file, collecting traces |
+| `dockerfile.ts` | where a Dockerfile copies workspace files and where it builds them; the traced Dockerfile |
+| `shims.ts`, `mirror.ts` | the `/codegraph` folder (compiler and Python shims, entrypoint, runtime); the traced copy |
+| `config.ts` | `.codegraph.json`: JSON with comments, merged over the VS Code settings |
 | `trace.ts` | trace format and parser → `RunTrace` (calls per thread, values, shared objects); merges processes |
 | `model.ts` | shared types |
 
-**Runtime** (`runtime/`): `python/cg_tracer.py` (standard library only), `c/cg_trace.h` + `c/cg_trace.c`
-(C99 and pthreads) and `c/cg_trace_cxx.cpp` (uncaught C++ exceptions).
+**Runtime** (`runtime/`): `python/cg_tracer.py` (standard library only) and `python/sitecustomize.py` (starts it in
+every Python process of a traced container), `c/cg_trace.h` + `c/cg_trace.c` (C99 and pthreads) and
+`c/cg_trace_cxx.cpp` (uncaught C++ exceptions).
 
 **Webview** (`src/webview/`)
 
@@ -243,24 +247,51 @@ workspace units that define missing symbols, then the libraries that usually pro
 OpenSSL, Boost, libm, … with `-L` for e.g. `/opt/boost-1.87/lib` when found); what is still missing is reported
 on `main` in one line. The compile check runs before any build.
 
-**Docker Compose** (`compose.ts`): `docker compose config --format json` gives the resolved project. Services with a
-bind mount of the workspace (or a folder in it) are traced. The workspace is copied (without `.git`,
+**Project settings** (`config.ts`): `.codegraph.json` at the workspace root (JSON with comments) has a `run` and a
+`compose` section; a key there wins over the matching VS Code setting, so the host (`host/project.ts`) and the CLI
+read the same values. When a run cannot be set up — no entry point, a build CodeGraph cannot read, a service it
+cannot see into — the message offers to create the file; the starter has every key commented out, with what was
+detected (entry points, programs, compose files, services) as the example values. `schemas/codegraph.schema.json`
+gives completion and hovers in the editor.
+
+**A build CodeGraph does not read** (`run.build` + `run.program`): the command runs in a traced copy of the
+workspace (CMake-generated files dropped, so a configure starts over) with the same compiler shims as in
+containers, then the program is started from the copy.
+
+**Docker Compose** (`compose.ts`): `docker compose config --format json` gives the resolved project (all its files,
+profiles, override file). A service is traced when its container has some of the workspace's C, C++ or Python
+sources, found three ways:
+
+| how | detected from | traced as |
+| --- | --- | --- |
+| mounted | a bind mount of the workspace or a folder in it | the traced copy is mounted at the same target |
+| copied in | `build.context` in the workspace and a Dockerfile that `COPY`/`ADD`s (or `RUN --mount=type=bind`s) sources | the image is rebuilt from the copy: in each stage that `RUN`s after seeing the sources, `COPY --from=codegraph_trace / /codegraph/`, the shim setup and `PATH` go right before the first instruction that sees them (an `additional_contexts` entry); layers above stay cached |
+| configured | `compose.sourcePath` / `compose.build` in `.codegraph.json` | the copy mounted there / a command run before the service's own |
+
+Services without workspace sources (databases, proxies) run as they are. The workspace is copied (without `.git`,
 `node_modules`, CMake caches), C/C++ files of the copy get probes, and an override file — JSON, which Compose reads
 as YAML — gives each traced service:
 
 | key | value |
 | --- | --- |
-| `volumes` | the copy at the workspace's mount target (Compose merges volumes by target), `/codegraph` |
+| `volumes` | the copy at the workspace's mount targets (Compose merges volumes by target), `/codegraph` |
+| `image` / `build` | for images built from the workspace: `codegraph-trace/<project>-<service>`, built from the copy with the traced Dockerfile |
 | `entrypoint` / `command` | `/codegraph/bin/cg-run` + the service's own entrypoint and command (from the image when the compose file has none) |
-| `environment` | `CODE_GRAPH_TRACE=/codegraph/trace/<service>/{pid}.jsonl`, event cap, values |
+| `environment` | `CODE_GRAPH_TRACE=/codegraph/trace/<service>/{host}-{pid}.jsonl`, Python roots, event cap, values |
 
-`cg-run` puts `/codegraph/bin` first on `PATH` (and `umask 0`, so the host can delete what a root container
-builds). There `gcc`, `g++`, `cc`, `c++`, `clang`, `clang++` are links to one shim that finds the real compiler
-further down `PATH`, adds `-include /codegraph/rt/cg_trace.h` to every compile and, for a program link, compiles
-the runtime once per container and appends it (`-Wl,--dynamic-list` exports `cgt_*`, so shared libraries with
-probes resolve them from the program). The project runs with `up`; the time limit counts from the first trace
-file; when every traced container has exited or the limit is reached the project is stopped (the runtime exits
-on `SIGTERM` even as PID 1) and taken down. Logs of services that never started a traced program are parsed for
+`cg-run` (`umask 0`, so the host can delete what a root container builds) runs `cg-setup`, which looks through
+`PATH` and links every C/C++ compiler and Python interpreter it finds (`gcc`, `g++-12`, `clang++-17`,
+`aarch64-linux-gnu-gcc`, `python3.12` …; not `ar`, `ccache` or `*-config`) to a shim in `/tmp/codegraph-bin`, first
+on `PATH`; `CC` / `CXX` given by full path are wrapped too. The compiler shim finds the real compiler further down
+`PATH` (with the shim folders removed, so `ccache` and masquerading wrappers do not loop), adds
+`-include /codegraph/rt/cg_trace.h` to every compile and, for a program link, compiles the runtime once per
+container and appends it (`-Wl,--dynamic-list` exports `cgt_*`). For Python, the shim starts scripts under a source
+root under the tracer, and `PYTHONPATH` gets `/codegraph/rt/py`, whose `sitecustomize` starts the tracer in every
+other Python process — started by full path, gunicorn, multiprocessing children; such a trace file is only created
+once workspace code runs, and a forked child gets its own. The project runs with `up`; the time limit counts from
+the first trace file; when every traced container has exited or the limit is reached the project is stopped (the
+runtime exits on `SIGTERM` even as PID 1) and taken down. A service that ended without a traced program gets a note
+saying what to write in `.codegraph.json` (it compiled nothing, no workspace Python ran); its log is parsed for
 compiler errors, with container paths mapped back to the workspace.
 
 **Several processes** (`mergeTraces`): every trace header carries the monotonic and wall clock at its time 0

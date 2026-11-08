@@ -2,7 +2,7 @@
   "name": "code-graph-vscode",
   "displayName": "%displayName%",
   "description": "%description%",
-  "version": "0.3.0",
+  "version": "0.4.0",
   "publisher": "21HoKim",
   "license": "MIT",
   "author": {
@@ -36,7 +36,9 @@
     "circuit",
     "tracing",
     "runtime",
-    "compile errors"
+    "compile errors",
+    "docker",
+    "docker compose"
   ],
   "icon": "media/icon.png",
   "galleryBanner": {
@@ -115,6 +117,12 @@
         "enablement": "isWorkspaceTrusted"
       },
       {
+        "command": "codeGraph.createConfig",
+        "title": "%cmd.createConfig%",
+        "category": "CodeGraph",
+        "icon": "$(settings-gear)"
+      },
+      {
         "command": "codeGraph.loadTrace",
         "title": "%cmd.loadTrace%",
         "category": "CodeGraph"
@@ -164,6 +172,11 @@
       },
       {
         "view": "codeGraph.home",
+        "contents": "%welcome.config%",
+        "when": "isWorkspaceTrusted"
+      },
+      {
+        "view": "codeGraph.home",
         "contents": "%welcome.untrusted%",
         "when": "!isWorkspaceTrusted"
       },
@@ -188,6 +201,11 @@
           "command": "codeGraph.clearTrace",
           "when": "view == codeGraph.home",
           "group": "2_tools@2"
+        },
+        {
+          "command": "codeGraph.createConfig",
+          "when": "view == codeGraph.home",
+          "group": "2_tools@3"
         }
       ],
       "explorer/context": [
@@ -460,7 +478,21 @@
           "markdownDescription": "%cfg.runValues%"
         }
       }
-    }
+    },
+    "jsonValidation": [
+      {
+        "fileMatch": ".codegraph.json",
+        "url": "./schemas/codegraph.schema.json"
+      }
+    ],
+    "languages": [
+      {
+        "id": "jsonc",
+        "filenames": [
+          ".codegraph.json"
+        ]
+      }
+    ]
   },
   "scripts": {
     "build": "node scripts/build.mjs",

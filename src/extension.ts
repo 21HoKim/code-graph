@@ -4,7 +4,9 @@
 import * as fs from 'fs';
 import * as vscode from 'vscode';
 import { CircuitPanel, VIEW_TYPE, verifyMode, viewSettings } from './host/panel';
-import { COMPOSE_FILES, findComposeFile } from './core/compose';
+import { COMPOSE_FILES } from './core/compose';
+import { CONFIG_FILE } from './core/config';
+import { createConfigCommand, options } from './host/project';
 import { clearTraceCommand, loadTraceCommand, runComposeCommand, runTraceCommand, stopRun } from './host/run';
 import { AnalysisService } from './host/service';
 
@@ -32,6 +34,7 @@ export function activate(ctx: vscode.ExtensionContext): void {
     }),
     vscode.commands.registerCommand('codeGraph.runTrace', () => runTraceCommand(ctx, svc)),
     vscode.commands.registerCommand('codeGraph.runCompose', () => runComposeCommand(ctx, svc)),
+    vscode.commands.registerCommand('codeGraph.createConfig', () => createConfigCommand(svc)),
     vscode.commands.registerCommand('codeGraph.loadTrace', () => loadTraceCommand(ctx, svc)),
     vscode.commands.registerCommand('codeGraph.clearTrace', () => clearTraceCommand(svc)),
     vscode.commands.registerCommand('codeGraph.exportGraph', async () => {
@@ -87,12 +90,13 @@ export function activate(ctx: vscode.ExtensionContext): void {
 
   // build files: the programs make / CMake build (flags, libraries) are read again when they change;
   // a compose file shows "Run & Trace with Docker Compose" in the CodeGraph panel
-  const hasCompose = () =>
-    void vscode.commands.executeCommand('setContext', 'codeGraph.hasCompose', !!findComposeFile(svc.root, vscode.workspace.getConfiguration('codeGraph.run.compose').get<string>('file', '') || undefined));
+  const hasCompose = () => void vscode.commands.executeCommand('setContext', 'codeGraph.hasCompose', options(svc.root).compose.files.length > 0);
   hasCompose();
   const buildFiles = vscode.workspace.createFileSystemWatcher('**/{Makefile,makefile,GNUmakefile,*.mk,CMakeLists.txt,compile_commands.json,link.txt}');
   const folder = vscode.workspace.workspaceFolders?.[0];
-  const composeFiles = vscode.workspace.createFileSystemWatcher(folder ? new vscode.RelativePattern(folder, `{${COMPOSE_FILES.join(',')}}`) : '**/compose.never');
+  const composeFiles = vscode.workspace.createFileSystemWatcher(
+    folder ? new vscode.RelativePattern(folder, `{${[...COMPOSE_FILES, CONFIG_FILE].join(',')}}`) : '**/compose.never',
+  );
   const rebuild = () => svc.invalidateBuildInfo();
   ctx.subscriptions.push(
     buildFiles,
@@ -101,6 +105,7 @@ export function activate(ctx: vscode.ExtensionContext): void {
     buildFiles.onDidDelete(rebuild),
     composeFiles,
     composeFiles.onDidCreate(hasCompose),
+    composeFiles.onDidChange(hasCompose),
     composeFiles.onDidDelete(hasCompose),
     vscode.workspace.onDidChangeConfiguration((e) => {
       if (e.affectsConfiguration('codeGraph.run.compose.file')) hasCompose();

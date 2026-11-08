@@ -12,6 +12,7 @@ on:
       - 'runtime/**'
       - 'media/**'
       - 'l10n/**'
+      - 'schemas/**'
       - 'scripts/build.mjs'
       - 'package.json'
       - 'package-lock.json'

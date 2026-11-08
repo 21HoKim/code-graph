@@ -3,6 +3,34 @@
 From 0.2.1 on, every change to the extension pushed to `main` is published automatically as the next patch
 version; the notes for each one are on the [Releases](https://github.com/21HoKim/code-graph/releases) page.
 
+## 0.4.0
+
+**Traces your setup as it is**
+- Docker Compose: every service whose container has your sources is traced, whether they are mounted
+  (`- ./:/app`) or copied into its image by its Dockerfile (`COPY`, multi-stage builds, `RUN --mount=type=bind`).
+  Such images are rebuilt from the traced copy with the compiler wrappers added right before the first copy, so
+  the layers above stay cached. Services without your code (databases, proxies) run as they are.
+- In a traced container every C/C++ compiler on `PATH` is wrapped (`g++-12`, `clang++-17`, cross compilers,
+  `CC`/`CXX` given by full path, `ccache` in front), and Python is traced however it is started: by name, by full
+  path, through gunicorn or as a multiprocessing child. A forked process gets a trace of its own.
+- Several compose files, the override file and profiles; trace files are named `<host>-<pid>`, so replicas do not
+  collide.
+
+**`.codegraph.json` for unusual setups**
+- One file at the workspace root for what CodeGraph cannot find out by itself: a build script (`run.build` +
+  `run.program`, run in a traced copy with every compiler wrapped), the program, its arguments and folder, compose
+  files and profiles, which services to trace, a build to run in a container first (`compose.build`), and where
+  the code is in a container (`compose.sourcePath`). When a run cannot be set up, CodeGraph says what is missing
+  and offers to create the file; **CodeGraph: Create / Open .codegraph.json** writes a starter with what it
+  detected. The editor completes and explains every key, and the CLI reads the file too.
+
+**Fixes**
+- Python scripts in containers: the interpreter wrapper passed its arguments in the wrong order.
+- A CMake build folder copied into the traced copy no longer builds back into the workspace.
+
+**Docs**
+- The README now has only usage, examples and GIFs; everything else is in [docs/GUIDE.md](docs/GUIDE.md).
+
 ## 0.3.0
 
 **Run & Trace builds your program the way your project does**

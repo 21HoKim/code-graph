@@ -22,7 +22,7 @@
   "welcome.open": "See your code as a circuit. Folders, files, classes and functions become blocks; calls, threads and data are wires that current flows through.\n[Open Circuit View](command:codeGraph.open)\n[Show Current File](command:codeGraph.showFile)",
   "welcome.check": "Check that the code compiles. Only the broken parts turn red, and the wires show how far the break reaches.\n[Verify (compile check)](command:codeGraph.verify)\nRun the program and replay what each thread did and which values flowed.\n[Run & Trace](command:codeGraph.runTrace)",
   "welcome.untrusted": "Verify and Run & Trace start your compiler and program, so they only work in a trusted workspace.\n[Manage Workspace Trust](command:workbench.trust.manage)",
-  "welcome.more": "[Load Trace File…](command:codeGraph.loadTrace)\nTip: right-click a C, C++ or Python file, or click CodeGraph in the status bar, to jump to that file in the circuit.\n[Settings](command:workbench.action.openSettings?%5B%22codeGraph%22%5D) · [Guide](https://github.com/21HoKim/code-graph#use)",
+  "welcome.more": "[Load Trace File…](command:codeGraph.loadTrace)\nTip: right-click a C, C++ or Python file, or click CodeGraph in the status bar, to jump to that file in the circuit.\n[Settings](command:workbench.action.openSettings?%5B%22codeGraph%22%5D) · [Guide](https://github.com/21HoKim/code-graph/blob/main/docs/GUIDE.md)",
   "trust.description": "Static analysis works everywhere. Compile checks and Run & Trace execute your compiler and program, so they need a trusted workspace.",
   "cfg.verifyMode": "When to compile-check the workspace with the real toolchain (`gcc`/`clang -fsyntax-only`, Python `compile()`). Broken blocks turn red and the impact spreads along the wires.",
   "cfg.verifyMode.onOpenAndSave": "Check on open, then re-check the affected translation units on every save.",
@@ -35,7 +35,7 @@
   "cfg.verifyCcdb": "Use the project's build flags: `compile_commands.json`, or the flags its makefile passes (read with a `make -n` dry run).",
   "cfg.verifyEditor": "Also mark errors reported by language servers (C/C++, clangd, Pylance…).",
   "cfg.verifyTimeout": "Time limit per translation unit.",
-  "cfg.runEntry": "What Run & Trace starts: a Python file, or a C/C++ file containing `main`. Empty = the active editor's entry point, or pick from a list.",
+  "cfg.runEntry": "What Run & Trace starts: a Python file, or a C/C++ file containing `main`. Empty = the active editor's entry point, or pick from a list. Keys in `.codegraph.json` win over these settings.",
   "cfg.runArgs": "Program arguments for Run & Trace.",
   "cfg.runCwd": "Working directory (workspace-relative). Empty = workspace root.",
   "cfg.runEnv": "Extra environment variables for the traced program.",
@@ -48,8 +48,10 @@
   "welcome.compose": "This workspace has a Compose file: run its services in their own containers and network, and see every container on one timeline.\n[Run & Trace with Docker Compose](command:codeGraph.runCompose)",
   "cfg.runUseBuildSystem": "Build C/C++ programs the way the project does: sources, defines, libraries and the directory to run from come from the makefile (`make -n`) or CMake (`CMakeFiles/*/link.txt`).",
   "cfg.runTarget": "Program to run when the entry file is built into several (e.g. `node-a` and `node-b` from one `main.cpp`). Empty = ask.",
-  "cfg.composeFile": "Compose file for **Run & Trace with Docker Compose** (workspace-relative). Empty = `compose.yaml` / `docker-compose.yml` at the root.",
-  "cfg.composeServices": "Services to trace. Empty = every service that mounts the workspace (e.g. `- ./:/app`); the others still run.",
+  "cfg.composeFile": "Compose file for **Run & Trace with Docker Compose** (workspace-relative). Empty = `compose.yaml` / `docker-compose.yml` at the root, plus its override file. Several files, profiles and per-service settings go in `.codegraph.json`.",
+  "cfg.composeServices": "Services to trace. Empty = every service that mounts the workspace (e.g. `- ./:/app`) or builds its image from it; the others still run.",
   "cfg.composeStartTimeout": "Time allowed for image builds and the builds inside the containers, before the first traced program starts. `codeGraph.run.timeoutSeconds` counts from then.",
-  "cfg.composeDocker": "The docker CLI (with Compose v2) to use."
+  "cfg.composeDocker": "The docker CLI (with Compose v2) to use.",
+  "cmd.createConfig": "Create / Open .codegraph.json",
+  "welcome.config": "Build or Docker setup CodeGraph does not get right? Write what it cannot find out by itself in one file, `.codegraph.json`.\n[Create .codegraph.json](command:codeGraph.createConfig)"
 }
