@@ -37,7 +37,11 @@ ELK_CDN=https://cdn.jsdelivr.net/npm/elkjs@0.12.1/lib/ node scripts/build-demo.m
 - `src/webview` — the view (browser code, no Node APIs).
 - `runtime/` — the tracers that run inside the user's program (Python stdlib only; C99 + pthreads, C++11).
   Keep them dependency-free and never let them change what the program does when tracing is off.
-- `samples/` — small projects used by tests and the demo (`broken-*` fail on purpose).
+- `samples/` — small projects used by tests and the demo (`broken-*` fail on purpose; `net-pair` is a client and
+  a server with a makefile and a compose file).
+
+The Docker Compose test runs real containers and is skipped unless `CODE_GRAPH_DOCKER_TEST=1` and Docker is
+running (CI sets it): `CODE_GRAPH_DOCKER_TEST=1 npm test`.
 
 ## Releases
 

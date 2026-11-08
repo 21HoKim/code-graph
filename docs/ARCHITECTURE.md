@@ -24,8 +24,10 @@ dependency (the same code runs in the CLI and the tests), and the **webview** th
 | `verify.ts` | compile check with `gcc`/`clang -fsyntax-only` and Python `compile()` |
 | `health.ts` | diagnostics → broken / affected / unpowered blocks, cut wires |
 | `instrument.ts` | copies C/C++ sources with one probe per function body |
+| `buildinfo.ts` | the project's programs from `make -nBwk` / CMake link files; libraries behind undefined symbols |
 | `runner.ts` | builds (C/C++) or starts (Python) the program with a tracer and collects the result |
-| `trace.ts` | trace format and parser → `RunTrace` (calls per thread, values, shared objects) |
+| `compose.ts` | Run & Trace with Docker Compose: traced copy, compiler shims, override file, collecting traces |
+| `trace.ts` | trace format and parser → `RunTrace` (calls per thread, values, shared objects); merges processes |
 | `model.ts` | shared types |
 
 **Runtime** (`runtime/`): `python/cg_tracer.py` (standard library only), `c/cg_trace.h` + `c/cg_trace.c`
@@ -191,7 +193,7 @@ errors such as a `SyntaxError` attach to the file), then computes:
 **Trace format** (`code-graph-trace/1`, JSON lines, written by both runtimes):
 
 ```jsonc
-{"k":"h","schema":"code-graph-trace/1","lang":"cpp","clock":"ns","pid":4242}
+{"k":"h","schema":"code-graph-trace/1","lang":"cpp","clock":"ns","pid":4242,"mono":…,"wall":…,"exe":"node-b"}
 {"k":"t","id":2,"t":120934,"name":"thread-2"}                         // thread first seen
 ["c",121003,2,7,"0x7ffd…",[["pkt","o","0x7ffd…","0x7ffd…"]]]       // call: t, thread, fid, this, args
 ["r",121550,2,7]                                                      // return (Python: + value)
@@ -225,10 +227,47 @@ size, references, pointers and `this` by address. The runtime (`cg_trace.c`) kee
 per thread, appends to the trace under one mutex, and on `SIGSEGV`/`SIGABRT`/… writes every thread's stack before
 re-raising; `cg_trace_cxx.cpp` records the type and `what()` of an uncaught exception.
 
-`runner.ts` builds only the translation units `main` needs (file-level closure over call / spawn / instantiate /
-inherit relations, methods of used classes, excluding units with another `main`), with `compile_commands.json`
-flags when present. A unit whose instrumented copy does not compile is rebuilt untouched (it just is not traced);
-one link retry adds units that define the missing symbols. The compile check runs before any build.
+**Building it like the project does** (`buildinfo.ts`): a makefile is dry-run with `make -nBwk` (every command of
+the default goal, with "Entering directory" lines); CMake gives `compile_commands.json` plus
+`CMakeFiles/<target>.dir/link.txt`. Compiler, `ar` and link commands are grouped into programs: an executable link
+with the compile commands of its objects, archives and shared libraries the project builds itself. A program
+carries per-source compile flags (`-D`, `-I`, `-std` …), link flags (`-L`, `-l`, `-Wl,…`, `-pthread`) and the
+directory it is linked in — where `make run` would start it. The compile check uses the same flags when there is
+no `compile_commands.json`.
+
+`runner.ts` builds the program's sources when the entry file belongs to one (the user picks when several do), else
+the translation units `main` needs (file-level closure over call / spawn / instantiate / inherit relations,
+methods of used classes, excluding units with another `main`), with `compile_commands.json` flags when present. A
+unit whose instrumented copy does not compile is rebuilt untouched (it just is not traced). Link retries add the
+workspace units that define missing symbols, then the libraries that usually provide them (`guessLibraries`:
+OpenSSL, Boost, libm, … with `-L` for e.g. `/opt/boost-1.87/lib` when found); what is still missing is reported
+on `main` in one line. The compile check runs before any build.
+
+**Docker Compose** (`compose.ts`): `docker compose config --format json` gives the resolved project. Services with a
+bind mount of the workspace (or a folder in it) are traced. The workspace is copied (without `.git`,
+`node_modules`, CMake caches), C/C++ files of the copy get probes, and an override file — JSON, which Compose reads
+as YAML — gives each traced service:
+
+| key | value |
+| --- | --- |
+| `volumes` | the copy at the workspace's mount target (Compose merges volumes by target), `/codegraph` |
+| `entrypoint` / `command` | `/codegraph/bin/cg-run` + the service's own entrypoint and command (from the image when the compose file has none) |
+| `environment` | `CODE_GRAPH_TRACE=/codegraph/trace/<service>/{pid}.jsonl`, event cap, values |
+
+`cg-run` puts `/codegraph/bin` first on `PATH` (and `umask 0`, so the host can delete what a root container
+builds). There `gcc`, `g++`, `cc`, `c++`, `clang`, `clang++` are links to one shim that finds the real compiler
+further down `PATH`, adds `-include /codegraph/rt/cg_trace.h` to every compile and, for a program link, compiles
+the runtime once per container and appends it (`-Wl,--dynamic-list` exports `cgt_*`, so shared libraries with
+probes resolve them from the program). The project runs with `up`; the time limit counts from the first trace
+file; when every traced container has exited or the limit is reached the project is stopped (the runtime exits
+on `SIGTERM` even as PID 1) and taken down. Logs of services that never started a traced program are parsed for
+compiler errors, with container paths mapped back to the workspace.
+
+**Several processes** (`mergeTraces`): every trace header carries the monotonic and wall clock at its time 0
+(containers share the host's clock), so spans are shifted onto one clock and re-sorted; threads are renumbered
+across processes and named `<service> · <thread>`; object identities get the process name in front (the same
+address in two processes is not one object); `procs` keeps each process's threads and exit. A stop by `SIGTERM` /
+`SIGINT` (time limit, `docker stop`) ends the open spans but is not a failure.
 
 **Model** (`RunTrace`): calls become spans per thread (`t`, `end`, `parent`, `depth`) as parallel arrays; thread
 parents for C/C++ are inferred from the static spawn relation running in another thread when the thread started;

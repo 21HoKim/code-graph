@@ -2,7 +2,7 @@
   "name": "code-graph-vscode",
   "displayName": "%displayName%",
   "description": "%description%",
-  "version": "0.2.1",
+  "version": "0.3.0",
   "publisher": "21HoKim",
   "license": "MIT",
   "author": {

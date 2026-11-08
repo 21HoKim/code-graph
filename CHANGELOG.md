@@ -3,6 +3,29 @@
 From 0.2.1 on, every change to the extension pushed to `main` is published automatically as the next patch
 version; the notes for each one are on the [Releases](https://github.com/21HoKim/code-graph/releases) page.
 
+## 0.3.0
+
+**Run & Trace builds your program the way your project does**
+- Makefiles (a `make -n` dry run) and CMake (`compile_commands.json` + link files) give each program's sources,
+  defines, include and library flags, and the directory it runs from — so `-DNODE_A`, `-lssl -lcrypto
+  -lboost_json` and relative paths like `../../cfg` just work. When one `main.cpp` goes into several programs,
+  CodeGraph asks which (or set `codeGraph.run.target`). The compile check uses the same flags.
+- A link that misses symbols is retried with the libraries that usually provide them (OpenSSL, Boost.JSON, libm,
+  …, with `-L` for libraries under `/opt`), and a failed link is reported in a few lines on `main` instead of
+  hundreds of linker messages.
+
+**Run & Trace with Docker Compose**
+- Runs the workspace's compose project — its images, network and healthchecks — with the services that mount
+  the workspace building a traced copy inside their containers (compiler shims on `PATH`, nothing to change in
+  the project). Every container's threads are merged into one timeline on a common clock; the run summary lists
+  how each container ended. In the CodeGraph panel, the command palette, and the CLI (`trace --compose`).
+- `samples/net-pair`: a client and a server on their own Compose network.
+
+**Other**
+- Stopping a run at the time limit is no longer shown as a failure.
+- Traces record their clock, process id and program name; `{pid}` in `CODE_GRAPH_TRACE` gives each process its
+  own file.
+
 ## 0.2.1
 
 - CodeGraph icon in the activity bar: a panel with a button for each step (open the circuit, show the current

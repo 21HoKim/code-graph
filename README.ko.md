@@ -48,8 +48,13 @@
   코드의 호출·반환·예외, 인자/반환 값, 객체 식별자를 스레드별로 기록해요.
 - **C / C++**: 소스를 복사해 함수 본문마다 프로브를 하나씩 넣어요. `{`가 있는 줄에 넣어서 컴파일러 줄 번호가
   바뀌지 않아요. 작은 런타임이 스레드별 호출, 인자 값, `this`·포인터 식별자를 기록하고, 크래시(`SIGSEGV`,
-  잡히지 않은 예외 → `SIGABRT`)가 나면 모든 스레드가 어느 함수에 있었는지 남겨요. `main`에 필요한 번역 단위만
-  `compile_commands.json` 플래그로 빌드해요.
+  잡히지 않은 예외 → `SIGABRT`)가 나면 모든 스레드가 어느 함수에 있었는지 남겨요.
+- **프로젝트가 빌드하는 그대로**: makefile이나 CMake가 있으면 프로그램마다 소스, 정의(`-DNODE_A`), include·라이브러리
+  플래그, 실행 위치를 `make -n` 드라이런이나 CMake 링크 파일에서 가져와요. 그래서 `../cfg` 같은 상대 경로도
+  맞게 풀려요. `main.cpp` 하나가 여러 프로그램에 들어가면 어느 쪽인지 고르면 돼요. 빌드 시스템이 없으면 그래프에서
+  `main`에 필요한 번역 단위를 찾아 `compile_commands.json` 플래그로 빌드해요. 그래도 링크에서 심볼이 빠지면
+  그 심볼을 보통 제공하는 라이브러리(OpenSSL, Boost.JSON, libm …)를 붙여 다시 시도하고, 실패하면 한 줄로
+  알려 줘요.
 - **재생**: 스레드 레인에서 재생/탐색/한 단계씩. 각 스레드의 호출 스택에 있는 블록이 그 스레드 색으로 빛나고,
   펄스가 전선을 따라 달리며 인자와 반환값이 블록으로 들어가요. 한 번도 실행 안 된 블록과 전선은 흐려지고,
   실행해 봐야 알 수 있는 호출(가상 함수, 콜백)은 새 전선으로 생겨요.
@@ -61,6 +66,18 @@
 | Python 파이프라인 재생 | 스레드 세 개가 공유하는 링버퍼의 데이터 경로 |
 | --- | --- |
 | ![Python 파이프라인: 펌프 스레드, 디스패처, 풀 워커와 값](docs/images/trace-python.png) | ![producer, consumer, main을 거쳐 간 링버퍼 객체](docs/images/data-trail.png) |
+
+### Docker Compose: 모든 컨테이너를 한 타임라인에
+- 상대가 있어야 도는 프로그램(클라이언트와 서버, 프로토콜의 노드들)은 **Docker Compose로 실행 & 추적**으로
+  프로젝트의 Compose 구성 그대로(이미지, 네트워크, 고정 주소, healthcheck) 실행해요.
+- 워크스페이스를 마운트하는 서비스(예: `volumes: - ./:/app`)는 자기 명령(make, CMake, 스크립트)으로 추적용
+  복사본을 빌드해요. `PATH` 맨 앞의 컴파일러 shim이 컨테이너 안의 모든 컴파일과 링크에 트레이서를 넣어요.
+  워크스페이스는 건드리지 않고, 추적이 끝나면 프로젝트를 내려요.
+- 추적되는 프로세스마다 추적 파일을 남기고, 이것들을 한 시계로 합쳐요. 컨테이너의 스레드는 컨테이너 이름이 붙은
+  레인이 되어서, 한 노드의 요청이 나가고 다른 노드의 핸들러가 받는 모습이 보여요. 실행 요약에는 컨테이너마다
+  어떻게 끝났는지 나와요.
+
+![자체 Compose 네트워크의 두 노드: node-b의 serve 스레드가 node-a의 메시지를 검증하고, node-a의 reader는 확인 응답을 기다려요](docs/images/compose-trace.png)
 
 ## 설치
 
@@ -106,7 +123,8 @@ Python 3.8 이상. 둘 다 컴파일러와 프로그램을 실제로 실행하�
 | `CodeGraph: 회로도 열기` | 워크스페이스를 분석하고 뷰 열기(컴파일 검사도 함께) |
 | `CodeGraph: 회로도에서 보기` | 현재 파일 중심으로 보기(탐색기/에디터 메뉴, 상태 표시줄) |
 | `CodeGraph: 검증 (컴파일 검사)` | 지금 다시 검사(툴바 **✓ 검증**) |
-| `CodeGraph: 실행 & 추적` | 빌드·실행·재생(툴바 **▶ 실행**, `main`/스크립트가 여러 개면 물어봐요) |
+| `CodeGraph: 실행 & 추적` | 빌드·실행·재생(툴바 **▶ 실행**, `main`/스크립트가 여러 개거나 makefile이 그 파일로 프로그램을 여러 개 만들면 물어봐요) |
+| `CodeGraph: Docker Compose로 실행 & 추적` | 워크스페이스의 Compose 프로젝트를 실행하고 서비스를 컨테이너 안에서 추적(Docker, Compose v2 필요) |
 | `CodeGraph: 추적 파일 불러오기…` | CLI나 트레이서가 쓴 추적 파일 열기 |
 | 블록 클릭 / 더블클릭 | 전선 추적 · 펼치기/접기, 함수면 소스 열기 |
 | `1`…`5` · `/` · `F` · `Esc` | 단계 · 검색 · 화면 맞춤 · 선택 해제 |
@@ -120,7 +138,10 @@ Python 3.8 이상. 둘 다 컴파일러와 프로그램을 실제로 실행하�
   `verify.extraFlags`, `verify.useCompileCommands`, `verify.editorDiagnostics`(clangd / C/C++ / Pylance 오류도
   표시), `verify.timeoutSeconds`
 - 실행 & 추적: `run.entry`, `run.args`, `run.cwd`, `run.env`, `run.buildFlags`, `run.linkFlags`,
-  `run.timeoutSeconds`(기본 20초, 멈춘 시점까지의 추적은 남음), `run.maxEvents`, `run.captureValues`
+  `run.useBuildSystem`(makefile / CMake 읽기), `run.target`(실행할 프로그램), `run.timeoutSeconds`(기본 20초,
+  멈춘 시점까지의 추적은 남음), `run.maxEvents`, `run.captureValues`
+- Docker Compose: `run.compose.file`, `run.compose.services`(기본: 워크스페이스를 마운트하는 모든 서비스),
+  `run.compose.startTimeoutSeconds`(이미지와 컨테이너 안 빌드, 기본 600초), `run.compose.docker`
 
 ### 명령줄
 
@@ -128,6 +149,8 @@ Python 3.8 이상. 둘 다 컴파일러와 프로그램을 실제로 실행하�
 node dist/cli.js path/to/project -o graph.json            # 정적 그래프
 node dist/cli.js path/to/project --verify -o graph.json   # + 컴파일 검사, 오류가 있으면 종료 코드 2 (CI용)
 node dist/cli.js trace path/to/project -o run.json -- --프로그램 --인자
+node dist/cli.js trace path/to/project --target node-b -o run.json   # makefile이 만드는 프로그램 중 하나
+node dist/cli.js trace path/to/project --compose -o run.json         # Compose 프로젝트, 모든 컨테이너
 # src/main.cpp · main(): exit 0 · 6 threads · 1657 calls · 15 shared objects · 1008 ms traced
 ```
 
@@ -139,8 +162,9 @@ node dist/cli.js trace path/to/project -o run.json -- --프로그램 --인자
    관계(호출, 스레드 생성, 객체 생성, 상속, include)마다 신뢰도가 붙어요.
 3. **검사** — 실제 컴파일러/인터프리터로 검사하고, 오류를 그 오류가 있는 함수에 붙인 뒤 관계를 따라 영향
    범위(누가 의존하는지, 어디로 전류가 못 가는지)를 계산해요.
-4. **실행** — 실행 & 추적에선 프로브를 넣어 빌드(C/C++)하거나 트레이서로 실행(Python)하고, 추적 결과를
-   스레드별 호출, 값, 스레드 사이를 오간 객체로 정리해요.
+4. **실행** — 실행 & 추적에선 프로젝트의 makefile이나 CMake가 빌드하는 그대로 프로브를 넣어 빌드(C/C++)하거나
+   트레이서로 실행(Python)해요. 직접 실행하거나, 컴파일러 shim을 거쳐 Compose 컨테이너 안에서 실행해요.
+   추적 결과는 스레드(컨테이너)별 호출, 값, 스레드 사이를 오간 객체로 정리해요.
 5. **그리기** — 고른 단계의 블록을 정하고 그 사이 전선을 합친 뒤, 웹 워커의 ELK로 배치해서 SVG와 전류용
    캔버스로 그려요.
 
@@ -150,8 +174,12 @@ node dist/cli.js trace path/to/project -o run.json -- --프로그램 --인자
 
 - **정적 분석**: 매크로 전개, 템플릿 인스턴스화는 하지 않고, 가상 호출과 콜백은 선언된 대상으로 연결돼요
   (실제 대상은 추적에서 보여요). 신뢰도가 낮은 연결은 그렇게 표시해요.
-- **실행 & 추적**은 단순한 프로젝트를 스스로 빌드해요(`main`에서 닿는 번역 단위). 생성 코드나 특별한 링크
-  단계가 필요하면 `run.buildFlags` / `run.linkFlags`를 쓰세요. 프로그램은 표준 입력 없이 실행돼요.
+- **실행 & 추적**은 makefile(기본 목표의 `make -n`)과 CMake(`compile_commands.json` + 링크 파일)를 따라요.
+  다른 빌드 시스템이면 `main`에서 닿는 번역 단위에 `run.buildFlags` / `run.linkFlags`를 더해 빌드해요.
+  프로그램은 표준 입력 없이 실행돼요.
+- **Docker Compose**는 워크스페이스를 마운트하고 컨테이너 안에서 gcc / g++ / cc / c++ / clang을 이름으로 불러
+  빌드하는 C/C++ 서비스를 추적해요(`/usr/bin/g++`처럼 경로를 박아 둔 빌드는 shim을 거치지 않아요). Python
+  서비스나 이미지 빌드 때 소스를 넣어 버리는 서비스는 아직 추적하지 않아요.
 - C/C++은 인자 값만 기록하고 반환값은 기록하지 않아요. 식별자는 주소라서, Python과 C 할당자가 해제된 객체의
   주소를 재사용하면 긴 데이터 경로에 두 객체의 수명이 섞일 수 있어요.
 - 추적에는 비용이 들어요: 워크스페이스 Python 호출 하나에 약 1µs, C/C++은 더 적어요. `run.maxEvents`가 넘으면
@@ -160,7 +188,8 @@ node dist/cli.js trace path/to/project -o run.json -- --프로그램 --인자
 ## 로드맵
 
 1. **정밀도** — 언어 서버 call hierarchy로 연결 확인, 가상 함수 오버라이드 전개, 콜백.
-2. **런타임 확장** — 락/대기 이벤트와 경합 히트맵, 실행 중인 프로세스에 붙기(eBPF), 디버그 세션 실시간 스트리밍.
+2. **런타임 확장** — 프로세스 사이의 메시지를 전선으로, 락/대기 이벤트와 경합 히트맵, 실행 중인 프로세스에 붙기(eBPF),
+   디버그 세션 실시간 스트리밍.
 3. **언어 추가** — Rust, Go, Java, TypeScript.
 
 ## 기여
