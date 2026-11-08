@@ -6,6 +6,7 @@
 !dist/webview/**
 !dist/runtime/**
 !media/icon.png
+!media/activitybar.svg
 !l10n/**
 !package.json
 !package.nls.json

@@ -1,5 +1,14 @@
 # Changelog
 
+From 0.2.1 on, every change to the extension pushed to `main` is published automatically as the next patch
+version; the notes for each one are on the [Releases](https://github.com/21HoKim/code-graph/releases) page.
+
+## 0.2.1
+
+- CodeGraph icon in the activity bar: a panel with a button for each step (open the circuit, show the current
+  file, compile check, Run & Trace, load a trace) and a short guide; re-analyze from its title bar.
+- Published on the VS Code Marketplace as `21HoKim.code-graph-vscode`.
+
 ## 0.2.0
 
 **Compile check — only what is broken turns red**

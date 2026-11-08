@@ -67,13 +67,16 @@ their impact spreading along the wires; run it and every thread lights up its ow
 
 ## Install
 
-**From a release (.vsix)**
+**From the Marketplace**: search for **CodeGraph** in the *Extensions* view, or
 
 ```bash
-code --install-extension code-graph-vscode-0.2.0.vsix
+code --install-extension 21HoKim.code-graph-vscode
 ```
 
-or in VS Code: *Extensions* view → `…` menu → *Install from VSIX…*
+([Marketplace page](https://marketplace.visualstudio.com/items?itemName=21HoKim.code-graph-vscode))
+
+**From a release (.vsix)**: every release on the [Releases](https://github.com/21HoKim/code-graph/releases) page
+has its `.vsix` attached. In VS Code: *Extensions* view → `…` menu → *Install from VSIX…*
 
 **From source**
 
@@ -82,7 +85,7 @@ git clone https://github.com/21HoKim/code-graph && cd code-graph
 npm ci
 npm run build          # dist/: extension, parse worker, webview, WASM grammars, runtime tracers
 npm test               # analyzer, projection, compile-check and Run & Trace tests
-npx @vscode/vsce package --no-dependencies   # -> code-graph-<version>.vsix
+npx @vscode/vsce package --no-dependencies   # -> code-graph-vscode-<version>.vsix
 ```
 
 To try a development build without installing it: `npm run build`, then
@@ -93,6 +96,14 @@ untested) and/or Python 3.8+. Both execute your compiler and your program, so th
 workspaces. The static view needs nothing.
 
 ## Use
+
+Click the **CodeGraph** icon in the activity bar on the left. The panel has a button for each step (open the
+circuit, show the current file, compile check, Run & Trace, load a trace) with a line on what it does;
+refresh at its top re-analyzes the workspace.
+
+![The CodeGraph panel in the activity bar, next to the circuit view of a C++ project](docs/images/sidebar.png)
+
+The same commands are in the Command Palette:
 
 | | |
 | --- | --- |

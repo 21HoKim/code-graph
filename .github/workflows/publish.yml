@@ -1,0 +1,66 @@
+name: Publish
+
+# Every push to main that changes the extension is published to the VS Code Marketplace as the next
+# patch version (scripts/release-version.mjs picks it) and attached to a GitHub release.
+# Sign-in uses Marketplace Trusted Publishing (GitHub OIDC), so no token is stored in the repository.
+# Docs-only pushes don't publish; their README changes ship with the next release (or run this by hand).
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'src/**'
+      - 'runtime/**'
+      - 'media/**'
+      - 'l10n/**'
+      - 'scripts/build.mjs'
+      - 'package.json'
+      - 'package-lock.json'
+      - 'package.nls*.json'
+      - '.vscodeignore'
+  workflow_dispatch:
+
+concurrency:
+  group: publish
+  cancel-in-progress: false
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write # create the release and its tag
+      id-token: write # Marketplace Trusted Publishing
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0 # the release tags
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - run: npm run typecheck
+      - run: npm test
+
+      - name: Pick the version
+        id: release
+        run: node scripts/release-version.mjs >> "$GITHUB_OUTPUT"
+
+      - name: Package
+        env:
+          VERSION: ${{ steps.release.outputs.version }}
+          VSIX: ${{ steps.release.outputs.vsix }}
+        run: |
+          npm version "$VERSION" --no-git-tag-version --allow-same-version
+          npx @vscode/vsce package --no-dependencies --out "$VSIX"
+
+      - name: Publish to the Marketplace
+        env:
+          VSIX: ${{ steps.release.outputs.vsix }}
+        run: npx @vscode/vsce publish --oidc --packagePath "$VSIX"
+
+      - name: Release on GitHub
+        env:
+          GH_TOKEN: ${{ github.token }}
+          VERSION: ${{ steps.release.outputs.version }}
+          VSIX: ${{ steps.release.outputs.vsix }}
+        run: gh release create "v$VERSION" "$VSIX" --target "$GITHUB_SHA" --title "v$VERSION" --generate-notes

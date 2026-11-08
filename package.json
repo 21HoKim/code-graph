@@ -2,7 +2,7 @@
   "name": "code-graph-vscode",
   "displayName": "%displayName%",
   "description": "%description%",
-  "version": "0.2.0",
+  "version": "0.2.1",
   "publisher": "21HoKim",
   "license": "MIT",
   "author": {
@@ -87,7 +87,8 @@
       {
         "command": "codeGraph.reanalyze",
         "title": "%cmd.reanalyze%",
-        "category": "CodeGraph"
+        "category": "CodeGraph",
+        "icon": "$(refresh)"
       },
       {
         "command": "codeGraph.verify",
@@ -119,7 +120,61 @@
         "category": "CodeGraph"
       }
     ],
+    "viewsContainers": {
+      "activitybar": [
+        {
+          "id": "codeGraph",
+          "title": "CodeGraph",
+          "icon": "media/activitybar.svg"
+        }
+      ]
+    },
+    "views": {
+      "codeGraph": [
+        {
+          "id": "codeGraph.home",
+          "name": "CodeGraph"
+        }
+      ]
+    },
+    "viewsWelcome": [
+      {
+        "view": "codeGraph.home",
+        "contents": "%welcome.open%"
+      },
+      {
+        "view": "codeGraph.home",
+        "contents": "%welcome.check%",
+        "when": "isWorkspaceTrusted"
+      },
+      {
+        "view": "codeGraph.home",
+        "contents": "%welcome.untrusted%",
+        "when": "!isWorkspaceTrusted"
+      },
+      {
+        "view": "codeGraph.home",
+        "contents": "%welcome.more%"
+      }
+    ],
     "menus": {
+      "view/title": [
+        {
+          "command": "codeGraph.reanalyze",
+          "when": "view == codeGraph.home",
+          "group": "navigation@1"
+        },
+        {
+          "command": "codeGraph.exportGraph",
+          "when": "view == codeGraph.home",
+          "group": "2_tools@1"
+        },
+        {
+          "command": "codeGraph.clearTrace",
+          "when": "view == codeGraph.home",
+          "group": "2_tools@2"
+        }
+      ],
       "explorer/context": [
         {
           "command": "codeGraph.showFile",

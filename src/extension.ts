@@ -46,6 +46,12 @@ export function activate(ctx: vscode.ExtensionContext): void {
     vscode.window.registerWebviewPanelSerializer(VIEW_TYPE, {
       deserializeWebviewPanel: async (panel) => CircuitPanel.revive(panel, ctx, svc),
     }),
+    // activity bar panel: its buttons and guide are the view's welcome content (package.json viewsWelcome),
+    // which VS Code shows while the tree is empty
+    vscode.window.registerTreeDataProvider<vscode.TreeItem>('codeGraph.home', {
+      getTreeItem: (item) => item,
+      getChildren: () => [],
+    }),
   );
 
   // incremental updates: re-link after saves / file creation / deletion

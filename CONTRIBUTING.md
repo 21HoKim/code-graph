@@ -39,6 +39,18 @@ ELK_CDN=https://cdn.jsdelivr.net/npm/elkjs@0.12.1/lib/ node scripts/build-demo.m
   Keep them dependency-free and never let them change what the program does when tracing is off.
 - `samples/` — small projects used by tests and the demo (`broken-*` fail on purpose).
 
+## Releases
+
+Every push to `main` that changes the extension (`src/`, `runtime/`, `media/`, `package.json`, …) runs
+`.github/workflows/publish.yml`: tests, then publish to the VS Code Marketplace and a GitHub release with the
+`.vsix`. Docs-only pushes don't publish; their README changes go out with the next release, or run the workflow by
+hand (*Actions* → *Publish* → *Run workflow*).
+
+- The version is picked by `scripts/release-version.mjs`: the next patch after the newest release. To release a
+  new minor or major version, set it in `package.json` (`npm version minor --no-git-tag-version`) and push.
+- Publishing uses Marketplace Trusted Publishing (GitHub OIDC), so the repository holds no token. The publisher
+  `21HoKim` has a policy for owner `21HoKim`, repository `code-graph`, workflow `publish.yml`.
+
 ## Pull requests
 
 - `npm run typecheck && npm test` must pass.

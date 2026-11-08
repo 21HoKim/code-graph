@@ -8,7 +8,7 @@ dependency (the same code runs in the CLI and the tests), and the **webview** th
 
 | file | role |
 | --- | --- |
-| `extension.ts` | commands, file watcher, cursor follow, status bar |
+| `extension.ts` | commands, activity bar panel (welcome buttons from `package.json`), file watcher, cursor follow, status bar |
 | `host/service.ts` | finds files, runs the analysis and the compile check, keeps the latest results |
 | `host/panel.ts` | the webview panel: content security policy, messages, verify on open and on save |
 | `host/run.ts` | Run & Trace: pick the entry point, check, build, run, send the trace to the view |

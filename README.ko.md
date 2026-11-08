@@ -64,13 +64,16 @@
 
 ## 설치
 
-**.vsix로 설치**
+**Marketplace에서 설치**: VS Code *확장* 뷰에서 **CodeGraph**를 검색하거나
 
 ```bash
-code --install-extension code-graph-vscode-0.2.0.vsix
+code --install-extension 21HoKim.code-graph-vscode
 ```
 
-또는 VS Code의 *확장* 뷰 → `…` 메뉴 → *VSIX에서 설치…*
+([Marketplace 페이지](https://marketplace.visualstudio.com/items?itemName=21HoKim.code-graph-vscode))
+
+**.vsix로 설치**: [Releases](https://github.com/21HoKim/code-graph/releases) 페이지의 릴리스마다 `.vsix`가
+붙어 있어요. VS Code의 *확장* 뷰 → `…` 메뉴 → *VSIX에서 설치…*
 
 **소스에서 빌드**
 
@@ -79,7 +82,7 @@ git clone https://github.com/21HoKim/code-graph && cd code-graph
 npm ci
 npm run build          # dist/: 확장, 파서 워커, 웹뷰, WASM 문법, 런타임 트레이서
 npm test               # 분석기·프로젝션·컴파일 검사·실행 추적 테스트
-npx @vscode/vsce package --no-dependencies   # -> code-graph-<버전>.vsix
+npx @vscode/vsce package --no-dependencies   # -> code-graph-vscode-<버전>.vsix
 ```
 
 설치하지 않고 개발 빌드를 써 보려면 `npm run build` 후
@@ -90,6 +93,13 @@ Python 3.8 이상. 둘 다 컴파일러와 프로그램을 실제로 실행하�
 정적 회로도는 아무것도 필요 없어요.
 
 ## 사용법
+
+왼쪽 활동 표시줄의 **CodeGraph** 아이콘을 누르세요. 패널에 단계마다 버튼(회로도 열기, 현재 파일 보기,
+컴파일 검사, 실행 & 추적, 추적 파일 불러오기)과 한 줄 설명이 있고, 위쪽의 새로 고침은 워크스페이스를 다시 분석해요.
+
+![활동 표시줄의 CodeGraph 패널과 C++ 프로젝트의 회로도](docs/images/sidebar.png)
+
+명령 팔레트에도 같은 명령이 있어요.
 
 | | |
 | --- | --- |
