@@ -56,6 +56,7 @@ hand (*Actions* → *Publish* → *Run workflow*).
 
 - The version is picked by `scripts/release-version.mjs`: the next patch after the newest release. To release a
   new minor or major version, set it in `package.json` (`npm version minor --no-git-tag-version`) and push.
+  [docs/VERSIONING.md](docs/VERSIONING.md) says what each number means and when it goes up.
 - Publishing uses Marketplace Trusted Publishing (GitHub OIDC), so the repository holds no token. The publisher
   `21HoKim` has a policy for owner `21HoKim`, repository `code-graph`, workflow `publish.yml`.
 

@@ -1,6 +1,6 @@
 # CodeGraph guide
 
-[README](../README.md) · [한국어](GUIDE.ko.md) · [Architecture](ARCHITECTURE.md) · [Roadmap](ROADMAP.md) · [Changelog](../CHANGELOG.md)
+[README](../README.md) · [한국어](GUIDE.ko.md) · [Architecture](ARCHITECTURE.md) · [Roadmap](ROADMAP.md) · [Changelog](../CHANGELOG.md) · [Versions](VERSIONING.md)
 
 - [Install](#install)
 - [The circuit view](#the-circuit-view)

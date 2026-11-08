@@ -1,6 +1,6 @@
 # CodeGraph 사용 설명서
 
-[README](../README.ko.md) · [English](GUIDE.md) · [아키텍처](ARCHITECTURE.md) · [로드맵](ROADMAP.md) · [변경 기록](../CHANGELOG.md)
+[README](../README.ko.md) · [English](GUIDE.md) · [아키텍처](ARCHITECTURE.md) · [로드맵](ROADMAP.md) · [변경 기록](../CHANGELOG.md) · [버전 번호](VERSIONING.ko.md)
 
 - [설치](#설치)
 - [회로도](#회로도)

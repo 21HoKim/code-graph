@@ -1,7 +1,8 @@
 # Changelog
 
 From 0.2.1 on, every change to the extension pushed to `main` is published automatically as the next patch
-version; the notes for each one are on the [Releases](https://github.com/21HoKim/code-graph/releases) page.
+version; the notes for each one are on the [Releases](https://github.com/21HoKim/code-graph/releases) page. What the
+three numbers mean: [docs/VERSIONING.md](docs/VERSIONING.md).
 
 ## 0.5.0
 
