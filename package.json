@@ -38,7 +38,19 @@
     "runtime",
     "compile errors",
     "docker",
-    "docker compose"
+    "docker compose",
+    "codegraph",
+    "code graph",
+    "visualizer",
+    "code visualizer",
+    "code visualization",
+    "graph view",
+    "code map",
+    "diagram",
+    "dependency graph",
+    "flowchart",
+    "call hierarchy",
+    "c"
   ],
   "icon": "media/icon.png",
   "galleryBanner": {
