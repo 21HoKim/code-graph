@@ -18,6 +18,7 @@ import type {
   FileFacts,
   FileInfo,
   Loc,
+  Param,
   RawCall,
   RawEntity,
   Relation,
@@ -440,7 +441,10 @@ class Linker {
         push(this.ccClassByQname, q, e);
         push(this.ccClassesByName, r.name, e);
         this.classRaw.set(e.id, { raw: r, facts: f });
-        if (r.fields) this.fieldsOf.set(e.id, r.fields);
+        if (r.fields) {
+          this.fieldsOf.set(e.id, r.fields);
+          e.fields = memberList(r.fields);
+        }
       });
     }
 
@@ -823,7 +827,10 @@ class Linker {
         if (e.kind === 'class') {
           push(this.pyClassesByName, e.name, e);
           this.classRaw.set(e.id, { raw: r, facts: f });
-          if (r.fields) this.fieldsOf.set(e.id, r.fields);
+          if (r.fields) {
+          this.fieldsOf.set(e.id, r.fields);
+          e.fields = memberList(r.fields);
+        }
         } else if (e.kind === 'function') {
           push(this.pyFnsByName, e.name, e);
           if (this.parentOf(e)?.kind === 'class') push(this.pyMethodsByName, e.name, e);
@@ -1124,4 +1131,12 @@ class Linker {
       }
     }
   }
+}
+
+/** Data members for display: the receiver-inference helpers (`x[]`, `x#raw`) left out. */
+function memberList(fields: Record<string, string>): Param[] | undefined {
+  const out = Object.entries(fields)
+    .filter(([k]) => !k.endsWith('[]') && !k.includes('#'))
+    .map(([name, type]) => ({ name, type: fields[name + '[]'] ? `${type}<${fields[name + '[]']}>` : type }));
+  return out.length ? out : undefined;
 }

@@ -6,6 +6,7 @@
   "cmd.reanalyze": "Re-analyze Workspace",
   "cmd.export": "Export Graph as JSON",
   "cfg.defaultLevel": "Abstraction level shown first. `auto` picks the finest level that stays readable.",
+  "cfg.headerWrapsSource": "Files view: show a C/C++ source file inside the header it implements. What the header declares sits at the header level (that is what callers see); what only the source has stays inside the source block.",
   "cfg.layout": "`circuit`: left-to-right with orthogonal wires. `network`: top-down with curved links.",
   "cfg.flowMode": "Electric flow animation on wires: `all`, only for the `focus`ed selection, or `off`.",
   "cfg.maxParticles": "Upper bound for animated charges on screen (lower = lighter).",

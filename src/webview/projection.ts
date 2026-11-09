@@ -3,6 +3,7 @@
  *
  *   buildTree()  places entities in a containment tree
  *                  files mode:   dir / file / namespace / class / function
+ *                                (a C/C++ source sits inside the header it implements: header → source)
  *                  symbols mode: namespace / class / function (merged across files)
  *   project()    decides which tree nodes are expanded (containers) or collapsed
  *                (blocks), lifts every relation to the nearest visible ancestors and
@@ -91,8 +92,13 @@ function entityViewNode(id: string, e: Entity, parent: string | null): TNode {
   };
 }
 
-export function buildTree(g: CodeGraph, mode: GroupMode): ViewTree {
-  const t = mode === 'files' ? buildFilesTree(g) : buildSymbolsTree(g);
+export interface TreeOptions {
+  /** Files mode: a C/C++ source file goes inside the header it implements (default true). */
+  pairSources?: boolean;
+}
+
+export function buildTree(g: CodeGraph, mode: GroupMode, opts: TreeOptions = {}): ViewTree {
+  const t = mode === 'files' ? buildFilesTree(g, opts.pairSources ?? true) : buildSymbolsTree(g);
   compact(t, 'dir', '/');
   compact(t, 'namespace', '::');
   finalize(t);
@@ -104,11 +110,85 @@ function isFileLevelNamespace(e: Entity): boolean {
   return e.kind === 'namespace' && (e.sub === 'module' || e.sub === 'package');
 }
 
-function buildFilesTree(g: CodeGraph): ViewTree {
-  const t = newTree('files');
+const HEADER_EXT = /\.(h|hh|hpp|hxx|h\+\+|inl|ipp)$/i;
+const SOURCE_EXT = /\.(c|cc|cpp|cxx|c\+\+)$/i;
+
+function stem(path: string): string {
+  return path.slice(path.lastIndexOf('/') + 1).replace(/\.[^.]+$/, '');
+}
+
+function dirOf(path: string): string {
+  return path.slice(0, Math.max(0, path.lastIndexOf('/')));
+}
+
+/**
+ * C/C++ source → the header it implements: the one declaring most of what the source defines,
+ * else a header of the same name that the source includes or that sits next to it.
+ * Callers see the header; the source is how it works inside.
+ */
+export function pairSources(g: CodeGraph): Map<string, string> {
+  const headers = new Set(g.files.filter((f) => HEADER_EXT.test(f.path)).map((f) => f.path));
+  const links = new Map<string, Map<string, number>>(); // source -> header -> definitions declared there
+  for (const e of g.entities) {
+    if (!e.decl || !e.def || e.decl.file === e.def.file) continue;
+    if (!headers.has(e.decl.file) || !SOURCE_EXT.test(e.def.file)) continue;
+    const m = links.get(e.def.file) ?? new Map<string, number>();
+    m.set(e.decl.file, (m.get(e.decl.file) ?? 0) + 1);
+    links.set(e.def.file, m);
+  }
+  const includes = new Map<string, Set<string>>();
+  for (const r of g.relations) {
+    if (r.kind !== 'include') continue;
+    const s = includes.get(r.from.slice(2)) ?? new Set<string>();
+    s.add(r.to.slice(2));
+    includes.set(r.from.slice(2), s);
+  }
+  const out = new Map<string, string>();
   for (const f of g.files) {
+    if (!SOURCE_EXT.test(f.path)) continue;
+    let best: string | undefined;
+    let score = 0;
+    for (const h of headers) {
+      const sameStem = stem(h) === stem(f.path);
+      const n = links.get(f.path)?.get(h) ?? 0;
+      const near = dirOf(h) === dirOf(f.path) || includes.get(f.path)?.has(h);
+      if (!n && !(sameStem && near)) continue;
+      const sc = n * 10 + (sameStem ? 5 : 0) + (near ? 1 : 0);
+      if (sc > score) [best, score] = [h, sc];
+    }
+    if (best) out.set(f.path, best);
+  }
+  return out;
+}
+
+function buildFilesTree(g: CodeGraph, pair: boolean): ViewTree {
+  const t = newTree('files');
+  const pairs = pair ? pairSources(g) : new Map<string, string>();
+  // headers first: a paired source is added inside its header
+  const files = [...g.files].sort((a, b) => Number(pairs.has(a.path)) - Number(pairs.has(b.path)));
+  for (const f of files) {
     const parts = f.path.split('/');
     let parent: string | null = null;
+    const header = pairs.get(f.path);
+    if (header && t.nodes.has('f:' + header)) {
+      const id = 'f:' + f.path;
+      const elsewhere = dirOf(header) !== dirOf(f.path);
+      addNode(t, {
+        id,
+        kind: 'file',
+        // from another folder (include/ vs src/): say where it lives
+        label: elsewhere ? f.path : parts[parts.length - 1],
+        tag: fileTag(f.path),
+        parent: 'f:' + header,
+        children: [],
+        file: f,
+        loc: { file: f.path, line: 1, endLine: f.lines },
+        fnCount: 0,
+        depth: 0,
+      });
+      t.fileNode.set(f.id, id);
+      continue;
+    }
     for (let i = 0; i < parts.length - 1; i++) {
       const id = 'd:' + parts.slice(0, i + 1).join('/');
       if (!t.nodes.has(id)) {
@@ -137,7 +217,8 @@ function buildFilesTree(g: CodeGraph): ViewTree {
     .filter((e) => e.kind !== 'namespace' && (e.def ?? e.decl))
     .sort((a, b) => order(a) - order(b) || (a.def ?? a.decl)!.line - (b.def ?? b.decl)!.line);
   for (const e of placed) {
-    const loc = (e.def ?? e.decl)!;
+    // declared in the header its source implements: it is part of what the header offers, so it goes there
+    const loc = e.decl && e.def && pairs.get(e.def.file) === e.decl.file ? e.decl : (e.def ?? e.decl)!;
     const fid = 'f:' + loc.file;
     if (!t.nodes.has(fid)) continue;
     const chain: Entity[] = [];
@@ -157,6 +238,15 @@ function buildFilesTree(g: CodeGraph): ViewTree {
     const id = fid + '|' + e.id;
     if (!t.nodes.has(id)) addNode(t, entityViewNode(id, e, parent));
     if (!t.entityNode.has(e.id)) t.entityNode.set(e.id, id);
+  }
+  // a source with nothing of its own (it only implements what its header declares) is its header
+  for (const [src, header] of pairs) {
+    const n = t.nodes.get('f:' + src);
+    if (!n || n.children.length || n.parent !== 'f:' + header) continue;
+    const h = t.nodes.get(n.parent)!;
+    h.children = h.children.filter((c) => c !== n.id);
+    t.nodes.delete(n.id);
+    t.fileNode.set('f:' + src, h.id);
   }
   for (const e of g.entities) {
     if (e.kind === 'namespace' && e.sub === 'module' && e.def) t.entityNode.set(e.id, 'f:' + e.def.file);
@@ -382,9 +472,9 @@ export function isExpanded(tree: ViewTree, n: TNode, o: Pick<ProjectOptions, 'le
   const r = RANK[n.kind];
   const L = RANK[effectiveLevel(tree, o.level)];
   if (r < L) return true;
-  // nested namespaces / classes open up to show the finest unit of that kind;
-  // folders do not (that would spill their loose files onto the Folder level)
-  if (r === L && n.kind !== 'dir') return n.children.some((c) => tree.nodes.get(c)!.kind === n.kind);
+  // nested namespaces / classes open up to show the finest unit of that kind; folders do not (that would
+  // spill their loose files onto the Folder level), nor do headers (their source is part of the same unit)
+  if (r === L && n.kind !== 'dir' && n.kind !== 'file') return n.children.some((c) => tree.nodes.get(c)!.kind === n.kind);
   return false;
 }
 

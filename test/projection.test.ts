@@ -4,7 +4,7 @@ import { before, describe, it } from 'node:test';
 import { AnalysisSession, walk } from '../src/core/analyze';
 import type { CodeGraph, RelationKind } from '../src/core/model';
 import { ParsePool } from '../src/core/pool';
-import { ALL_KINDS, availableLevels, buildTree, hasSymbolsMode, pickLevel, project, type ProjectOptions, type ViewKind } from '../src/webview/projection';
+import { ALL_KINDS, availableLevels, buildTree, hasSymbolsMode, pairSources, pickLevel, project, type ProjectOptions, type ViewKind } from '../src/webview/projection';
 
 const ROOT = path.resolve(__dirname, '..');
 
@@ -58,14 +58,50 @@ const opts = (level: ViewKind, extra: Partial<ProjectOptions> = {}): ProjectOpti
 });
 
 describe('view tree', () => {
-  it('places out-of-line methods in a class fragment of the defining file', () => {
-    const t = buildTree(g, 'files');
+  it('without pairing, places out-of-line methods in a class fragment of the defining file', () => {
+    const t = buildTree(g, 'files', { pairSources: false });
     const node = t.nodes.get(t.entityNode.get('cc:net::Router::start')!)!;
     const cls = t.nodes.get(node.parent!)!;
     assert.equal(cls.kind, 'class');
     assert.equal(cls.fragment, true);
     assert.equal(t.nodes.get(cls.parent!)!.kind, 'namespace');
     assert.ok(cls.id.startsWith('f:src/net/router.cpp|'));
+  });
+
+  it('puts a source inside the header it implements', () => {
+    const pairs = pairSources(g);
+    assert.equal(pairs.get('src/net/router.cpp'), 'include/net/router.h');
+    assert.equal(pairs.get('src/crc/crc32.c'), 'src/crc/crc32.h');
+    assert.ok(!pairs.has('src/main.cpp'), 'main.cpp implements no header');
+    const t = buildTree(g, 'files');
+    const log = t.nodes.get('f:src/util/log.cpp')!;
+    assert.equal(log.parent, 'f:src/util/log.h', 'log.cpp keeps its own helpers inside log.h');
+    assert.ok(log.children.length);
+    // router.cpp only implements what router.h declares: no empty block, the header stands for it
+    assert.ok(!t.nodes.has('f:src/net/router.cpp'));
+    assert.equal(t.fileNode.get('f:src/net/router.cpp'), 'f:include/net/router.h');
+  });
+
+  it('keeps what the header declares at the header level, without fragments', () => {
+    const t = buildTree(g, 'files');
+    const start = t.nodes.get(t.entityNode.get('cc:net::Router::start')!)!;
+    assert.ok(start.id.startsWith('f:include/net/router.h|'), start.id);
+    assert.equal(start.loc?.file, 'src/net/router.cpp', 'opening it still goes to the body');
+    assert.ok(![...t.nodes.values()].some((n) => n.fragment && n.id.startsWith('f:include/net/router.h')));
+  });
+
+  it('calls into a paired source arrive at its header', () => {
+    const t = buildTree(g, 'files');
+    const p = project(t, g, opts('file'));
+    assert.ok(p.edges.some((e) => e.kind === 'call' && e.dst === 'f:include/net/queue.h'), 'router → queue.h');
+    assert.ok(!p.edges.some((e) => e.kind === 'include' && e.src === 'f:include/net/router.h' && e.dst === 'f:include/net/router.h'));
+  });
+
+  it('keeps class data members, with container element types', () => {
+    const router = g.entities.find((e) => e.id === 'cc:net::Router')!;
+    assert.ok(router.fields?.some((f) => f.name === 'table_' && f.type === 'RouteTable'));
+    const table = g.entities.find((e) => e.id === 'cc:net::RouteTable')!;
+    assert.ok(table.fields?.some((f) => f.name === 'routes_' && /vector<.*Route>/.test(f.type ?? '')), JSON.stringify(table.fields));
   });
 
   it('merges a class across files in symbols mode', () => {
@@ -83,7 +119,7 @@ describe('view tree', () => {
 
 describe('projection', () => {
   it('lifts calls to file level and aggregates parallel wires', () => {
-    const t = buildTree(g, 'files');
+    const t = buildTree(g, 'files', { pairSources: false });
     const p = project(t, g, opts('file'));
     const e = p.edges.find((x) => x.kind === 'call' && x.src === 'f:src/net/router.cpp' && x.dst === 'f:src/net/queue.cpp');
     assert.ok(e, 'router.cpp -> queue.cpp');
@@ -101,7 +137,7 @@ describe('projection', () => {
   });
 
   it('collapsing a container re-routes its wires to the block', () => {
-    const t = buildTree(g, 'files');
+    const t = buildTree(g, 'files', { pairSources: false });
     const p = project(t, g, opts('function', { collapse: new Set(['f:src/net/router.cpp']) }));
     const n = p.nodes.get('f:src/net/router.cpp')!;
     assert.equal(n.container, false);
@@ -109,7 +145,7 @@ describe('projection', () => {
   });
 
   it('focus keeps only the neighbourhood', () => {
-    const t = buildTree(g, 'files');
+    const t = buildTree(g, 'files', { pairSources: false });
     const full = project(t, g, opts('file'));
     const p = project(t, g, opts('file', { focus: { id: 'f:src/net/queue.cpp', hops: 1 } }));
     assert.ok(p.leaves < full.leaves);

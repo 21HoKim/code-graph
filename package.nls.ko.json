@@ -6,6 +6,7 @@
   "cmd.reanalyze": "워크스페이스 다시 분석",
   "cmd.export": "그래프를 JSON으로 내보내기",
   "cfg.defaultLevel": "처음 보여 줄 추상화 단계. `auto`는 읽을 수 있는 범위에서 가장 세밀한 단계를 고릅니다.",
+  "cfg.headerWrapsSource": "파일 보기: C/C++ 소스 파일을 그 소스가 구현하는 헤더 안에 넣어 보여 줍니다. 헤더에 선언된 것은 헤더 단계에(호출하는 쪽이 보는 모습), 소스에만 있는 것은 소스 블록 안에 둡니다.",
   "cfg.layout": "`circuit`: 왼쪽→오른쪽, 직각 전선. `network`: 위→아래, 곡선 링크.",
   "cfg.flowMode": "전선 위 전류 애니메이션: `all`(전체), `focus`(선택한 것만), `off`(끔).",
   "cfg.maxParticles": "화면에 동시에 그릴 전하(입자) 수 상한. 낮을수록 가볍습니다.",

@@ -130,7 +130,7 @@ function parseParams(list: Node | null): Param[] {
         const i = txt.lastIndexOf(name);
         if (i >= 0) txt = txt.slice(0, i) + txt.slice(i + name.length);
       }
-      const type = clip(txt.replace(/\s+([&*])/g, '$1'), 40);
+      const type = clip(txt.replace(/\s+([&*])/g, '$1'), 160);
       out.push({ name, type: type || undefined });
     } else if (p.type === 'variadic_parameter_declaration' || p.type === 'variadic_parameter') {
       out.push({ name: '...', type: '...' });
@@ -156,7 +156,7 @@ function returnType(def: Node, declarator: Node | null): string | undefined {
     .filter((c) => c.type === 'type_qualifier')
     .map((c) => c.text)
     .join(' ');
-  return clip((q ? q + ' ' : '') + s, 32);
+  return clip((q ? q + ' ' : '') + s, 160);
 }
 
 function collectFlags(def: Node, fd: Node | null, out: Set<string>): void {

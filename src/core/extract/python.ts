@@ -137,14 +137,14 @@ function parseParams(list: Node | null, isMethod: boolean): Param[] {
         break;
       case 'typed_parameter': {
         const id = named(p).find((c) => c.type === 'identifier' || c.type.endsWith('splat_pattern'));
-        out.push({ name: id?.text, type: clip(p.childForFieldName('type')?.text ?? '', 32) || undefined });
+        out.push({ name: id?.text, type: clip(p.childForFieldName('type')?.text ?? '', 160) || undefined });
         break;
       }
       case 'default_parameter':
         out.push({ name: p.childForFieldName('name')?.text });
         break;
       case 'typed_default_parameter':
-        out.push({ name: p.childForFieldName('name')?.text, type: clip(p.childForFieldName('type')?.text ?? '', 32) || undefined });
+        out.push({ name: p.childForFieldName('name')?.text, type: clip(p.childForFieldName('type')?.text ?? '', 160) || undefined });
         break;
       case 'list_splat_pattern':
       case 'dictionary_splat_pattern':
@@ -327,7 +327,7 @@ class PyExtractor {
       endLine: endLineOf(n),
       isDefinition: true,
       params,
-      returns: clip(n.childForFieldName('return_type')?.text ?? '', 32) || undefined,
+      returns: clip(n.childForFieldName('return_type')?.text ?? '', 160) || undefined,
       flags: flags.size ? [...flags] : undefined,
     };
     this.entities.push(ent);

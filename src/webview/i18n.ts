@@ -39,6 +39,9 @@ const en = {
   passedThrough: 'Passed through', firstSteps: 'First hand-overs',
   traceCapped: 'Detailed events stop after {n}; call counts cover the whole run.', output: 'Program output', speed: 'Replay speed', closeTrace: 'Close the trace',
   peekOpen: '{key}+click or F12: open the source', peekSite: '{key}+click or F12: go to the call',
+  retStatements: 'Where it returns', noReturn: 'No return statement: it runs to the end and comes back',
+  noBody: 'No body in this workspace (declared only)', members: 'Members', bases: 'Inherits from', derived: 'Inherited by',
+  createdAt: 'Objects created at', heldBy: 'Held as a member by', passedTo: 'Taken as a parameter by', returnedBy: 'Returned by',
 };
 export type Strings = typeof en;
 
@@ -83,6 +86,9 @@ const ko: Strings = {
   passedThrough: '거쳐 간 함수', firstSteps: '처음 전달된 순서',
   traceCapped: '자세한 이벤트는 {n}개까지만 기록, 호출 횟수는 전체 실행 기준이에요.', output: '프로그램 출력', speed: '재생 속도', closeTrace: '추적 닫기',
   peekOpen: '{key}+클릭 또는 F12: 소스 열기', peekSite: '{key}+클릭 또는 F12: 호출한 줄로 이동',
+  retStatements: '반환하는 곳', noReturn: 'return 문 없음: 끝까지 실행하고 돌아감',
+  noBody: '이 작업 영역에 본문 없음 (선언만 있음)', members: '멤버 변수', bases: '상속받은 클래스 (부모)', derived: '이 클래스를 상속한 클래스 (자식)',
+  createdAt: '객체를 만드는 곳', heldBy: '멤버로 가진 클래스', passedTo: '매개변수로 받는 함수', returnedBy: '반환하는 함수',
 };
 
 let dict: Strings = en;

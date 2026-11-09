@@ -2,8 +2,9 @@
 import * as fs from 'node:fs';
 import * as vscode from 'vscode';
 import { peekLines, type Peek } from '../core/peek';
+import { returnStatements, statementAt } from '../core/snippets';
 import { processTrace } from '../core/trace';
-import type { HostMessage, LevelSetting, ViewSettings, WebviewMessage } from '../shared/protocol';
+import type { CodeAsk, CodeSnip, HostMessage, LevelSetting, ViewSettings, WebviewMessage } from '../shared/protocol';
 import type { AnalysisService } from './service';
 import { currentTheme } from './theme';
 
@@ -32,6 +33,21 @@ async function sourceText(abs: string): Promise<string | undefined> {
 }
 
 /** Syntax colours in the editor's theme; the preview stays plain when the theme or the grammar is not at hand. */
+/** Tabs to spaces, common indentation off, very long lines cut. */
+function tidy(lines: string[], width = 140): string[] {
+  const exp = lines.map((l) => {
+    let o = '';
+    for (const ch of l) o += ch === '\t' ? ' '.repeat(4 - (o.length % 4)) : ch;
+    return o.trimEnd();
+  });
+  const ind = exp.filter((l) => l.trim()).map((l) => l.length - l.trimStart().length);
+  const cutAt = ind.length ? Math.min(...ind) : 0;
+  return exp.map((l) => {
+    const s = l.slice(cutAt);
+    return s.length > width ? s.slice(0, width - 1) + '…' : s;
+  });
+}
+
 async function colour(peek: Peek, file: string, log: (line: string) => void): Promise<void> {
   try {
     // loaded with the first view, not with the extension: the grammars are big
@@ -65,6 +81,7 @@ export function viewSettings(): ViewSettings {
     flow: c.get<'all' | 'focus' | 'off'>('flow.mode', 'all'),
     maxParticles: c.get<number>('flow.maxParticles', 2500),
     showGuesses: c.get<boolean>('showGuessedLinks', true),
+    headerWrapsSource: c.get<boolean>('headerWrapsSource', true),
     lang: vscode.env.language,
     host: true,
     trusted: vscode.workspace.isTrusted,
@@ -86,6 +103,38 @@ export class CircuitPanel implements vscode.Disposable {
   private pendingFocus?: string;
   private saved = new Set<string>();
   private verifyAbort?: AbortController;
+  /** Snippets for the details panel, from files of the analyzed graph only. */
+  private async code(asks: CodeAsk[]): Promise<(CodeSnip[] | null)[]> {
+    const texts = new Map<string, string | undefined>();
+    const out: (CodeSnip[] | null)[] = [];
+    for (const a of asks) {
+      if (!texts.has(a.file)) {
+        const abs = this.service.abs(a.file);
+        texts.set(a.file, abs ? await sourceText(abs) : undefined);
+      }
+      const text = texts.get(a.file);
+      const lang = this.service.graph?.files.find((f) => f.path === a.file)?.lang;
+      if (text === undefined || !lang) {
+        out.push(null);
+        continue;
+      }
+      const snips =
+        a.what === 'returns'
+          ? returnStatements(text, a.line, a.endLine ?? a.line, lang)
+          : [statementAt(text, a.line, lang)].filter((s): s is NonNullable<typeof s> => !!s);
+      const shown: CodeSnip[] = [];
+      for (const s of snips) {
+        const c: CodeSnip = { first: s.first, last: s.last, lines: tidy(s.lines) };
+        const peek: Peek = { first: c.first, lines: c.lines, more: false };
+        await colour(peek, a.file, this.note);
+        c.html = peek.html;
+        shown.push(c);
+      }
+      out.push(shown);
+    }
+    return out;
+  }
+
   /** A line in the CodeGraph output channel. */
   private readonly note = (line: string): void => this.service.log.appendLine(line);
 
@@ -329,6 +378,9 @@ export class CircuitPanel implements vscode.Disposable {
         this.post({ type: 'peek', req: m.req, peek, final: true });
         break;
       }
+      case 'code':
+        this.post({ type: 'code', req: m.req, items: await this.code(m.items.slice(0, 80)) });
+        break;
       case 'open': {
         const abs = this.service.abs(m.file);
         if (!abs) return;

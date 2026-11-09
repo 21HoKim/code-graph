@@ -58,6 +58,8 @@ export interface Entity {
   def?: Loc;
   params?: Param[];
   returns?: string;
+  /** Classes: data members (name and type as written, normalized). */
+  fields?: Param[];
   /** static, virtual, override, async, template, threadEntry, abstract, property ... */
   flags?: string[];
 }

@@ -290,6 +290,11 @@
           "default": "auto",
           "markdownDescription": "%cfg.defaultLevel%"
         },
+        "codeGraph.headerWrapsSource": {
+          "type": "boolean",
+          "default": true,
+          "markdownDescription": "%cfg.headerWrapsSource%"
+        },
         "codeGraph.layout": {
           "type": "string",
           "enum": [

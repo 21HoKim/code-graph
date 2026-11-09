@@ -8,11 +8,13 @@ import { threadColor, type RuntimeOverlay } from './traceview';
 import {
   clipLabel,
   HEADER_H,
+  placeLabel,
   labelOf,
   roundedPath,
   smoothPath,
   tagWidth,
   truncate,
+  type Box,
   type FlowDir,
   type LayoutResult,
   type LayoutStyle,
@@ -267,15 +269,31 @@ export class Renderer {
   dataLabels(items: { edge: PEdge; text: string }[], measure: Measure): void {
     if (!this.current) return;
     const out: string[] = [];
+    // labels keep off blocks and container titles: a label covering the block it points at hides its name
+    const { boxes } = this.current.layout;
+    const obstacles: Box[] = [];
+    for (const [id, b] of boxes) {
+      if (this.current.proj.nodes.get(id)?.container) obstacles.push({ x: b.x, y: b.y, w: b.w, h: HEADER_H });
+      else obstacles.push(b);
+    }
+    const taken: Box[] = [];
     for (const { edge, text } of items.slice(0, 40)) {
       const pts = this.current.layout.routes.get(edge.id);
       if (!pts || pts.length < 2) continue;
-      const mid = midpoint(pts);
       const shown = clipLabel(text);
       const w = Math.ceil(measure(shown, '10px var(--cc-mono)')) + 12;
+      let spot = placeLabel(pts, w, 16, obstacles, taken);
+      let label = shown;
+      if (!spot) {
+        // no room on this wire: a small marker on it; hovering it shows what travels
+        const mid = midpoint(pts);
+        label = '⋯';
+        spot = { x: mid.x - 11, y: mid.y - 8, w: 22, h: 16 };
+      }
+      taken.push(spot);
       // hovering the label is hovering its wire: the tooltip has the whole text
       out.push(
-        `<g class="dl k-${edge.kind}" data-id="${esc(edge.id)}" data-edge="1" transform="translate(${mid.x - w / 2},${mid.y - 8})"><rect width="${w}" height="16" rx="8"/><text x="${w / 2}" y="11.3" text-anchor="middle">${esc(shown)}</text></g>`,
+        `<g class="dl k-${edge.kind}" data-id="${esc(edge.id)}" data-edge="1" transform="translate(${spot.x},${spot.y})"><rect width="${spot.w}" height="16" rx="8"/><text x="${spot.w / 2}" y="11.3" text-anchor="middle">${esc(label)}</text></g>`,
       );
     }
     this.gLabels.innerHTML = out.join('');

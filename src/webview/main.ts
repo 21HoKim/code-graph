@@ -6,7 +6,7 @@ import ELK from 'elkjs/lib/elk-api.js';
 import './style.css';
 import { attachDiagnostics, computeHealth, impactPath, type Health } from '../core/health';
 import type { CodeGraph, Confidence, Diagnostic, Entity, Relation, RelationKind } from '../core/model';
-import type { DiagSet, HostMessage, VerifyInfo, ViewSettings, WebviewMessage } from '../shared/protocol';
+import type { CodeAsk, CodeSnip, DiagSet, HostMessage, VerifyInfo, ViewSettings, WebviewMessage } from '../shared/protocol';
 import { FlowLayer, makePath, type FlowMode, type FlowPalette } from './flow';
 import { setLang, t } from './i18n';
 import { runLayout, samplePath, signature, type ElkLike, type FlowDir, type LayoutResult, type LayoutStyle, type Measure } from './layout';
@@ -36,6 +36,16 @@ import type { LiveUpdate } from '../core/live';
 import type { Peek } from '../core/peek';
 import type { RunTrace } from '../core/trace';
 import { Viewport } from './viewport';
+
+/** A place in the details panel waiting for code from the host. */
+interface CodeSlot {
+  slot: string;
+  ask: CodeAsk;
+}
+
+function escapeRegExp(s: string): string {
+  return s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+}
 
 interface VsApi {
   postMessage(m: WebviewMessage): void;
@@ -266,6 +276,9 @@ class App {
   private peekWant = '';
   /** The preview in the tooltip now: plain lines get replaced when their colours arrive. */
   private peekShown = '';
+  /** Code the details panel asked the host for: which node it was for and which slots to fill. */
+  private codeReq = 0;
+  private codeAsked = new Map<number, { node: string; slots: { slot: string; file: string }[] }>();
   private lastHover?: PointerEvent;
   /** What the tooltip shows and where it was put: it stays there while the pointer stays on that element. */
   private tip = { id: '', html: '', x: 0, y: 0 };
@@ -378,6 +391,9 @@ class App {
       case 'peek':
         this.gotPeek(m.req, m.peek, m.final !== false);
         break;
+      case 'code':
+        this.gotCode(m.req, m.items);
+        break;
       case 'peekReset':
         this.peeks.clear();
         this.peekWant = '';
@@ -436,7 +452,7 @@ class App {
   private rebuildTree(): void {
     if (!this.graph) return;
     if (this.state.mode === 'symbols' && !hasSymbolsMode(this.graph)) this.state.mode = 'files';
-    this.tree = buildTree(this.graph, this.state.mode);
+    this.tree = buildTree(this.graph, this.state.mode, { pairSources: this.settings?.headerWrapsSource !== false });
     this.fileCounts.clear();
   }
 
@@ -1267,6 +1283,8 @@ class App {
     const tn = n.t;
     const e = tn.entity;
     const d = this.details;
+    const asks: CodeSlot[] = [];
+    const host = this.settings?.host !== false;
     const k = `--k:var(--cc-${tn.kind})`;
     let html = `<h2><span class="pill" style="${k}">${esc(tn.tag)}</span>${esc(tn.label)}<button class="close" title="Esc">✕</button></h2>`;
     html += `<div class="qn">${esc(e?.qname ?? tn.file?.path ?? tn.label)}</div>`;
@@ -1284,7 +1302,15 @@ class App {
     if (e?.kind === 'function') {
       const ps = (e.params ?? []).map((p) => `${p.type ?? ''}${p.name ? ' ' + p.name : ''}`.trim()).join(',\n  ');
       html += `<h3>${esc(t('params'))} → ${esc(t('returns'))}</h3><div class="sig">${esc(`${e.name}(${ps ? '\n  ' + ps + '\n' : ''})${e.returns ? ' → ' + e.returns : ''}`)}</div>`;
+      // every `return`, as written: what it gives back and when
+      html += `<h3>${esc(t('retStatements'))}</h3>`;
+      if (!e.def) html += `<div class="row q">${esc(t('noBody'))}</div>`;
+      else if (host) {
+        html += `<div class="code-slot" data-slot="ret"><span class="q">…</span></div>`;
+        asks.push({ slot: 'ret', ask: { file: e.def.file, line: e.def.line, endLine: e.def.endLine, what: 'returns' } });
+      }
     }
+    if (e?.kind === 'class') html += this.classSection(e, host ? asks : undefined);
     html += this.problemsSection(n);
     html += this.runtimeSection(n);
     html += '<div class="row">';
@@ -1293,12 +1319,12 @@ class App {
     if (tn.children.length) html += `<button class="btn" data-act="toggle">${esc(n.container ? t('collapse') : t('expand'))}</button>`;
     html += '</div>';
 
-    if (e && !n.container && !tn.children.length && (e.kind === 'function' || e.kind === 'class')) {
+    if (e && !n.container && !tn.children.length && e.kind === 'function') {
       const inc = this.graph!.relations.filter((r) => r.to === e.id);
       const out = this.graph!.relations.filter((r) => r.from === e.id);
-      html += this.relList(t('incoming'), inc, 'from');
-      html += this.relList(t('outgoing'), out, 'to');
-    } else {
+      html += this.relList(t('incoming'), inc, 'from', host ? asks : undefined);
+      html += this.relList(t('outgoing'), out, 'to', host ? asks : undefined);
+    } else if (!(e?.kind === 'class' && !n.container && !tn.children.length)) {
       const inc = touching.filter((x) => !this.isInside(x.src, n.id));
       const out = touching.filter((x) => this.isInside(x.src, n.id) && !this.isInside(x.dst, n.id));
       html += this.edgeList(t('incoming'), inc, 'src');
@@ -1319,6 +1345,71 @@ class App {
     d.innerHTML = html;
     d.hidden = false;
     this.wireDetails(n.id, tn);
+    if (asks.length) this.askCode(n.id, asks);
+  }
+
+  /** Class: its members, family, where its objects are made, and where they live. */
+  private classSection(e: Entity, asks?: CodeSlot[]): string {
+    const rels = this.graph!.relations;
+    let html = '';
+    if (e.fields?.length) {
+      html += `<h3>${esc(t('members'))} (${e.fields.length})</h3><div class="sig">${esc(e.fields.map((f) => `${f.type ?? ''} ${f.name ?? ''}`.trim()).join('\n'))}</div>`;
+    }
+    const link = (id: string, extra = '') =>
+      `<li><span class="dot" style="background:var(--cc-inherit)"></span><a data-entity="${esc(id)}">${esc(this.nameOf(id))}</a>${extra ? `<span class="args">${extra}</span>` : ''}</li>`;
+    const bases = rels.filter((r) => r.kind === 'inherit' && r.from === e.id);
+    const derived = rels.filter((r) => r.kind === 'inherit' && r.to === e.id);
+    if (bases.length) html += `<h3>${esc(t('bases'))} (${bases.length})</h3><ul class="lst">${bases.map((r) => link(r.to)).join('')}</ul>`;
+    if (derived.length) html += `<h3>${esc(t('derived'))} (${derived.length})</h3><ul class="lst">${derived.map((r) => link(r.from)).join('')}</ul>`;
+    html += this.relList(t('createdAt'), rels.filter((r) => r.kind === 'instantiate' && r.to === e.id), 'from', asks);
+    // where objects of it live: members of other classes, parameters, return values
+    const names = [...new Set([e.qname, e.name])].map(escapeRegExp).join('|');
+    const mentions = new RegExp(`(^|[^\\w:.])(${names})(?!\\w)`);
+    const holders: string[] = [];
+    const takers: string[] = [];
+    const givers: string[] = [];
+    for (const x of this.graph!.entities) {
+      if (x.id === e.id) continue;
+      if (x.kind === 'class') {
+        for (const f of x.fields ?? []) if (f.type && mentions.test(f.type)) holders.push(link(x.id, esc(`${f.name}: ${f.type}`)));
+      } else if (x.kind === 'function' && x.parent !== e.id) {
+        const p = (x.params ?? []).find((pp) => pp.type && mentions.test(pp.type));
+        if (p) takers.push(link(x.id, esc(`${p.name ?? ''}: ${p.type}`)));
+        if (x.returns && mentions.test(x.returns)) givers.push(link(x.id, esc(`→ ${x.returns}`)));
+      }
+    }
+    const list = (title: string, items: string[]) => (items.length ? `<h3>${esc(title)} (${items.length})</h3><ul class="lst">${items.slice(0, 40).join('')}</ul>` : '');
+    html += list(t('heldBy'), holders) + list(t('passedTo'), takers) + list(t('returnedBy'), givers);
+    return html;
+  }
+
+  /** Ask the host for the code of these slots; the answer fills them if the panel still shows `node`. */
+  private askCode(node: string, asks: CodeSlot[]): void {
+    const req = ++this.codeReq;
+    this.codeAsked.clear();
+    this.codeAsked.set(req, { node, slots: asks.map((a) => ({ slot: a.slot, file: a.ask.file })) });
+    api.postMessage({ type: 'code', req, items: asks.map((a) => a.ask) });
+  }
+
+  private gotCode(req: number, items: (CodeSnip[] | null)[]): void {
+    const asked = this.codeAsked.get(req);
+    this.codeAsked.delete(req);
+    if (!asked || this.details.hidden) return;
+    asked.slots.forEach(({ slot, file }, i) => {
+      const el = this.details.querySelector<HTMLElement>(`.code-slot[data-slot="${slot}"]`);
+      if (!el) return;
+      const snips = items[i];
+      if (!snips) el.innerHTML = '';
+      else if (!snips.length) el.innerHTML = slot === 'ret' ? `<div class="row q">${esc(t('noReturn'))}</div>` : '';
+      else el.innerHTML = snips.map((s) => this.snipHtml(file, s)).join('');
+      for (const a of el.querySelectorAll<HTMLElement>('[data-open]')) a.onclick = () => this.openLoc(a.dataset.open!, Number(a.dataset.line));
+    });
+  }
+
+  /** A snippet as code with line numbers, in the editor's colours; clicking it opens it. */
+  private snipHtml(file: string, s: CodeSnip): string {
+    const rows = s.lines.map((l, i) => `<span class="ln">${s.first + i}</span>${s.html?.[i] || esc(l) || ' '}`);
+    return `<pre class="snip" data-open="${esc(file)}" data-line="${s.first}">${rows.join('\n')}</pre>`;
   }
 
   private isInside(nid: string, container: string): boolean {
@@ -1326,18 +1417,26 @@ class App {
     return false;
   }
 
-  private relList(title: string, rels: Relation[], end: 'from' | 'to'): string {
+  /** `asks`: also show the whole statement of each first call site (filled in when the host answers). */
+  private relList(title: string, rels: Relation[], end: 'from' | 'to', asks?: CodeSlot[]): string {
     if (!rels.length) return '';
     const sorted = [...rels].sort((a, b) => b.count - a.count).slice(0, 60);
     const items = sorted
-      .map((r) => {
+      .map((r, k) => {
         const other = r[end];
         const args = r.sites?.[0]?.args;
         const site = r.sites?.[0];
+        let code = '';
+        if (asks && site && k < 15) {
+          const slot = 's' + asks.length;
+          asks.push({ slot, ask: { file: site.file, line: site.line, what: 'stmt' } });
+          code = `<div class="code-slot" data-slot="${slot}"></div>`;
+        }
         return (
           `<li class="conf-${r.conf}"><span class="dot" style="background:var(--cc-${r.kind})" title="${esc(t(r.kind))}"></span>` +
           `<a data-entity="${esc(other)}">${esc(KIND_ICON[r.kind])} ${esc(this.nameOf(other))}</a><span class="cnt">${r.count > 1 ? '×' + r.count : ''} ${esc(t(r.conf))}</span>` +
           (args || site ? `<span class="args">${args ? esc('(' + args.join(', ') + ')') + ' ' : ''}${site ? this.locLink(site.file, site.line) : ''}</span>` : '') +
+          code +
           `</li>`
         );
       })

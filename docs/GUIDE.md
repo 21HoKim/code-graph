@@ -42,6 +42,14 @@ Compose v2 for containers.
   Package → Module → Class → Function for Python. Wires are lifted to the visible blocks and merged; double-click
   a block to open it in place.
 - **Two groupings** for C++: *Files* (physical) and *Symbols* (namespaces → classes → methods across files).
+- **A header holds its source** (Files grouping, C/C++): `router.cpp` sits inside `router.h`, the header it
+  implements. What the header declares stays at the header level — that is what callers see and where their wires
+  arrive — and what only the source has (static helpers, an anonymous namespace) sits inside the source block. A
+  source with nothing of its own is not drawn. Turn off with `codeGraph.headerWrapsSource`.
+- **Details panel**: a function shows every parameter and its return type in full, each `return` statement, and the
+  whole statement of each call in and out (in your colour theme; click to open). A class shows its members, base
+  and derived classes, where its objects are created, and where they live: members of other classes, parameters,
+  return values.
 - **Current**: charges travel from caller to callee (arguments) and back in amber (return values). Click a block
   and its wires show what travels on them, e.g. `(pkt, 100) ⟲ bool`.
 - **Threads, statically**: `std::thread`, `std::async`, `std::jthread`, `pthread_create`,

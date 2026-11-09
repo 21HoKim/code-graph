@@ -288,6 +288,24 @@ button, input { font: inherit; color: inherit; }
 .lst .dot { width: 8px; height: 8px; border-radius: 50%; display: inline-block; }
 .lst .args { grid-column: 2 / 4; font-family: var(--cc-mono); font-size: 10.5px; color: var(--cc-muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .lst .cnt { color: var(--cc-muted); font-size: 10.5px; }
+/* code in the details panel: call statements, return statements (editor colours, click to open) */
+.code-slot { grid-column: 1 / 4; min-width: 0; }
+.code-slot:empty { display: none; }
+pre.snip {
+  margin: 3px 0 2px;
+  padding: 4px 8px 4px 0;
+  max-height: 14em;
+  overflow: auto;
+  font: 10.5px/1.45 var(--vscode-editor-font-family, var(--cc-mono));
+  color: var(--vscode-editor-foreground, var(--cc-fg));
+  background: var(--vscode-editor-background, var(--cc-faint));
+  border: 1px solid color-mix(in srgb, var(--vscode-editor-foreground, var(--cc-fg)) 10%, transparent);
+  border-radius: 4px;
+  white-space: pre;
+  cursor: pointer;
+}
+pre.snip:hover { border-color: var(--vscode-focusBorder, var(--cc-accent, #3794ff)); }
+pre.snip .ln { display: inline-block; width: 3.2em; padding-right: 0.8em; text-align: right; color: var(--vscode-editorLineNumber-foreground, var(--cc-muted)); user-select: none; }
 .conf-guess { opacity: 0.6; font-style: italic; }
 .bad { color: var(--cc-broken) !important; }
 .warn { color: var(--cc-affected) !important; }

@@ -95,6 +95,41 @@ export function truncate(s: string, max: number): string {
   return s.length > max ? s.slice(0, max - 1) + '…' : s;
 }
 
+function overlaps(a: Box, b: Box, pad = 2): boolean {
+  return a.x < b.x + b.w + pad && b.x < a.x + a.w + pad && a.y < b.y + b.h + pad && b.y < a.y + a.h + pad;
+}
+
+/**
+ * Where a w×h label goes on a wire: centred on it, or just above / below it, along its longest segments
+ * first, wherever it covers no block (`obstacles`) and no label placed before (`taken`). Null when the
+ * wire is too short for it anywhere — between two blocks standing close together.
+ */
+export function placeLabel(pts: Pt[], w: number, h: number, obstacles: Box[], taken: Box[]): Box | null {
+  const segs: { a: Pt; b: Pt; len: number }[] = [];
+  for (let i = 1; i < pts.length; i++) {
+    const a = pts[i - 1];
+    const b = pts[i];
+    segs.push({ a, b, len: Math.hypot(b.x - a.x, b.y - a.y) });
+  }
+  segs.sort((x, y) => y.len - x.len);
+  for (const { a, b, len } of segs) {
+    if (len < 8) continue;
+    const horizontal = Math.abs(b.y - a.y) <= Math.abs(b.x - a.x);
+    for (const u of [0.5, 0.3, 0.7, 0.15, 0.85]) {
+      const cx = a.x + (b.x - a.x) * u;
+      const cy = a.y + (b.y - a.y) * u;
+      const spots = horizontal
+        ? [{ x: cx - w / 2, y: cy - h / 2 }, { x: cx - w / 2, y: cy - h - 3 }, { x: cx - w / 2, y: cy + 3 }]
+        : [{ x: cx - w / 2, y: cy - h / 2 }, { x: cx + 4, y: cy - h / 2 }, { x: cx - w - 4, y: cy - h / 2 }];
+      for (const sp of spots) {
+        const r = { x: sp.x, y: sp.y, w, h };
+        if (!obstacles.some((o) => overlaps(r, o)) && !taken.some((o) => overlaps(r, o, 1))) return r;
+      }
+    }
+  }
+  return null;
+}
+
 /** Longest text drawn on a wire or above a block; the tooltip has the rest. */
 export const LABEL_MAX = 32;
 

@@ -14,6 +14,8 @@ export interface ViewSettings {
   flow: 'all' | 'focus' | 'off';
   maxParticles: number;
   showGuesses: boolean;
+  /** Files view: a C/C++ source goes inside the header it implements. */
+  headerWrapsSource?: boolean;
   lang: string;
   /** Running inside VS Code (false = standalone demo page). */
   host: boolean;
@@ -23,6 +25,21 @@ export interface ViewSettings {
 
 /** compile = syntax-only check · editor = language servers · build = real build for Run & Trace · runtime = exceptions/crashes */
 export type DiagSet = 'compile' | 'editor' | 'build' | 'runtime';
+
+export interface CodeAsk {
+  file: string;
+  line: number;
+  endLine?: number;
+  what: 'stmt' | 'returns';
+}
+
+/** A few lines of code, dedented; `html`: the same lines with the editor theme's syntax colours (escaped). */
+export interface CodeSnip {
+  first: number;
+  last: number;
+  lines: string[];
+  html?: string[];
+}
 
 export type HostMessage =
   | { type: 'graph'; graph: CodeGraph; settings: ViewSettings; reason: 'initial' | 'update' }
@@ -40,6 +57,8 @@ export type HostMessage =
   | { type: 'replay'; t: number; playing: boolean; speed: number }
   /** Answer to a webview 'peek': the source lines for a hover preview (null: file not readable). */
   | { type: 'peek'; req: number; peek: Peek | null; final?: boolean }
+  /** Answer to a webview 'code': per asked item, its snippets (null: file not readable). */
+  | { type: 'code'; req: number; items: (CodeSnip[] | null)[] }
   /** The colour theme changed: previews shown so far have the old colours. */
   | { type: 'peekReset' }
   | { type: 'error'; message: string };
@@ -49,6 +68,8 @@ export type WebviewMessage =
   | { type: 'open'; file: string; line: number }
   /** A few source lines for the tooltip: a definition (`count` lines, up to `endLine`) or a call site (`count: 1`). */
   | { type: 'peek'; req: number; file: string; line: number; endLine?: number; count?: number }
+  /** Code for the details panel: the statement at a line (a call), or the `return`s of a function. */
+  | { type: 'code'; req: number; items: CodeAsk[] }
   | { type: 'reanalyze' }
   | { type: 'exportGraph' }
   | { type: 'verify' }
