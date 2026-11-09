@@ -267,6 +267,8 @@ class App {
   /** The preview in the tooltip now: plain lines get replaced when their colours arrive. */
   private peekShown = '';
   private lastHover?: PointerEvent;
+  /** What the tooltip shows and where it was put: it stays there while the pointer stays on that element. */
+  private tip = { id: '', html: '', x: 0, y: 0 };
 
   // DOM
   private root = document.getElementById('app') ?? document.body.appendChild(h('div', { id: 'app' }));
@@ -2042,6 +2044,7 @@ class App {
       this.tooltip.hidden = true;
       this.wantPeek(null);
       this.peekShown = '';
+      this.tip.id = '';
       return;
     }
     const id = el.getAttribute('data-id')!;
@@ -2071,11 +2074,25 @@ class App {
     const peek = this.peekHtml(src);
     html += peek;
     const r = this.stage.getBoundingClientRect();
+    // same element: the tooltip stays where it appeared; it only changes when its content does (colours arriving)
+    const same = id === this.tip.id && !this.tooltip.hidden;
+    if (same && html === this.tip.html) return;
+    if (!same) this.tip = { id, html, x: ev.clientX - r.left, y: ev.clientY - r.top };
+    this.tip.html = html;
     this.tooltip.classList.toggle('wide', !!peek);
     this.tooltip.innerHTML = html;
     this.tooltip.hidden = false;
-    const x = Math.min(ev.clientX - r.left + 14, r.width - this.tooltip.offsetWidth - 8);
-    const y = Math.min(ev.clientY - r.top + 16, r.height - this.tooltip.offsetHeight - 8);
+    // measure at the top-left corner, where nothing squeezes it: its width no longer depends on where it was
+    this.tooltip.style.left = '0px';
+    this.tooltip.style.top = '0px';
+    const w = this.tooltip.offsetWidth;
+    const h = this.tooltip.offsetHeight;
+    const { x: px, y: py } = this.tip;
+    // right of and below the pointer; left of / above it when there is no room
+    let x = px + 14;
+    if (x + w > r.width - 8) x = px - w - 14 >= 4 ? px - w - 14 : r.width - w - 8;
+    let y = py + 16;
+    if (y + h > r.height - 8) y = py - h - 12 >= 4 ? py - h - 12 : r.height - h - 8;
     this.tooltip.style.left = `${Math.max(4, x)}px`;
     this.tooltip.style.top = `${Math.max(4, y)}px`;
   }
