@@ -264,6 +264,8 @@ class App {
   private peekReq = 0;
   private peekTimer = 0;
   private peekWant = '';
+  /** The preview in the tooltip now: plain lines get replaced when their colours arrive. */
+  private peekShown = '';
   private lastHover?: PointerEvent;
 
   // DOM
@@ -372,7 +374,7 @@ class App {
         else if (m.update) this.applyLive(m.update);
         break;
       case 'peek':
-        this.gotPeek(m.req, m.peek);
+        this.gotPeek(m.req, m.peek, m.final !== false);
         break;
       case 'peekReset':
         this.peeks.clear();
@@ -2039,6 +2041,7 @@ class App {
     if (!el || !this.proj) {
       this.tooltip.hidden = true;
       this.wantPeek(null);
+      this.peekShown = '';
       return;
     }
     const id = el.getAttribute('data-id')!;
@@ -2090,6 +2093,7 @@ class App {
 
   /** The source lines for the tooltip if the host already sent them; otherwise asked for after a short rest. */
   private peekHtml(src: ReturnType<App['sourceOf']>): string {
+    this.peekShown = '';
     if (!src || this.settings?.host === false) {
       this.wantPeek(null);
       return '';
@@ -2105,6 +2109,7 @@ class App {
     this.wantPeek(null);
     const p = this.peeks.get(key);
     if (!p?.lines.length) return hint;
+    this.peekShown = key;
     const rows = p.lines.map((l, i) => {
       const n = p.first + i;
       // html: the host's syntax colours, already escaped
@@ -2129,14 +2134,15 @@ class App {
     return req;
   }
 
-  private gotPeek(req: number, peek: Peek | null): void {
+  /** `final`: the last answer to `req` (the host may first send plain lines, then the coloured ones). */
+  private gotPeek(req: number, peek: Peek | null, final = true): void {
     const key = this.peekAsked.get(req);
-    this.peekAsked.delete(req);
+    if (final) this.peekAsked.delete(req);
     if (key === undefined) return;
     if (this.peeks.size > 300) this.peeks.delete(this.peeks.keys().next().value!);
     this.peeks.set(key, peek);
-    // still hovering what asked for it: show it now
-    if (key === this.peekWant && !this.tooltip.hidden && this.lastHover) {
+    // still hovering what asked for it, or showing its plain lines: show it now
+    if ((key === this.peekWant || key === this.peekShown) && !this.tooltip.hidden && this.lastHover) {
       this.peekWant = '';
       this.onHover(this.lastHover);
     }

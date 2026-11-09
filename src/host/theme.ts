@@ -5,6 +5,7 @@
  */
 import * as path from 'node:path';
 import * as vscode from 'vscode';
+import { fallbackTheme } from '../core/fallbacktheme';
 import type { EditorTheme } from '../core/highlight';
 import { customRules, readThemeFile } from '../core/themefile';
 
@@ -37,6 +38,21 @@ function kindOf(uiTheme: string | undefined): vscode.ColorThemeKind {
   }
 }
 
+/**
+ * Older settings IDs of the built-in themes, as VS Code migrates them (workbenchThemeService.ts,
+ * migrateThemeSettingsId): the "Default " prefix went away and the experimental themes became the 2026 ones.
+ */
+const LEGACY_IDS: Record<string, string> = {
+  'Default Dark Modern': 'Dark Modern',
+  'Default Light Modern': 'Light Modern',
+  'Default Dark+': 'Dark+',
+  'Default Light+': 'Light+',
+  'Experimental Dark': 'Dark 2026',
+  'VS Code Dark': 'Dark 2026',
+  'Experimental Light': 'Light 2026',
+  'VS Code Light': 'Light 2026',
+};
+
 /** Theme settings IDs that may be the one in use: the setting, then the preferred theme for the active kind. */
 function candidates(): string[] {
   const w = vscode.workspace.getConfiguration('workbench');
@@ -53,32 +69,57 @@ function strings(o: Record<string, unknown> | undefined): Record<string, string>
   return Object.fromEntries(Object.entries(o ?? {}).filter((e): e is [string, string] => typeof e[1] === 'string'));
 }
 
-let cached: EditorTheme | null | undefined;
+function activeType(): 'dark' | 'light' {
+  const kind = vscode.window.activeColorTheme.kind;
+  return kind === vscode.ColorThemeKind.Light || kind === vscode.ColorThemeKind.HighContrastLight ? 'light' : 'dark';
+}
 
-/** The theme in use, or null when it cannot be found or read (the preview then stays plain). */
-export function currentTheme(): EditorTheme | null {
-  if (cached !== undefined) return cached;
-  cached = null;
+/** The theme file of the theme in use, with the user's customisations; a reason when it cannot be had. */
+function findTheme(): EditorTheme | string {
   const kind = vscode.window.activeColorTheme.kind;
   const all = contributions();
-  for (const name of candidates()) {
+  const names = candidates();
+  for (const raw of names) {
+    const name = LEGACY_IDS[raw] ?? raw;
     const hit = all.find(({ theme }) => (theme.id ?? theme.label) === name || theme.label === name);
     if (!hit?.theme.path || kindOf(hit.theme.uiTheme) !== kind) continue;
+    const file = path.join(hit.ext.extensionPath, hit.theme.path);
+    let read;
     try {
-      const file = readThemeFile(path.join(hit.ext.extensionPath, hit.theme.path));
-      const editor = vscode.workspace.getConfiguration('editor').get<Record<string, unknown>>('tokenColorCustomizations') ?? {};
-      const colors = vscode.workspace.getConfiguration('workbench').get<Record<string, unknown>>('colorCustomizations') ?? {};
-      const scoped = (o: Record<string, unknown>) => o[`[${name}]`] as Record<string, unknown> | undefined;
-      cached = {
-        name,
-        type: kind === vscode.ColorThemeKind.Light || kind === vscode.ColorThemeKind.HighContrastLight ? 'light' : 'dark',
-        colors: { ...file.colors, ...strings(colors), ...strings(scoped(colors)) },
-        tokenColors: [...(file.tokenColors ?? []), ...customRules(editor), ...customRules(scoped(editor))],
-      };
-    } catch {
-      cached = null;
+      read = readThemeFile(file);
+    } catch (e) {
+      const remote = vscode.env.remoteName ? ` (remote "${vscode.env.remoteName}": the theme may be installed on the other machine)` : '';
+      return `"${name}" from ${hit.ext.id}: cannot read ${file}${remote}: ${(e as Error).message}`;
     }
-    break;
+    if (!read.tokenColors?.length) return `"${name}" from ${hit.ext.id} has no token colours CodeGraph can read`;
+    const editor = vscode.workspace.getConfiguration('editor').get<Record<string, unknown>>('tokenColorCustomizations') ?? {};
+    const colors = vscode.workspace.getConfiguration('workbench').get<Record<string, unknown>>('colorCustomizations') ?? {};
+    const scoped = (o: Record<string, unknown>) => (o[`[${name}]`] ?? o[`[${raw}]`]) as Record<string, unknown> | undefined;
+    return {
+      name,
+      type: activeType(),
+      colors: { ...read.colors, ...strings(colors), ...strings(scoped(colors)) },
+      tokenColors: [...read.tokenColors, ...customRules(editor), ...customRules(scoped(editor))],
+    };
+  }
+  return `no installed theme matches ${names.map((n) => `"${n}"`).join(' or ') || 'the settings'}`;
+}
+
+let cached: EditorTheme | undefined;
+
+/**
+ * The theme in use for the preview's syntax colours. When it cannot be found or read, Dark+ / Light+ (by the
+ * active kind) stand in, so the preview is coloured either way; `log` hears which one it is, once per theme change.
+ */
+export function currentTheme(log?: (line: string) => void): EditorTheme {
+  if (cached) return cached;
+  const found = findTheme();
+  if (typeof found === 'string') {
+    cached = fallbackTheme(activeType());
+    log?.(`source preview colours: ${found} — using ${cached.name}`);
+  } else {
+    cached = found;
+    log?.(`source preview colours: theme "${found.name}"`);
   }
   return cached;
 }

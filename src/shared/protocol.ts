@@ -39,7 +39,7 @@ export type HostMessage =
   /** Another view of the same run played, paused, jumped or changed speed: follow it. */
   | { type: 'replay'; t: number; playing: boolean; speed: number }
   /** Answer to a webview 'peek': the source lines for a hover preview (null: file not readable). */
-  | { type: 'peek'; req: number; peek: Peek | null }
+  | { type: 'peek'; req: number; peek: Peek | null; final?: boolean }
   /** The colour theme changed: previews shown so far have the old colours. */
   | { type: 'peekReset' }
   | { type: 'error'; message: string };

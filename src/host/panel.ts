@@ -32,15 +32,28 @@ async function sourceText(abs: string): Promise<string | undefined> {
 }
 
 /** Syntax colours in the editor's theme; the preview stays plain when the theme or the grammar is not at hand. */
-async function colour(peek: Peek, file: string): Promise<void> {
+async function colour(peek: Peek, file: string, log: (line: string) => void): Promise<void> {
   try {
-    // loaded on the first preview: the grammars are big and most sessions never hover
+    // loaded with the first view, not with the extension: the grammars are big
     const { highlightLines, langOf } = await import('../core/highlight');
     const lang = langOf(file);
-    const theme = lang && currentTheme();
-    if (lang && theme) peek.html = (await highlightLines(peek.lines, lang, theme)) ?? undefined;
-  } catch {
-    // plain text it is
+    if (!lang) return;
+    const html = await highlightLines(peek.lines, lang, currentTheme(log));
+    if (html) peek.html = html;
+    else log('source preview colours: the theme could not be loaded — plain text');
+  } catch (e) {
+    log(`source preview colours: ${(e as Error)?.message ?? e} — plain text`);
+  }
+}
+
+/** Load the grammars and find the theme while the view opens, so the first preview is not the slow one. */
+async function warmPreview(log: (line: string) => void): Promise<void> {
+  try {
+    const { warmHighlighter } = await import('../core/highlight');
+    currentTheme(log);
+    await warmHighlighter();
+  } catch (e) {
+    log(`source preview colours: ${(e as Error)?.message ?? e}`);
   }
 }
 
@@ -73,6 +86,8 @@ export class CircuitPanel implements vscode.Disposable {
   private pendingFocus?: string;
   private saved = new Set<string>();
   private verifyAbort?: AbortController;
+  /** A line in the CodeGraph output channel. */
+  private readonly note = (line: string): void => this.service.log.appendLine(line);
 
   static show(ctx: vscode.ExtensionContext, service: AnalysisService, focusFile?: string): CircuitPanel {
     if (CircuitPanel.current) {
@@ -257,6 +272,8 @@ export class CircuitPanel implements vscode.Disposable {
     switch (m.type) {
       case 'ready': {
         this.ready = true;
+        // grammars and theme ready before the first hover
+        void warmPreview(this.note);
         const q = this.queue;
         this.queue = [];
         for (const msg of q) void this.panel.webview.postMessage(msg);
@@ -305,8 +322,11 @@ export class CircuitPanel implements vscode.Disposable {
         const abs = this.service.abs(m.file);
         const text = abs ? await sourceText(abs) : undefined;
         const peek = text === undefined ? null : peekLines(text, m.line, { endLine: m.endLine, count: m.count, lead: m.count === 1 ? 0 : 4 });
-        if (peek) await colour(peek, m.file);
-        this.post({ type: 'peek', req: m.req, peek });
+        // grammars still loading (first hover right after opening): the plain lines now, the colours after
+        const h = peek ? await import('../core/highlight') : undefined;
+        if (peek && h?.langOf(m.file) && !h.highlighterReady()) this.post({ type: 'peek', req: m.req, peek: { ...peek }, final: false });
+        if (peek) await colour(peek, m.file, this.note);
+        this.post({ type: 'peek', req: m.req, peek, final: true });
         break;
       }
       case 'open': {

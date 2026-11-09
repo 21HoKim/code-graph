@@ -30,6 +30,7 @@ export function langOf(file: string): HighlightLang | undefined {
 }
 
 let core: Promise<HighlighterCore> | undefined;
+let ready = false;
 const loaded = new Set<string>();
 /** Oniguruma, the regex engine VS Code runs TextMate grammars with (dist/wasm next to the bundle). */
 let wasmFile = path.join(__dirname, 'wasm', 'onig.wasm');
@@ -42,6 +43,10 @@ function highlighter(): Promise<HighlighterCore> {
   core ??= fs.promises
     .readFile(wasmFile)
     .then((wasm) => createHighlighterCore({ langs: [c, cpp, python], themes: [], engine: createOnigurumaEngine(wasm) }))
+    .then((hl) => {
+      ready = true;
+      return hl;
+    })
     .catch((e) => {
       core = undefined;
       throw e;
@@ -66,6 +71,16 @@ function span(t: ThemedToken, text: string, fg: string | undefined): string {
     if (fs & 4) css.push('text-decoration:underline');
   }
   return css.length ? `<span style="${css.join(';')}">${escHtml(text)}</span>` : escHtml(text);
+}
+
+/** Grammars and regex engine loaded: colouring is now a matter of milliseconds. */
+export function highlighterReady(): boolean {
+  return ready;
+}
+
+/** Load the grammars ahead of the first hover (they take a few hundred milliseconds). */
+export async function warmHighlighter(): Promise<void> {
+  await highlighter();
 }
 
 let generation = 0;
