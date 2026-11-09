@@ -95,6 +95,25 @@ export function truncate(s: string, max: number): string {
   return s.length > max ? s.slice(0, max - 1) + '…' : s;
 }
 
+/** Longest text drawn on a wire or above a block; the tooltip has the rest. */
+export const LABEL_MAX = 32;
+
+/** Addresses, hashes and long numbers: their ends tell them apart, so they lose their middle. */
+const LONG_TOKEN = /\b(?:0x[0-9a-f]{10,}|[0-9a-f]{17,}|\d{13,})\b/gi;
+
+/**
+ * A label short enough not to cover the circuit: long hex / number tokens are cut in the middle first
+ * (`0x7f3a1c2e9b40` → `0x7f3a…9b40`), then the end goes.
+ */
+export function clipLabel(s: string, max = LABEL_MAX): string {
+  if (s.length <= max) return s;
+  const mid = s.replace(LONG_TOKEN, (tok) => {
+    const head = tok.startsWith('0x') || tok.startsWith('0X') ? 6 : 4;
+    return `${tok.slice(0, head)}…${tok.slice(-4)}`;
+  });
+  return truncate(mid, max);
+}
+
 export function tagWidth(tag: string, measure: Measure): number {
   return Math.ceil(measure(tag, FONT_TAG)) + 8;
 }

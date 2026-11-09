@@ -9,6 +9,7 @@ import { CONFIG_FILE } from './core/config';
 import { createConfigCommand, options } from './host/project';
 import { clearTraceCommand, finishRun, loadTraceCommand, runComposeCommand, runTraceCommand, splitTraceCommand, stopRun } from './host/run';
 import { AnalysisService } from './host/service';
+import { onThemeChange } from './host/theme';
 
 let service: AnalysisService | undefined;
 
@@ -111,6 +112,14 @@ export function activate(ctx: vscode.ExtensionContext): void {
     composeFiles.onDidDelete(hasCompose),
     vscode.workspace.onDidChangeConfiguration((e) => {
       if (e.affectsConfiguration('codeGraph.run.compose.file')) hasCompose();
+    }),
+  );
+
+  // the source preview's syntax colours follow the editor's theme
+  ctx.subscriptions.push(
+    onThemeChange(() => {
+      void import('./core/highlight').then((h) => h.forgetThemes());
+      for (const p of [CircuitPanel.current, ...CircuitPanel.scoped.values()]) p?.post({ type: 'peekReset' });
     }),
   );
 
