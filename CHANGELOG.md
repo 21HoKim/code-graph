@@ -7,6 +7,9 @@ into the version's section and its [release notes](https://github.com/21HoKim/co
 
 ## Unreleased
 
+### Changed
+- Reworded the 0.5.8 notes.
+
 ## 0.5.8
 
 ### Added
