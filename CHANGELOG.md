@@ -1,8 +1,83 @@
 # Changelog
 
 From 0.2.1 on, every change to the extension pushed to `main` is published automatically as the next patch
-version; the notes for each one are on the [Releases](https://github.com/21HoKim/code-graph/releases) page. What the
-three numbers mean: [docs/VERSIONING.md](docs/VERSIONING.md).
+version. Each change is written under **Unreleased** (Added / Changed / Fixed) when it is made; the release turns that
+into the version's section and its [release notes](https://github.com/21HoKim/code-graph/releases). In Korean:
+[CHANGELOG.ko.md](CHANGELOG.ko.md). What the three numbers mean: [docs/VERSIONING.md](docs/VERSIONING.md).
+
+## Unreleased
+
+## 0.5.7
+
+### Added
+- Python classes list every `self.x = …` attribute as a member, typed when the value or annotation tells.
+- C: a `typedef struct ringbuf {…} ringbuf_t;` name counts as the struct, so functions taking `ringbuf_t*` show
+  up under *Taken as a parameter by*.
+
+### Fixed
+- C/C++ members keep their declared type: `int* data`, `char name[16]` (the `*`, `&` and `[N]` were dropped).
+
+## 0.5.6
+
+### Added
+- `↻N` on a block (calls that stay inside it) is clickable: the details panel opens at a list of those calls with
+  their code. `+N` on a closed block opens it.
+- The signature box is written as the language writes it (`int lookup(uint32_t dst)`, `def f(x: int) -> str`) and
+  coloured in your theme, and so is a class's member list.
+
+### Changed
+- The collapse button of an open block is a larger square with a light shade.
+- No tooltip over an open block's empty area or over its header buttons and badges.
+
+### Fixed
+- A code snippet at an `#include` line no longer runs on to the next `;`.
+
+## 0.5.5
+
+### Added
+- **A header holds its source** (Files grouping, C/C++): `router.cpp` sits inside `router.h`. What the header
+  declares is at the header level, where callers' wires arrive; what only the source has stays inside it.
+  `codeGraph.headerWrapsSource` turns it off.
+- Function details: every `return` statement and the whole statement of each call in and out, as code.
+- Class details: members, base and derived classes, where objects are created, and where they live (members of
+  other classes, parameters, return values).
+
+### Changed
+- Wire labels are placed where they cover no block or title; a wire too short for its label gets a small `⋯`.
+
+### Fixed
+- Parameter and return types are no longer cut at 40/32 characters.
+
+## 0.5.4
+
+### Fixed
+- The tooltip no longer grows while the pointer trembles over a block near the edge of the view: it stays where it
+  appeared, opening left of or above the pointer when there is no room.
+
+## 0.5.3
+
+### Changed
+- The source preview appears in about a quarter of a second: grammars load when the view opens, and plain lines show
+  first if a hover beats them.
+
+### Fixed
+- The preview is coloured in WSL, SSH and container windows (Dark+ / Light+ stand in when the theme's files are on
+  the other machine) and with the renamed built-in themes. The *CodeGraph* output says which theme it uses.
+
+## 0.5.2
+
+### Changed
+- More search keywords: codegraph, visualizer, code map, graph view, diagram, call hierarchy…
+
+## 0.5.1
+
+### Added
+- Hovering a block previews its source (the comment above, the header, the first lines), coloured in your theme;
+  hovering a wire shows the line of the call.
+- `Ctrl`+click (`⌘`+click) or `F12` opens a block's definition or a wire's call site.
+
+### Changed
+- Labels on wires and replay values stop at 32 characters (addresses keep both ends); the tooltip has the rest.
 
 ## 0.5.0
 

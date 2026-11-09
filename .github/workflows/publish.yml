@@ -1,7 +1,9 @@
 name: Publish
 
 # Every push to main that changes the extension is published to the VS Code Marketplace as the next
-# patch version (scripts/release-version.mjs picks it) and attached to a GitHub release.
+# patch version (scripts/release-version.mjs picks it) and attached to a GitHub release. Its notes are the
+# "Unreleased" sections of CHANGELOG.md / CHANGELOG.ko.md (scripts/release-notes.mjs), which are then
+# committed back under the version's number.
 # Sign-in uses Marketplace Trusted Publishing (GitHub OIDC), so no token is stored in the repository.
 # Docs-only pushes don't publish; their README changes ship with the next release (or run this by hand).
 on:
@@ -46,6 +48,11 @@ jobs:
         id: release
         run: node scripts/release-version.mjs >> "$GITHUB_OUTPUT"
 
+      - name: Release notes
+        env:
+          VERSION: ${{ steps.release.outputs.version }}
+        run: node scripts/release-notes.mjs "$VERSION" "$RUNNER_TEMP/notes.md"
+
       - name: Package
         env:
           VERSION: ${{ steps.release.outputs.version }}
@@ -64,4 +71,19 @@ jobs:
           GH_TOKEN: ${{ github.token }}
           VERSION: ${{ steps.release.outputs.version }}
           VSIX: ${{ steps.release.outputs.vsix }}
-        run: gh release create "v$VERSION" "$VSIX" --target "$GITHUB_SHA" --title "v$VERSION" --generate-notes
+        run: gh release create "v$VERSION" "$VSIX" --target "$GITHUB_SHA" --title "v$VERSION" --notes-file "$RUNNER_TEMP/notes.md" --generate-notes
+
+      # the "Unreleased" sections now carry the version: keep that in the repository (docs-only, publishes nothing)
+      - name: Commit the changelog
+        continue-on-error: true
+        env:
+          VERSION: ${{ steps.release.outputs.version }}
+        run: |
+          git checkout -- package.json package-lock.json
+          if git diff --quiet -- CHANGELOG.md CHANGELOG.ko.md; then exit 0; fi
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add CHANGELOG.md CHANGELOG.ko.md
+          git commit -m "Changelog: v$VERSION [skip ci]"
+          git pull --rebase origin main
+          git push origin HEAD:main

@@ -43,8 +43,10 @@ reach the Marketplace page with the next release.
 
 ## Where to see what changed
 
-- [CHANGELOG.md](../CHANGELOG.md): a section for every MINOR version and notable PATCH versions.
-- [GitHub Releases](https://github.com/21HoKim/code-graph/releases): every version, with its `.vsix`.
+- [CHANGELOG.md](../CHANGELOG.md) ([한국어](../CHANGELOG.ko.md)): every version, as **Added / Changed / Fixed**.
+  The Marketplace page shows it in its *Changelog* tab.
+- [GitHub Releases](https://github.com/21HoKim/code-graph/releases): every version with the same notes (English, and
+  Korean folded under *한국어*) and its `.vsix`.
 - The Marketplace page's *Version History* tab. VS Code updates the extension by itself; to go back to an older
   version, use *Install Another Version…* in the extension's ⚙ menu, or install a `.vsix` from Releases.
 

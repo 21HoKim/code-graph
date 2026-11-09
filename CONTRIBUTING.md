@@ -54,6 +54,10 @@ Every push to `main` that changes the extension (`src/`, `runtime/`, `media/`, `
 `.vsix`. Docs-only pushes don't publish; their README changes go out with the next release, or run the workflow by
 hand (*Actions* → *Publish* → *Run workflow*).
 
+- **Write what changed** with the change: a line under `## Unreleased` in [CHANGELOG.md](CHANGELOG.md) and
+  [CHANGELOG.ko.md](CHANGELOG.ko.md), under `### Added` / `### Changed` / `### Fixed` (추가 / 변경 / 수정), in words a
+  user understands. The release makes that its notes and renames the section to its version
+  (`scripts/release-notes.mjs`); without entries, the notes list the commit titles.
 - The version is picked by `scripts/release-version.mjs`: the next patch after the newest release. To release a
   new minor or major version, set it in `package.json` (`npm version minor --no-git-tag-version`) and push.
   [docs/VERSIONING.md](docs/VERSIONING.md) says what each number means and when it goes up.

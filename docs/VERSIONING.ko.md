@@ -42,8 +42,10 @@ MAJOR가 **0**인 동안은 CodeGraph가 아직 자라는 중이라, MINOR 버�
 
 ## 무엇이 바뀌었는지 보는 곳
 
-- [CHANGELOG.md](../CHANGELOG.md): MINOR 버전과 눈여겨볼 PATCH 버전마다 한 절씩.
-- [GitHub 릴리스](https://github.com/21HoKim/code-graph/releases): 모든 버전과 그 `.vsix`.
+- [CHANGELOG.ko.md](../CHANGELOG.ko.md) ([English](../CHANGELOG.md)): 버전마다 **추가 / 변경 / 수정**. 마켓플레이스
+  페이지의 *Changelog* 탭에는 영어판이 나와요.
+- [GitHub 릴리스](https://github.com/21HoKim/code-graph/releases): 모든 버전, 같은 내용의 노트(영어, 그 아래 접힌
+  *한국어*)와 그 `.vsix`.
 - 마켓플레이스 페이지의 *Version History* 탭. 확장은 VS Code가 알아서 업데이트하고, 예전 버전으로 돌아가려면 확장의
   ⚙ 메뉴에서 *다른 버전 설치…*를 고르거나 릴리스의 `.vsix`를 설치하면 돼요.
 
