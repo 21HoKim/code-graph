@@ -296,6 +296,8 @@ button, input { font: inherit; color: inherit; }
 .lst .cnt { color: var(--cc-muted); font-size: 10.5px; }
 /* code in the details panel: call statements, return statements (editor colours, click to open) */
 .code-slot { grid-column: 1 / 4; min-width: 0; }
+.lst .onward { grid-column: 2 / 4; font-size: 10.5px; color: var(--cc-muted); }
+.lst .onward a { color: var(--cc-fg); }
 .code-slot:empty { display: none; }
 pre.snip {
   margin: 3px 0 2px;

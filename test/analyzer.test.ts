@@ -120,6 +120,41 @@ describe('C ring buffer sample', () => {
   });
 });
 
+describe('where a class\'s objects live', () => {
+  it('finds members, parameters and returns by scope, even partly qualified, and keeps same names apart', async () => {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'cc-usage-'));
+    fs.writeFileSync(
+      path.join(dir, 'shop.hpp'),
+      [
+        'namespace shop {',
+        'namespace billing {',
+        'class Address { public: int zip; };',
+        'class Note { public: int id; };',
+        'class Customer { public: Note note; Address address; };',
+        'class Order { public: billing::Customer customer; };',
+        '}',
+        'namespace shipping {',
+        'class Address { public: int zip; };',
+        'class Customer { public: Address address; };',
+        '}',
+        '}',
+        'struct Store { void take(const shop::billing::Order& o); shop::billing::Customer make(); ::shop::shipping::Customer other; };',
+      ].join('\n'),
+    );
+    const g = await analyze(dir);
+    const { typeUsages } = await import('../src/webview/usage');
+    const cls = (q: string) => g.entities.find((e) => e.kind === 'class' && e.qname === q)!;
+    const holders = (q: string) => typeUsages(g, cls(q)).holders.map((u) => `${g.entities.find((e) => e.id === u.id)!.qname}.${u.name}`).sort();
+    assert.deepEqual(holders('shop::billing::Customer'), ['shop::billing::Order.customer'], 'written as billing::Customer inside shop::billing::Order');
+    assert.deepEqual(holders('shop::billing::Address'), ['shop::billing::Customer.address'], 'not shipping::Customer, whose Address is shipping::Address');
+    assert.deepEqual(holders('shop::shipping::Address'), ['shop::shipping::Customer.address']);
+    assert.deepEqual(holders('shop::shipping::Customer'), ['Store.other'], '::shop::shipping::Customer, fully qualified from the global scope');
+    const u = typeUsages(g, cls('shop::billing::Order'));
+    assert.deepEqual(u.takers.map((t) => t.name), ['o']);
+    assert.deepEqual(typeUsages(g, cls('shop::billing::Customer')).givers.map((t) => t.type), ['shop::billing::Customer']);
+  });
+});
+
 describe('robustness & incremental updates', () => {
   it('survives syntax errors and only re-parses changed files', async () => {
     const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'cc-test-'));

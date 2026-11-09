@@ -7,6 +7,16 @@ into the version's section and its [release notes](https://github.com/21HoKim/co
 
 ## Unreleased
 
+### Added
+- Class details: under each class that holds it as a member, where that class goes on to (the classes holding it,
+  the functions taking it), so a chain like `Address` → `Customer.address` → `Order.customer` can be
+  followed up.
+
+### Fixed
+- *Held as a member by*, *Taken as a parameter by* and *Returned by* find types written partly qualified
+  (`billing::Customer` inside `shop`) and look names up from the scope they are written in, so two
+  classes with the same name in different namespaces (`billing::Address`, `shipping::Address`) are no longer mixed up.
+
 ## 0.5.7
 
 ### Added

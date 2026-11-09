@@ -36,6 +36,7 @@ import { RuntimeMap, TraceModel, argsText, augmentGraph, fmtNs, retText, threadC
 import type { LiveUpdate } from '../core/live';
 import type { Peek } from '../core/peek';
 import type { RunTrace } from '../core/trace';
+import { TypeIndex, typeUsages } from './usage';
 import { Viewport } from './viewport';
 
 /** A place in the details panel waiting for code from the host. */
@@ -55,9 +56,6 @@ function declText(e: Entity): string {
   return `${e.returns ? e.returns + ' ' : ''}${e.name}(${list.length ? '\n    ' + list.join(',\n    ') + '\n' : ''})`;
 }
 
-function escapeRegExp(s: string): string {
-  return s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-}
 
 interface VsApi {
   postMessage(m: WebviewMessage): void;
@@ -292,6 +290,8 @@ class App {
   private codeReq = 0;
   /** The next details panel opens at its "calls inside" list (the ↻ badge was clicked). */
   private showInternal = false;
+  /** Class names as code may write them, for "where its objects live"; rebuilt with each graph. */
+  private typeIndex?: TypeIndex;
   private codeAsked = new Map<number, { node: string; slots: { slot: string; file: string }[] }>();
   private lastHover?: PointerEvent;
   /** What the tooltip shows and where it was put: it stays there while the pointer stays on that element. */
@@ -440,6 +440,7 @@ class App {
     const first = !this.graph;
     this.staticGraph = g;
     this.graph = this.trace ? augmentGraph(g, this.trace.tr) : g;
+    this.typeIndex = undefined;
     this.settings = settings;
     setLang(settings.lang);
     this.flow.maxParticles = settings.maxParticles;
@@ -1424,22 +1425,25 @@ class App {
     if (bases.length) html += `<h3>${esc(t('bases'))} (${bases.length})</h3><ul class="lst">${bases.map((r) => link(r.to)).join('')}</ul>`;
     if (derived.length) html += `<h3>${esc(t('derived'))} (${derived.length})</h3><ul class="lst">${derived.map((r) => link(r.from)).join('')}</ul>`;
     html += this.relList(t('createdAt'), rels.filter((r) => r.kind === 'instantiate' && r.to === e.id), 'from', asks);
-    // where objects of it live: members of other classes, parameters, return values
-    const names = [...new Set([e.qname, e.name, ...(e.aliases ?? [])])].map(escapeRegExp).join('|');
-    const mentions = new RegExp(`(^|[^\\w:.])(${names})(?!\\w)`);
-    const holders: string[] = [];
-    const takers: string[] = [];
-    const givers: string[] = [];
-    for (const x of this.graph!.entities) {
-      if (x.id === e.id) continue;
-      if (x.kind === 'class') {
-        for (const f of x.fields ?? []) if (f.type && mentions.test(f.type)) holders.push(link(x.id, esc(`${f.name}: ${f.type}`)));
-      } else if (x.kind === 'function' && x.parent !== e.id) {
-        const p = (x.params ?? []).find((pp) => pp.type && mentions.test(pp.type));
-        if (p) takers.push(link(x.id, esc(`${p.name ?? ''}: ${p.type}`)));
-        if (x.returns && mentions.test(x.returns)) givers.push(link(x.id, esc(`→ ${x.returns}`)));
-      }
-    }
+    // where objects of it live: members of other classes, parameters, return values (types looked up by scope)
+    this.typeIndex ??= new TypeIndex(this.graph!);
+    const use = typeUsages(this.graph!, e, this.typeIndex);
+    // one step further up: where each holder itself goes (click it to keep climbing)
+    const onward = (id: string): string => {
+      const h = this.graph!.entities.find((x) => x.id === id);
+      if (!h) return '';
+      const up = typeUsages(this.graph!, h, this.typeIndex);
+      const names = [...up.holders.map((u) => `${u.id}|${this.nameOf(u.id)}.${u.name}`), ...up.takers.map((u) => `${u.id}|${this.nameOf(u.id)}(${u.name ?? ''})`)];
+      if (!names.length) return '';
+      const shown = names.slice(0, 4).map((s) => {
+        const [i, label] = [s.slice(0, s.indexOf('|')), s.slice(s.indexOf('|') + 1)];
+        return `<a data-entity="${esc(i)}">${esc(label)}</a>`;
+      });
+      return `<div class="onward">↳ ${esc(t('goesOn', { name: h.name }))} ${shown.join(', ')}${names.length > 4 ? ` +${names.length - 4}` : ''}</div>`;
+    };
+    const holders = use.holders.map((u) => link(u.id, esc(`${u.name}: ${u.type}`)).replace(/<\/li>$/, `${onward(u.id)}</li>`));
+    const takers = use.takers.map((u) => link(u.id, esc(`${u.name ?? ''}: ${u.type}`)));
+    const givers = use.givers.map((u) => link(u.id, esc(`→ ${u.type}`)));
     const list = (title: string, items: string[]) => (items.length ? `<h3>${esc(title)} (${items.length})</h3><ul class="lst">${items.slice(0, 40).join('')}</ul>` : '');
     html += list(t('heldBy'), holders) + list(t('passedTo'), takers) + list(t('returnedBy'), givers);
     return html;
@@ -1624,6 +1628,7 @@ class App {
       this.timeline.setTime(0);
     }
     if (this.staticGraph) this.graph = tr ? augmentGraph(this.staticGraph, tr) : this.staticGraph;
+    this.typeIndex = undefined;
     this.buildToolbar();
     this.buildLegend();
     // the dock takes room from the stage: fit the circuit again
