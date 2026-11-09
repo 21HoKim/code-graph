@@ -7,6 +7,8 @@ into the version's section and its [release notes](https://github.com/21HoKim/co
 
 ## Unreleased
 
+## 0.5.8
+
 ### Added
 - Class details: under each class that holds it as a member, where that class goes on to (the classes holding it,
   the functions taking it), so a chain like `Address` → `Customer.address` → `Order.customer` can be
