@@ -41,6 +41,12 @@ describe('code snippets', () => {
     assert.equal(statementAt(cpp, 8, 'cpp')?.last, 9);
   });
 
+  it('a preprocessor line is its own statement', () => {
+    const src = '#include "net/router.h"\n\n#include <chrono>\n#define TWICE(x) \\\n  ((x) * 2)\nint a;';
+    assert.deepEqual(statementAt(src, 1, 'cpp'), { first: 1, last: 1, lines: ['#include "net/router.h"'] });
+    assert.equal(statementAt(src, 4, 'cpp')?.last, 5);
+  });
+
   it('returns of a one-line C function', () => {
     assert.deepEqual(returnStatements('static int one(void) { return 1; }', 1, 1, 'c').map((s) => s.first), [1]);
   });

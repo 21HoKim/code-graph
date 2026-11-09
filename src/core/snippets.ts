@@ -113,6 +113,12 @@ function cStart(code: string[], line: number, floor: number): number {
 
 /** C/C++: where a statement starting at `start` (0-based) ends — `;` or an opening `{` at depth 0. */
 function cEnd(code: string[], start: number, ceil: number): number {
+  // a preprocessor line ends with its line (or its `\` continuations)
+  if (code[start].trimStart().startsWith('#')) {
+    let i = start;
+    while (i < ceil && i < start + MAX_LINES - 1 && code[i].trimEnd().endsWith('\\')) i++;
+    return i;
+  }
   let d = 0;
   for (let i = start; i <= ceil && i < start + MAX_LINES; i++) {
     for (const ch of code[i]) {

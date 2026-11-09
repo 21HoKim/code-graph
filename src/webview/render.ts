@@ -161,14 +161,18 @@ export class Renderer {
     const tw = tagWidth(t.tag, measure);
     const zs = overlay?.zones.get(n.id);
     const cls = `z k-${t.kind}${t.fragment ? ' fragment' : ''}${zs?.self ? ' zs-broken' : ''}`;
-    const internalW = n.internal ? 9 * String(n.internal).length + 14 : 0;
+    const internalW = n.internal ? 7 * String(n.internal).length + 18 : 0;
     let errW = zs?.errors ? 7 * (2 + String(zs.errors).length) + 8 : 0;
     const room = (w: number) => Math.floor((b.w - tw - 50 - internalW - w) / 7);
     // narrow container: the title wins, the blocks inside carry their own error badges
     if (errW && room(errW) < 6) errW = 0;
     const title = truncate(t.label, Math.max(3, room(errW)));
-    let badge = n.internal ? `<text class="zi" x="${b.x + b.w - 30}" y="${b.y + 18.5}" text-anchor="end">↻${n.internal}</text>` : '';
-    if (errW) badge += `<text class="ze" x="${b.x + b.w - 30 - internalW}" y="${b.y + 18.5}" text-anchor="end">✕ ${zs!.errors}</text>`;
+    // ↻: calls that stay inside this block (click: list them)
+    let badge = n.internal
+      ? `<g class="zi" data-act="internal"><rect x="${b.x + b.w - 30 - internalW}" y="${b.y + 4}" width="${internalW}" height="20" rx="5"/>` +
+        `<text x="${b.x + b.w - 30 - internalW / 2}" y="${b.y + 18}" text-anchor="middle">↻${n.internal}</text></g>`
+      : '';
+    if (errW) badge += `<text class="ze" x="${b.x + b.w - 34 - internalW}" y="${b.y + 18.5}" text-anchor="end">✕ ${zs!.errors}</text>`;
     return (
       `<g class="${cls}" data-id="${esc(n.id)}">` +
       `<rect class="zb" x="${b.x}" y="${b.y}" width="${b.w}" height="${b.h}" rx="10"/>` +
@@ -177,7 +181,8 @@ export class Renderer {
       `<text class="tt" x="${b.x + 10 + tw / 2}" y="${b.y + 17.2}" text-anchor="middle">${esc(t.tag)}</text>` +
       `<text class="zt" x="${b.x + 16 + tw}" y="${b.y + 18.5}">${esc(title)}</text>` +
       badge +
-      `<text class="zx" data-act="collapse" x="${b.x + b.w - 12}" y="${b.y + 19}" text-anchor="middle">−</text>` +
+      `<g class="zx" data-act="collapse"><rect x="${b.x + b.w - 26}" y="${b.y + 3}" width="22" height="22" rx="5"/>` +
+      `<text x="${b.x + b.w - 15}" y="${b.y + 19}" text-anchor="middle">−</text></g>` +
       `</g>`
     );
   }
@@ -222,10 +227,10 @@ export class Renderer {
         : `<circle class="pin" cx="${w / 2}" cy="0" r="2.6"/><circle class="pin" cx="${w / 2}" cy="${h}" r="2.6"/>`;
     let badges = '';
     let bx = w - 6;
-    const badge = (txt: string, c: string) => {
+    const badge = (txt: string, c: string, act?: string) => {
       const bw = Math.ceil(measure(txt, '600 9px var(--cc-font)')) + 8;
       bx -= bw;
-      badges += `<g class="bd ${c}"><rect x="${bx}" y="-7" width="${bw}" height="13" rx="6.5"/><text x="${bx + bw / 2}" y="2.6" text-anchor="middle">${esc(txt)}</text></g>`;
+      badges += `<g class="bd ${c}"${act ? ` data-act="${act}"` : ''}><rect x="${bx}" y="-7" width="${bw}" height="13" rx="6.5"/><text x="${bx + bw / 2}" y="2.6" text-anchor="middle">${esc(txt)}</text></g>`;
       bx -= 3;
     };
     if (st?.state === 'broken') badge(`✕ ${st.errors}`, 'bd-err');
@@ -238,8 +243,8 @@ export class Renderer {
       strip = rb.threads.map((th, i) => `<rect class="ts" x="${6 + i * sw}" y="${h - 3.2}" width="${Math.max(1, sw - 1)}" height="2.4" rx="1.2" fill="${threadColor(th)}"/>`).join('');
     }
     if (thread) badge('⚡ thread', 'bd-thread');
-    if (t.children.length) badge(`+${n.t.children.length}`, 'bd-more');
-    if (n.internal) badge(`↻${n.internal}`, 'bd-int');
+    if (t.children.length) badge(`+${n.t.children.length}`, 'bd-more', 'expand');
+    if (n.internal) badge(`↻${n.internal}`, 'bd-int', 'internal');
     return (
       `<g class="${cls}" data-id="${esc(n.id)}" transform="translate(${b.x},${b.y})">` +
       `<rect class="nb" width="${w}" height="${h}" rx="6"/>` +

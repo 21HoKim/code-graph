@@ -108,6 +108,14 @@ export class CircuitPanel implements vscode.Disposable {
     const texts = new Map<string, string | undefined>();
     const out: (CodeSnip[] | null)[] = [];
     for (const a of asks) {
+      if (a.what === 'text') {
+        // a signature or member list put together by the view: colours only
+        const lines = (a.text ?? '').split('\n').slice(0, 60);
+        const peek: Peek = { first: 1, lines, more: false };
+        await colour(peek, a.lang === 'python' ? 'x.py' : a.lang === 'c' ? 'x.c' : 'x.cpp', this.note);
+        out.push([{ first: 1, last: lines.length, lines, html: peek.html }]);
+        continue;
+      }
       if (!texts.has(a.file)) {
         const abs = this.service.abs(a.file);
         texts.set(a.file, abs ? await sourceText(abs) : undefined);

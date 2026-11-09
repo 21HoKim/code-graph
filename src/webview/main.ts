@@ -12,6 +12,7 @@ import { setLang, t } from './i18n';
 import { runLayout, samplePath, signature, type ElkLike, type FlowDir, type LayoutResult, type LayoutStyle, type Measure } from './layout';
 import {
   ALL_KINDS,
+  CONF_RANK,
   LEVELS,
   ancestorsOf,
   availableLevels,
@@ -41,6 +42,17 @@ import { Viewport } from './viewport';
 interface CodeSlot {
   slot: string;
   ask: CodeAsk;
+}
+
+/** A function's signature as its language writes it, one parameter per line: what the panel colours. */
+function declText(e: Entity): string {
+  const ps = e.params ?? [];
+  if (e.lang === 'python') {
+    const list = ps.map((p) => `${p.name ?? ''}${p.type ? ': ' + p.type : ''}`);
+    return `def ${e.name}(${list.length ? '\n    ' + list.join(',\n    ') + ',\n' : ''})${e.returns ? ' -> ' + e.returns : ''}`;
+  }
+  const list = ps.map((p) => `${p.type ?? ''}${p.name ? ' ' + p.name : ''}`.trim());
+  return `${e.returns ? e.returns + ' ' : ''}${e.name}(${list.length ? '\n    ' + list.join(',\n    ') + '\n' : ''})`;
 }
 
 function escapeRegExp(s: string): string {
@@ -278,6 +290,8 @@ class App {
   private peekShown = '';
   /** Code the details panel asked the host for: which node it was for and which slots to fill. */
   private codeReq = 0;
+  /** The next details panel opens at its "calls inside" list (the ↻ badge was clicked). */
+  private showInternal = false;
   private codeAsked = new Map<number, { node: string; slots: { slot: string; file: string }[] }>();
   private lastHover?: PointerEvent;
   /** What the tooltip shows and where it was put: it stays there while the pointer stays on that element. */
@@ -1068,9 +1082,17 @@ class App {
         return;
       }
     }
-    if (target?.closest('[data-act=collapse]')) {
+    if (target?.closest('[data-act=collapse]') || target?.closest('[data-act=expand]')) {
       const z = target.closest('[data-id]');
       if (z) this.toggle(z.getAttribute('data-id')!);
+      return;
+    }
+    if (target?.closest('[data-act=internal]')) {
+      const z = target.closest('[data-id]');
+      if (z) {
+        this.showInternal = true;
+        this.select(z.getAttribute('data-id')!);
+      }
       return;
     }
     const el = target?.closest('[data-id]');
@@ -1300,8 +1322,9 @@ class App {
     if (!e && tn.loc) locs.push(this.locLink(tn.loc.file, tn.loc.line));
     if (locs.length) html += `<div class="row">${locs.join(' · ')}</div>`;
     if (e?.kind === 'function') {
-      const ps = (e.params ?? []).map((p) => `${p.type ?? ''}${p.name ? ' ' + p.name : ''}`.trim()).join(',\n  ');
-      html += `<h3>${esc(t('params'))} → ${esc(t('returns'))}</h3><div class="sig">${esc(`${e.name}(${ps ? '\n  ' + ps + '\n' : ''})${e.returns ? ' → ' + e.returns : ''}`)}</div>`;
+      const sig = declText(e);
+      html += `<h3>${esc(t('params'))} → ${esc(t('returns'))}</h3><div class="sig code-slot" data-slot="sig">${esc(sig)}</div>`;
+      if (host) asks.push({ slot: 'sig', ask: { file: '', line: 0, what: 'text', text: sig, lang: e.lang } });
       // every `return`, as written: what it gives back and when
       html += `<h3>${esc(t('retStatements'))}</h3>`;
       if (!e.def) html += `<div class="row q">${esc(t('noBody'))}</div>`;
@@ -1313,6 +1336,7 @@ class App {
     if (e?.kind === 'class') html += this.classSection(e, host ? asks : undefined);
     html += this.problemsSection(n);
     html += this.runtimeSection(n);
+    if (n.internal) html += this.internalSection(n, host ? asks : undefined);
     html += '<div class="row">';
     if (tn.loc) html += `<button class="btn" data-act="open">${esc(t('openSource'))}</button>`;
     html += `<button class="btn" data-act="focus">${esc(t('focus'))}</button>`;
@@ -1346,6 +1370,42 @@ class App {
     d.hidden = false;
     this.wireDetails(n.id, tn);
     if (asks.length) this.askCode(n.id, asks);
+    if (this.showInternal) d.querySelector('.internal-calls')?.scrollIntoView({ block: 'start' });
+    this.showInternal = false;
+  }
+
+  /** ↻: the calls that start and end inside this block, so they draw no wire out of it. */
+  private internalSection(n: PNode, asks?: CodeSlot[]): string {
+    const tree = this.tree!;
+    const inside = (id: string) => {
+      for (let c = id.startsWith('f:') ? tree.fileNode.get(id) : tree.entityNode.get(id); c; c = tree.nodes.get(c)?.parent ?? undefined) if (c === n.id) return true;
+      return false;
+    };
+    const kinds = new Set(this.state.kinds);
+    const minRank = CONF_RANK[this.state.minConf];
+    const rels = this.graph!.relations
+      .filter((r) => kinds.has(r.kind) && CONF_RANK[r.conf] >= minRank && inside(r.from) && inside(r.to))
+      .sort((a, b) => b.count - a.count);
+    if (!rels.length) return '';
+    const items = rels.slice(0, 60).map((r, k) => {
+      const site = r.sites?.[0];
+      let code = '';
+      if (asks && site && k < 15) {
+        const slot = 's' + asks.length;
+        asks.push({ slot, ask: { file: site.file, line: site.line, what: 'stmt' } });
+        code = `<div class="code-slot" data-slot="${slot}"></div>`;
+      }
+      return (
+        `<li class="conf-${r.conf}"><span class="dot" style="background:var(--cc-${r.kind})"></span>` +
+        `<span><a data-entity="${esc(r.from)}">${esc(this.nameOf(r.from))}</a> ${esc(KIND_ICON[r.kind])} <a data-entity="${esc(r.to)}">${esc(this.nameOf(r.to))}</a></span>` +
+        `<span class="cnt">${r.count > 1 ? '×' + r.count : ''}</span>` +
+        (site ? `<span class="args">${site.args ? esc('(' + site.args.join(', ') + ')') + ' ' : ''}${this.locLink(site.file, site.line)}</span>` : '') +
+        code +
+        `</li>`
+      );
+    });
+    const total = rels.reduce((s, r) => s + r.count, 0);
+    return `<h3 class="internal-calls">↻ ${esc(t('internalCalls'))} (${total})</h3><div class="row q">${esc(t('internalHint'))}</div><ul class="lst">${items.join('')}</ul>`;
   }
 
   /** Class: its members, family, where its objects are made, and where they live. */
@@ -1353,7 +1413,9 @@ class App {
     const rels = this.graph!.relations;
     let html = '';
     if (e.fields?.length) {
-      html += `<h3>${esc(t('members'))} (${e.fields.length})</h3><div class="sig">${esc(e.fields.map((f) => `${f.type ?? ''} ${f.name ?? ''}`.trim()).join('\n'))}</div>`;
+      const text = e.fields.map((f) => (e.lang === 'python' ? `${f.name}${f.type ? ': ' + f.type : ''}` : `${f.type ?? ''} ${f.name ?? ''};`.trim())).join('\n');
+      html += `<h3>${esc(t('members'))} (${e.fields.length})</h3><div class="sig code-slot" data-slot="mem">${esc(text)}</div>`;
+      asks?.push({ slot: 'mem', ask: { file: '', line: 0, what: 'text', text, lang: e.lang } });
     }
     const link = (id: string, extra = '') =>
       `<li><span class="dot" style="background:var(--cc-inherit)"></span><a data-entity="${esc(id)}">${esc(this.nameOf(id))}</a>${extra ? `<span class="args">${extra}</span>` : ''}</li>`;
@@ -1399,6 +1461,11 @@ class App {
       const el = this.details.querySelector<HTMLElement>(`.code-slot[data-slot="${slot}"]`);
       if (!el) return;
       const snips = items[i];
+      if (slot === 'sig' || slot === 'mem') {
+        // coloured in place, no line numbers
+        if (snips?.[0]?.html) el.innerHTML = snips[0].html.map((h, k) => h || esc(snips[0].lines[k])).join('\n');
+        return;
+      }
       if (!snips) el.innerHTML = '';
       else if (!snips.length) el.innerHTML = slot === 'ret' ? `<div class="row q">${esc(t('noReturn'))}</div>` : '';
       else el.innerHTML = snips.map((s) => this.snipHtml(file, s)).join('');
@@ -2138,7 +2205,10 @@ class App {
   private onHover(ev: PointerEvent): void {
     if (ev.buttons) return;
     this.lastHover = ev;
-    const el = (ev.target as Element)?.closest?.('[data-id]');
+    const target = ev.target as Element;
+    // buttons and badges explain themselves; an open block's body is background
+    const quiet = !!target?.closest?.('[data-act]') || target?.classList?.contains('zb');
+    const el = quiet ? null : target?.closest?.('[data-id]');
     if (!el || !this.proj) {
       this.tooltip.hidden = true;
       this.wantPeek(null);

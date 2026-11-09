@@ -41,6 +41,7 @@ const en = {
   peekOpen: '{key}+click or F12: open the source', peekSite: '{key}+click or F12: go to the call',
   retStatements: 'Where it returns', noReturn: 'No return statement: it runs to the end and comes back',
   noBody: 'No body in this workspace (declared only)', members: 'Members', bases: 'Inherits from', derived: 'Inherited by',
+  internalCalls: 'Calls inside this block', internalHint: 'Both ends are inside, so they draw no wire out of the block.',
   createdAt: 'Objects created at', heldBy: 'Held as a member by', passedTo: 'Taken as a parameter by', returnedBy: 'Returned by',
 };
 export type Strings = typeof en;
@@ -88,6 +89,7 @@ const ko: Strings = {
   peekOpen: '{key}+클릭 또는 F12: 소스 열기', peekSite: '{key}+클릭 또는 F12: 호출한 줄로 이동',
   retStatements: '반환하는 곳', noReturn: 'return 문 없음: 끝까지 실행하고 돌아감',
   noBody: '이 작업 영역에 본문 없음 (선언만 있음)', members: '멤버 변수', bases: '상속받은 클래스 (부모)', derived: '이 클래스를 상속한 클래스 (자식)',
+  internalCalls: '이 블록 안에서 일어나는 호출', internalHint: '양쪽 끝이 모두 이 블록 안에 있어서 바깥으로 전선이 나가지 않는 호출이에요.',
   createdAt: '객체를 만드는 곳', heldBy: '멤버로 가진 클래스', passedTo: '매개변수로 받는 함수', returnedBy: '반환하는 함수',
 };
 

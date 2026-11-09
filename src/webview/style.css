@@ -167,9 +167,15 @@ button, input { font: inherit; color: inherit; }
 .z .zb { fill: color-mix(in srgb, var(--k) 5%, transparent); stroke: color-mix(in srgb, var(--k) 36%, transparent); stroke-width: 1.2; }
 .z .zh { fill: color-mix(in srgb, var(--k) 13%, transparent); }
 .z .zt { fill: var(--cc-fg); font: 600 12px var(--cc-font); }
-.z .zi { fill: var(--cc-muted); font: 10px var(--cc-mono); }
-.z .zx { fill: var(--cc-muted); font: 700 15px var(--cc-font); cursor: pointer; }
-.z .zx:hover { fill: var(--cc-fg); }
+/* header controls: square hit areas with a light shade, stronger on hover */
+.z .zx, .z .zi { cursor: pointer; }
+.z .zx rect, .z .zi rect { fill: color-mix(in srgb, var(--cc-fg) 7%, transparent); }
+.z .zx:hover rect, .z .zi:hover rect { fill: color-mix(in srgb, var(--cc-fg) 18%, transparent); }
+.z .zx text { fill: var(--cc-muted); font: 700 15px var(--cc-font); pointer-events: none; }
+.z .zi text { fill: var(--cc-muted); font: 10px var(--cc-mono); pointer-events: none; }
+.z .zx:hover text, .z .zi:hover text { fill: var(--cc-fg); }
+.bd[data-act] { cursor: pointer; }
+.bd[data-act]:hover rect { stroke: var(--cc-fg); }
 .z.fragment .zb { stroke-dasharray: 5 4; }
 .z:hover .zb { stroke: color-mix(in srgb, var(--k) 65%, transparent); }
 .k-dir { --k: var(--cc-dir); }

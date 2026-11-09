@@ -46,6 +46,8 @@ Compose v2 for containers.
   implements. What the header declares stays at the header level — that is what callers see and where their wires
   arrive — and what only the source has (static helpers, an anonymous namespace) sits inside the source block. A
   source with nothing of its own is not drawn. Turn off with `codeGraph.headerWrapsSource`.
+- **Block badges**: `↻N` counts calls that start and end inside the block, so they draw no wire out of it — click
+  it to list them with their code. `+N` is how many items a closed block holds — click it to open the block.
 - **Details panel**: a function shows every parameter and its return type in full, each `return` statement, and the
   whole statement of each call in and out (in your colour theme; click to open). A class shows its members, base
   and derived classes, where its objects are created, and where they live: members of other classes, parameters,

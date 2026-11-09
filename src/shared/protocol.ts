@@ -30,7 +30,10 @@ export interface CodeAsk {
   file: string;
   line: number;
   endLine?: number;
-  what: 'stmt' | 'returns';
+  /** stmt: the statement at `line` · returns: every return of the function · text: colour `text` as `lang` */
+  what: 'stmt' | 'returns' | 'text';
+  text?: string;
+  lang?: 'c' | 'cpp' | 'python';
 }
 
 /** A few lines of code, dedented; `html`: the same lines with the editor theme's syntax colours (escaped). */
