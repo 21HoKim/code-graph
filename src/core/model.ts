@@ -58,8 +58,10 @@ export interface Entity {
   def?: Loc;
   params?: Param[];
   returns?: string;
-  /** Classes: data members (name and type as written, normalized). */
+  /** Classes: data members, typed as written (Python attributes may have no type). */
   fields?: Param[];
+  /** Classes: other names of the same type (C typedef names). */
+  aliases?: string[];
   /** static, virtual, override, async, template, threadEntry, abstract, property ... */
   flags?: string[];
 }
@@ -180,6 +182,10 @@ export interface RawEntity {
   bases?: string[];
   /** Member name -> type name, used to infer receivers of member calls. */
   fields?: Record<string, string>;
+  /** Data members for display, in declaration order, typed as written (`int*`, `char[16]`; Python: maybe untyped). */
+  members?: Param[];
+  /** Other names of the type: C `typedef struct ringbuf {…} ringbuf_t;` → ['ringbuf_t']. */
+  aliases?: string[];
 }
 
 export type CallForm = 'plain' | 'qualified' | 'member' | 'super' | 'new';

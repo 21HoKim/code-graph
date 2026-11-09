@@ -301,6 +301,11 @@ class CppExtractor {
         const name = declName(d);
         const owner = scope.classKey ? this.byKey.get(scope.classKey) : undefined;
         if (name && type && owner) {
+          // as written, for display: the declarator's `*`, `&`, `[N]` belong to the type
+          const dt = d.text;
+          const at = dt.lastIndexOf(name);
+          const decor = at >= 0 ? (dt.slice(0, at) + dt.slice(at + name.length)).replace(/\s+/g, '') : '';
+          (owner.members ??= []).push({ name, type: clip(type.text + decor, 160) });
           owner.fields ??= {};
           owner.fields[name] = normCppType(type.text);
           const elem = elemCppType(type.text);
@@ -348,6 +353,8 @@ class CppExtractor {
       isDefinition: true,
       bases: bases.length ? bases : undefined,
       flags: flags?.length ? [...flags] : undefined,
+      // `typedef struct ringbuf {…} ringbuf_t;`: code names the type either way
+      aliases: alias && nameNode && alias !== name ? [alias] : undefined,
     };
     this.entities.push(ent);
     this.byKey.set(key, ent);

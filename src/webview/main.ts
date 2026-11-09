@@ -1425,7 +1425,7 @@ class App {
     if (derived.length) html += `<h3>${esc(t('derived'))} (${derived.length})</h3><ul class="lst">${derived.map((r) => link(r.from)).join('')}</ul>`;
     html += this.relList(t('createdAt'), rels.filter((r) => r.kind === 'instantiate' && r.to === e.id), 'from', asks);
     // where objects of it live: members of other classes, parameters, return values
-    const names = [...new Set([e.qname, e.name])].map(escapeRegExp).join('|');
+    const names = [...new Set([e.qname, e.name, ...(e.aliases ?? [])])].map(escapeRegExp).join('|');
     const mentions = new RegExp(`(^|[^\\w:.])(${names})(?!\\w)`);
     const holders: string[] = [];
     const takers: string[] = [];

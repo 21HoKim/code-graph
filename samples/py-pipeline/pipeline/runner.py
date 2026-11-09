@@ -30,15 +30,23 @@ class Runner:
             t = threading.Thread(target=self._pump, args=(src,), name=f"pump-{src.name}", daemon=True)
             t.start()
             self._threads.append(t)
-        threading.Thread(target=self._dispatch, name="dispatch", daemon=True).start()
+        d = threading.Thread(target=self._dispatch, name="dispatch", daemon=True)
+        d.start()
+        self._threads.append(d)
 
     def _pump(self, src: Source) -> None:
         while not self._stop.is_set():
-            self.inbox.put(src.read())
+            try:
+                self.inbox.put(src.read(), timeout=0.1)
+            except queue.Full:
+                continue
 
     def _dispatch(self) -> None:
         while not self._stop.is_set():
-            frame = self.inbox.get()
+            try:
+                frame = self.inbox.get(timeout=0.1)
+            except queue.Empty:
+                continue
             fut = self.pool.submit(process_frame, frame)
             fut.add_done_callback(self._collect)
 
@@ -49,6 +57,10 @@ class Runner:
             self.sink.emit({"spikes": spikes})
 
     def stop(self) -> dict:
+        # let every thread see the stop and finish before the pool goes: nothing may still be
+        # running (or printing) while the interpreter shuts down
         self._stop.set()
-        self.pool.shutdown(wait=False)
+        for t in self._threads:
+            t.join(timeout=2.0)
+        self.pool.shutdown(wait=True)
         return self.aggregator.summary()

@@ -441,10 +441,9 @@ class Linker {
         push(this.ccClassByQname, q, e);
         push(this.ccClassesByName, r.name, e);
         this.classRaw.set(e.id, { raw: r, facts: f });
-        if (r.fields) {
-          this.fieldsOf.set(e.id, r.fields);
-          e.fields = memberList(r.fields);
-        }
+        if (r.fields) this.fieldsOf.set(e.id, r.fields);
+        e.fields = r.members?.length ? r.members : r.fields ? memberList(r.fields) : undefined;
+        if (r.aliases?.length) e.aliases = r.aliases;
       });
     }
 
@@ -827,10 +826,9 @@ class Linker {
         if (e.kind === 'class') {
           push(this.pyClassesByName, e.name, e);
           this.classRaw.set(e.id, { raw: r, facts: f });
-          if (r.fields) {
-          this.fieldsOf.set(e.id, r.fields);
-          e.fields = memberList(r.fields);
-        }
+          if (r.fields) this.fieldsOf.set(e.id, r.fields);
+        e.fields = r.members?.length ? r.members : r.fields ? memberList(r.fields) : undefined;
+        if (r.aliases?.length) e.aliases = r.aliases;
         } else if (e.kind === 'function') {
           push(this.pyFnsByName, e.name, e);
           if (this.parentOf(e)?.kind === 'class') push(this.pyMethodsByName, e.name, e);

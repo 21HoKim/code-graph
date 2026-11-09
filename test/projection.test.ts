@@ -104,6 +104,21 @@ describe('view tree', () => {
     assert.ok(table.fields?.some((f) => f.name === 'routes_' && /vector<.*Route>/.test(f.type ?? '')), JSON.stringify(table.fields));
   });
 
+  it('C: members typed as written, and the typedef name as an alias', () => {
+    const rb = c.entities.find((e) => e.kind === 'class' && e.name === 'ringbuf')!;
+    assert.deepEqual(rb.aliases, ['ringbuf_t']);
+    assert.ok(rb.fields?.some((f) => f.name === 'data' && f.type === 'int*'), JSON.stringify(rb.fields));
+    assert.equal(rb.fields?.filter((f) => f.type === 'size_t').length, 4, 'size_t cap, head, tail, count');
+  });
+
+  it('Python: every self attribute is a member, typed when the value tells', () => {
+    const runner = py.entities.find((e) => e.qname === 'pipeline.runner.Runner')!;
+    const names = runner.fields?.map((f) => f.name);
+    assert.deepEqual(names?.slice(0, 3), ['sources', 'inbox', 'aggregator']);
+    assert.equal(runner.fields?.find((f) => f.name === 'sources')?.type, undefined);
+    assert.equal(runner.fields?.find((f) => f.name === 'aggregator')?.type, 'Aggregator');
+  });
+
   it('merges a class across files in symbols mode', () => {
     const t = buildTree(g, 'symbols');
     const router = t.nodes.get('e:cc:net::Router')!;

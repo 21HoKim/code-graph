@@ -290,7 +290,10 @@ class PyExtractor {
         if (a?.type === 'assignment') {
           const left = a.childForFieldName('left');
           const t = a.childForFieldName('type');
-          if (left?.type === 'identifier' && t) ent.fields![left.text] = t.text.replace(/^["']|["']$/g, '');
+          if (left?.type === 'identifier' && t) {
+            ent.fields![left.text] = t.text.replace(/^["']|["']$/g, '');
+            addMember(ent, left.text, ent.fields![left.text]);
+          }
         }
       }
       this.visit(c, inner, outer, depth + 1);
@@ -343,7 +346,14 @@ class PyExtractor {
     const right = n.childForFieldName('right');
     const annot = n.childForFieldName('type');
     const t = annot ? annot.text.replace(/^["']|["']$/g, '') : constructedType(right);
-    if (!left || !t) return;
+    if (!left) return;
+    // every `self.x = …` is a member, typed when the value tells
+    if (left.type === 'attribute' && f.selfClass) {
+      const obj = left.childForFieldName('object');
+      const attr = left.childForFieldName('attribute');
+      if (obj?.text === 'self' && attr) addMember(f.selfClass, attr.text, t);
+    }
+    if (!t) return;
     if (left.type === 'identifier') f.locals.set(left.text, t);
     else if (left.type === 'attribute' && f.selfClass) {
       const obj = left.childForFieldName('object');
@@ -464,4 +474,12 @@ class PyExtractor {
       });
     }
   }
+}
+
+/** A data member for display: first sighting fixes its place, a later one may add the type. */
+function addMember(cls: RawEntity, name: string, type?: string): void {
+  const list = (cls.members ??= []);
+  const had = list.find((m) => m.name === name);
+  if (!had) list.push({ name, type: type || undefined });
+  else if (!had.type && type) had.type = type;
 }
