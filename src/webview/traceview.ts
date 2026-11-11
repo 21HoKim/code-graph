@@ -146,7 +146,8 @@ function upper(n: number, pred: (k: number) => boolean): number {
 
 /**
  * Calls the program made that the static analysis did not see (virtual dispatch, callbacks,
- * function pointers, dynamic Python): added as relations so they get wires of their own.
+ * function pointers, dynamic Python), and threads it started that way: added as relations so they get wires of
+ * their own.
  */
 export function augmentGraph(g: CodeGraph, tr: RunTrace): CodeGraph {
   const kindOf = new Map(g.entities.map((e) => [e.id, e.kind]));
@@ -163,6 +164,19 @@ export function augmentGraph(g: CodeGraph, tr: RunTrace): CodeGraph {
     const r = extra.get(key);
     if (r) r.count += n;
     else extra.set(key, { id: `rt:${extra.size}`, kind: 'call', from, to, conf: 'exact', count: n, via: 'runtime' });
+  }
+  // a thread the tracer saw being started: from the function that started it to the one it runs
+  for (const th of tr.threads) {
+    if (th.by === undefined || th.entry === undefined) continue;
+    const from = tr.fns[th.by]?.id;
+    const to = tr.fns[th.entry]?.id;
+    if (!from || !to || from === to || kindOf.get(to) !== 'function') continue;
+    const key = from + '\u0001' + to;
+    if (known.has(key)) continue;
+    const k = 's' + key;
+    const r = extra.get(k);
+    if (r) r.count++;
+    else extra.set(k, { id: `rt:${extra.size}`, kind: 'spawn', from, to, conf: 'exact', count: 1, via: 'runtime' });
   }
   if (!extra.size) return g;
   return { ...g, relations: [...g.relations, ...extra.values()] };
@@ -215,7 +229,7 @@ export class RuntimeMap {
     // thread starts travel on spawn wires
     for (const th of tr.threads) {
       if (th.parent === undefined || th.entry === undefined) continue;
-      const id = this.spawnEdge(th.parent, th.entry, th.start);
+      const id = (th.by !== undefined ? this.edgeOf(th.by, th.entry) : undefined) ?? this.spawnEdge(th.parent, th.entry, th.start);
       if (!id) continue;
       const w = wires.get(id) ?? wires.set(id, { n: 0, threads: new Set() }).get(id)!;
       w.n++;

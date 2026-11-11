@@ -5,7 +5,8 @@
  *
  *   {"k":"h", schema, lang, clock:"ns", pid, root?}       header
  *   {"k":"f", id, file, line, name, q}                     function table (Python; C/C++ ids come from the instrumenter)
- *   {"k":"t", id, name, parent?, t}                        thread first seen
+ *   {"k":"t", id, name, parent?, by?, t}                   thread first seen; parent: the thread that started it,
+ *                                                          by: the function (fid) that thread was in
  *   ["c", t, th, fid, args]              Python call       args: [[name, kind, repr, id?, size?], …]
  *   ["c", t, th, fid, self, args]        C/C++ call        self: "0x…" (this) or null
  *   ["r", t, th, fid, value?]            return            value: [kind, repr, id?, size?]
@@ -40,6 +41,8 @@ export interface TraceThread {
   id: number;
   name: string;
   parent?: number;
+  /** Function the parent thread was in when it started this one (index into fns), when the runtime saw it. */
+  by?: number;
   /** Function the thread started in (index into fns). */
   entry?: number;
   start: number;
@@ -226,6 +229,8 @@ export function parseTrace(text: string, g: CodeGraph, opts: ParseTraceOptions =
   let header: Record<string, unknown> = {};
   const locator = new EntityLocator(g);
   const pyFn = new Map<number, number>();
+  /** thread id → fid of the function that started it, as written (mapped once the function table is complete) */
+  const startedBy = new Map<number, number>();
 
   for (const l of lines) {
     if (Array.isArray(l)) {
@@ -249,6 +254,7 @@ export function parseTrace(text: string, g: CodeGraph, opts: ParseTraceOptions =
       case 't': {
         const id = Number(l.id);
         threads.set(id, { id, name: String(l.name ?? `thread-${id}`), parent: typeof l.parent === 'number' ? l.parent : undefined, start: Number(l.t ?? 0) });
+        if (typeof l.by === 'number') startedBy.set(id, l.by);
         break;
       }
       case 'exc':
@@ -288,6 +294,11 @@ export function parseTrace(text: string, g: CodeGraph, opts: ParseTraceOptions =
     if (lang === 'python') return pyFn.get(n) ?? -1;
     return n >= 0 && n < fns.length ? n : -1;
   };
+  for (const [id, fid] of startedBy) {
+    const th = threads.get(id);
+    const f = F(fid);
+    if (th && f >= 0) th.by = f;
+  }
 
   // events → spans (per-thread stacks); per-thread buffers arrive out of order
   events.sort((a, b) => Number(a[1]) - Number(b[1]));
@@ -517,6 +528,7 @@ export function mergeTraces(input: { name: string; trace: RunTrace }[], g: CodeG
         id: thMap[pi].get(th.id)!,
         name: parts.length > 1 ? `${p.name} · ${th.name}` : th.name,
         parent: th.parent !== undefined ? thMap[pi].get(th.parent) : undefined,
+        by: th.by !== undefined ? F(pi, th.by) : undefined,
         entry: th.entry !== undefined ? F(pi, th.entry) : undefined,
         start: th.start + offset[pi],
         end: th.end !== undefined ? th.end + offset[pi] : undefined,
@@ -689,8 +701,9 @@ function nameThreads(threads: Map<number, TraceThread>, fns: TraceFn[]): void {
 }
 
 /**
- * C/C++ tracers do not see thread creation: a thread's parent is the thread that was running the
- * function that statically spawns the new thread's entry (e.g. Router::start → rxLoop) when it started.
+ * For threads whose start the tracer did not see (C/C++ programs linked statically, older traces): the parent is
+ * the thread that was running the function that statically spawns the new thread's entry (e.g. Router::start →
+ * rxLoop) when it started.
  */
 function inferParents(threads: Map<number, TraceThread>, spans: Spans, fns: TraceFn[], g: CodeGraph): void {
   const spawners = new Map<string, string[]>();

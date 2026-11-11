@@ -224,6 +224,7 @@ class Tracer:
                 cur = thread or threading._active.get(ident) or threading.current_thread()
                 self.names[t] = cur.name
                 self.write({"k": "t", "id": t, "name": cur.name, "parent": getattr(cur, "_cc_parent", None),
+                            "by": getattr(cur, "_cc_by", None),
                             "t": _now() - _T0, "daemon": bool(getattr(cur, "daemon", False))})
         return t
 
@@ -414,6 +415,12 @@ class Tracer:
         def start(thread, *a, **k):
             try:
                 thread._cc_parent = tracer.th()
+                # the workspace function that called start() (through a Thread subclass's own start, too)
+                f, by = sys._getframe(1), None
+                while f is not None and by is None:
+                    by = tracer.fid(f.f_code)
+                    f = f.f_back
+                thread._cc_by = by
                 target = getattr(thread, "_target", None)
                 code = getattr(target, "__code__", None)
                 tracer.write(["s", _now() - _T0, thread._cc_parent, tracer.fid(code) if code is not None else None, thread.name])

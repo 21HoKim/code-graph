@@ -239,7 +239,7 @@ errors such as a `SyntaxError` attach to the file), then computes:
 
 ```jsonc
 {"k":"h","schema":"code-graph-trace/1","lang":"cpp","clock":"ns","pid":4242,"mono":…,"wall":…,"exe":"node-b"}
-{"k":"t","id":2,"t":120934,"name":"thread-2"}                         // thread first seen
+{"k":"t","id":2,"t":120934,"parent":1,"by":4,"name":"thread-2"}      // thread first seen: started by thread 1 in fid 4
 ["c",121003,2,7,"0x7ffd…",[["pkt","o","0x7ffd…","0x7ffd…"]]]       // call: t, thread, fid, this, args
 ["r",121550,2,7]                                                      // return (Python: + value)
 ["x",130002,3,9,"SIGSEGV","segmentation fault …",0]                  // exception / crash in fid
@@ -254,7 +254,8 @@ tracking possible.
 **Python** (`runtime/python/cg_tracer.py`, stdlib only): runs the script with `runpy`, registers
 `sys.monitoring` callbacks for `PY_START/RESUME/RETURN/YIELD/UNWIND/THROW` (3.12+; `sys.setprofile` before).
 Code outside the workspace returns `DISABLE` on its first event, so libraries cost almost nothing afterwards.
-`threading.Thread.start` / `_bootstrap_inner` are wrapped to learn thread names and parents, `threading.excepthook`
+`threading.Thread.start` / `_bootstrap_inner` are wrapped to learn thread names, parents and the workspace function
+that called `start()`, `threading.excepthook`
 to record uncaught errors in threads. Function ids map to entities by file + definition line, then qualname, then
 the enclosing function (generator expressions, lambdas).
 
@@ -270,7 +271,13 @@ functions, coroutines and function-try-blocks are skipped. `cg_trace.h` is force
 `#include` is added. `cgt::arg` classifies a value with templates: numbers and strings by value, containers by
 size, references, pointers and `this` by address. The runtime (`cg_trace.c`) keeps a buffer and a shadow stack
 per thread, appends whole lines to the trace under one mutex (a full buffer keeps the line being written), and on
-`SIGSEGV`/`SIGABRT`/… writes every thread's stack before re-raising; `cg_trace_cxx.cpp` records the type and `what()` of an uncaught exception.
+`SIGSEGV`/`SIGABRT`/… writes every thread's stack before re-raising; `cg_trace_cxx.cpp` records the type and `what()`
+of an uncaught exception. The runtime defines `pthread_create` (weak, exported with `--dynamic-list`, the real one
+found with `dlsym(RTLD_NEXT)`, so the link gets `-ldl` on Linux): the program's own calls and those of the libraries
+it loads — `std::thread` and `std::async` in libstdc++ — start the thread through a trampoline that notes the
+starting thread and the function on top of its shadow stack, which go into the new thread's record. Without
+`CODE_GRAPH_TRACE` it passes straight through. Static programs cannot look up the real function, so their runtime
+is built with `-DCGT_NO_INTERPOSE` and keeps the inferred parents below.
 
 **Building it like the project does** (`buildinfo.ts`): a makefile is dry-run with `make -nBwk` (every command of
 the default goal, with "Entering directory" lines); CMake gives `compile_commands.json` plus
@@ -355,12 +362,15 @@ out (its threads, spans, values, exceptions, call counts from its edges; the mer
 time axis) for a view per container; those views relay play, pause, seek and speed through the host, so they replay
 together.
 
-**Model** (`RunTrace`): calls become spans per thread (`t`, `end`, `parent`, `depth`) as parallel arrays; thread
-parents for C/C++ are inferred from the static spawn relation running in another thread when the thread started;
+**Model** (`RunTrace`): calls become spans per thread (`t`, `end`, `parent`, `depth`) as parallel arrays; a thread's
+`parent` and `by` (the function that started it) come from its record; when the runtime did not see the start
+(static C/C++ programs, older traces) the parent is inferred from the static spawn relation running in another thread
+when the thread started;
 unnamed threads are named after their entry function (`rxLoop`, `txLoop #2`); objects seen by several functions or
 threads are labelled with what the graph knows (the class of `this`, the declared parameter type).
 
-**Viewer**: `augmentGraph` adds relations for calls only the run revealed (`via: 'runtime'`), `RuntimeMap` lifts
+**Viewer**: `augmentGraph` adds relations for calls and thread starts only the run revealed (`via: 'runtime'`: a
+callback, a thread started through a function pointer), `RuntimeMap` lifts
 call counts and threads onto the visible blocks and wires, `TraceModel` answers time queries (calls started /
 ended in a window, the active stack of every thread at *t*, every sighting of an object) with binary searches.
 Replay advances program time at `duration / 15 s × speed` per frame and fires `FlowLayer.pulse` along the

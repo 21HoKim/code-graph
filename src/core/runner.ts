@@ -389,9 +389,22 @@ async function buildNative(o: RunInput): Promise<NativeBuild> {
   const cc = tc.cc ?? tc.cxx;
   if (!cc) return { fns: inst.fns, diagnostics, notes: [...notes, 'no C compiler found for the tracer runtime'], log };
   const rtC = path.join(objDir, 'cg_trace.o');
+  const userLinkFlags = [...(target?.linkFlags ?? []), ...o.linkFlags];
+  // a static program has no dynamic loader to find the real pthread_create with: no thread-start trampoline
+  const isStatic = userLinkFlags.some((f) => f === '-static' || f === '-static-pie');
   let r = await run(
     cc,
-    [...(cc === tc.cxx && !tc.cc ? ['-x', 'c'] : []), '-O2', '-c', path.join(rt, 'cg_trace.c'), '-o', rtC, `-DCGT_NFN=${Math.max(1, inst.fns.length)}`, ...(anyCpp ? ['-DCGT_LANG_CPP'] : [])],
+    [
+      ...(cc === tc.cxx && !tc.cc ? ['-x', 'c'] : []),
+      '-O2',
+      '-c',
+      path.join(rt, 'cg_trace.c'),
+      '-o',
+      rtC,
+      `-DCGT_NFN=${Math.max(1, inst.fns.length)}`,
+      ...(anyCpp ? ['-DCGT_LANG_CPP'] : []),
+      ...(isStatic ? ['-DCGT_NO_INTERPOSE'] : []),
+    ],
     { cwd: o.workDir, timeoutMs: 120_000, signal: o.signal },
   );
   if (r.code !== 0) return { fns: inst.fns, diagnostics, notes: [...notes, `tracer runtime did not compile: ${r.stderr.split('\n')[0]}`], log: log + r.stderr };
@@ -408,7 +421,9 @@ async function buildNative(o: RunInput): Promise<NativeBuild> {
   if (!linker) return { fns: inst.fns, diagnostics, notes: [...notes, 'no linker'], log };
   const stem = (target?.name ?? path.basename(o.entry.file).replace(/\.[^.]+$/, '')).replace(/[^\w.-]/g, '_') || 'program';
   const exe = path.join(o.workDir, process.platform === 'win32' ? `${stem}.exe` : stem);
-  const baseFlags = [...(process.platform === 'win32' ? [] : ['-pthread']), ...(target?.linkFlags ?? []), ...o.linkFlags];
+  // -ldl: dlsym for the runtime's pthread_create (part of libc since glibc 2.34, libdl before)
+  const rtFlags = process.platform === 'win32' ? [] : process.platform === 'linux' && !isStatic ? ['-pthread', '-ldl'] : ['-pthread'];
+  const baseFlags = [...rtFlags, ...userLinkFlags];
   let guessed: string[] = [];
   let guesses: LibraryGuess[] = [];
   const notInstalled = new Set<string>();

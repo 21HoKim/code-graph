@@ -69,7 +69,9 @@ if [ $link = 0 ] || [ $shared = 1 ]; then exec "$real" -include "$CG/rt/cg_trace
 case "$self" in *++*) cxx=1 ;; *) cxx=0 ;; esac
 rt=/tmp/codegraph-rt-${tag}; mkdir -p "$rt" 2>/dev/null && [ -w "$rt" ] || rt=$(mktemp -d)
 cc=$(find_real gcc || find_real cc || find_real clang) || cc=
-if [ $cxx = 1 ]; then rtc="$rt/cg_trace_cpp.o"; lang=-DCGT_LANG_CPP; else rtc="$rt/cg_trace_c.o"; lang=; fi
+if [ $cxx = 1 ]; then rtc="$rt/cg_trace_cpp"; lang=-DCGT_LANG_CPP; else rtc="$rt/cg_trace_c"; lang=; fi
+# a static program has no dynamic loader to find the real pthread_create with: no thread-start trampoline
+if [ $static = 1 ]; then rtc="$rtc-static.o"; lang="$lang -DCGT_NO_INTERPOSE"; else rtc="$rtc.o"; fi
 if [ ! -f "$rtc" ]; then
   if [ -n "$cc" ]; then "$cc" -O2 -c "$CG/rt/cg_trace.c" -o "$rtc.$$" -DCGT_NFN=${n} $lang
   else "$real" -x c -O2 -c "$CG/rt/cg_trace.c" -o "$rtc.$$" -DCGT_NFN=${n} $lang; fi && mv -f "$rtc.$$" "$rtc"
@@ -82,7 +84,7 @@ if [ $cxx = 1 ]; then
   objs="$objs $rt/cg_trace_cxx.o"
 fi
 # shared libraries built with probes find the runtime in the program
-dyn=; [ $static = 0 ] && dyn="-Wl,--dynamic-list=$CG/rt/cgt.dynlist"
+dyn=; [ $static = 0 ] && dyn="-Wl,--dynamic-list=$CG/rt/cgt.dynlist -ldl"
 # an -rpath as RPATH, not RUNPATH: libraries found there load theirs from there too (Boost.JSON → Boost.Container)
 [ $rpath = 1 ] && [ "$(uname -s 2>/dev/null)" = Linux ] && dyn="$dyn -Wl,--disable-new-dtags"
 exec "$real" -include "$CG/rt/cg_trace.h" "$@" $objs -pthread $dyn
@@ -221,7 +223,8 @@ export function writeCodegraphDir(dir: string, runtimeDir: string, nfn: number, 
   fs.copyFileSync(path.join(runtimeDir, 'python', 'cg_tracer.py'), path.join(rt, 'cg_tracer.py'));
   fs.mkdirSync(path.join(rt, 'py'), { recursive: true });
   fs.copyFileSync(path.join(runtimeDir, 'python', 'sitecustomize.py'), path.join(rt, 'py', 'sitecustomize.py'));
-  fs.writeFileSync(path.join(rt, 'cgt.dynlist'), '{ cgt_*; };\n');
+  // pthread_create too: libraries the program loads start their threads through the runtime's
+  fs.writeFileSync(path.join(rt, 'cgt.dynlist'), '{ cgt_*; pthread_create; };\n');
   const hash = crypto.createHash('sha1');
   for (const f of ['cg_trace.h', 'cg_trace.c', 'cg_trace_cxx.cpp']) hash.update(fs.readFileSync(path.join(rt, f)));
   const scripts: [string, string][] = [

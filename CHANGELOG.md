@@ -19,6 +19,10 @@ into the version's section and its [release notes](https://github.com/21HoKim/co
   `Router r(cfg);` counts as creating a `Router`.
 - Python: thread and task APIs imported under another name are found (`from threading import Thread as T`,
   `from asyncio import create_task as spawn`).
+- Run & Trace (C/C++): each thread's parent and the function that started it now come from the run itself
+  (`pthread_create`, `std::thread`, `std::async`), not from a guess, so a thread's lane branches off the right thread
+  and its ⚡ wire shows up even when the analysis cannot tell which function a thread runs (a function pointer). Python
+  threads say which function started them too. Statically linked programs keep the guess.
 - Run & Trace (C/C++): busy threads no longer lose trace lines when their buffer filled up in the middle of a call.
 
 ## 0.5.11

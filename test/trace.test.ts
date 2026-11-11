@@ -274,6 +274,74 @@ describe('Run & Trace (C producer/consumer)', { skip: !native }, () => {
     assert.deepEqual(tr.threads.map((t) => t.name).sort(), ['consumer', 'main', 'producer']);
     const rb = tr.objects.find((o) => o.label.includes('ringbuf'));
     assert.ok(rb && rb.threads.length === 3);
+    for (const th of tr.threads.filter((t) => t.name !== 'main')) {
+      assert.equal(th.parent, 1, `${th.name}: started by main (seen by the runtime)`);
+      assert.equal(tr.fns[th.by!]?.name, 'main');
+    }
+  });
+});
+
+describe('Run & Trace (who started each thread)', { skip: !native }, () => {
+  it('C++: every thread knows its parent and the function that started it, also through a pointer', async () => {
+    const dir = tmp('spawn');
+    fs.writeFileSync(
+      path.join(dir, 'main.cpp'),
+      [
+        '#include <thread>',
+        '#include <pthread.h>',
+        'using namespace std;',
+        'struct Server {',
+        '  void init() { thread(&Server::heartbeat, this).detach(); thread t(&Server::acceptLoop, this); t.join(); }',
+        '  void acceptLoop() { thread h(&Server::handle, this, 1); h.join(); }',
+        '  void heartbeat() {}',
+        '  void handle(int s) {}',
+        '};',
+        'void hidden() {}',
+        'void (*pick())();',
+        'void viaPointer() { void (*fp)() = pick(); std::thread t(fp); t.join(); }',
+        'void (*pick())() { return &hidden; }',
+        'void* cworker(void*) { return nullptr; }',
+        'int main() {',
+        '  Server s;',
+        '  s.init();',
+        '  viaPointer();',
+        '  pthread_t p;',
+        '  pthread_create(&p, nullptr, cworker, nullptr);',
+        '  pthread_join(p, nullptr);',
+        '  this_thread::sleep_for(chrono::milliseconds(50));',
+        '}',
+      ].join('\n'),
+    );
+    const { r, g } = await trace(dir);
+    assert.ok(r.ok, r.notes.join('\n'));
+    const tr = r.trace!;
+    const fn = (i: number | undefined) => (i === undefined ? undefined : tr.fns[i]?.name);
+    const byName = new Map(tr.threads.map((t) => [fn(t.entry), t]));
+    const expect: [string, string, string][] = [
+      ['Server::heartbeat', 'main', 'Server::init'],
+      ['Server::acceptLoop', 'main', 'Server::init'],
+      ['Server::handle', 'Server::acceptLoop', 'Server::acceptLoop'],
+      ['hidden', 'main', 'viaPointer'],
+      ['cworker', 'main', 'main'],
+    ];
+    for (const [entry, parentEntry, by] of expect) {
+      const th = byName.get(entry);
+      assert.ok(th, `a thread runs ${entry}`);
+      assert.equal(fn(tr.threads.find((t) => t.id === th.parent)?.entry), parentEntry, `${entry}: parent thread`);
+      assert.equal(fn(th.by), by, `${entry}: started in`);
+    }
+    // the analysis cannot see which function `fp` holds; the run adds the spawn wire
+    const id = (q: string) => g.entities.find((e) => e.qname === q)!.id;
+    assert.ok(!g.relations.some((x) => x.kind === 'spawn' && x.to === id('hidden')));
+    const { augmentGraph } = await import('../src/webview/traceview');
+    const more = augmentGraph(g, tr).relations.find((x) => x.kind === 'spawn' && x.from === id('viaPointer') && x.to === id('hidden'));
+    assert.equal(more?.via, 'runtime');
+  });
+
+  it('the runtime also builds without the thread-start trampoline (static programs)', () => {
+    const out = path.join(tmp('rt'), 'rt.o');
+    const res = spawnSync(tc.cc!, ['-O2', '-Wall', '-Werror', '-DCGT_NO_INTERPOSE', '-c', path.join(ROOT, 'runtime', 'c', 'cg_trace.c'), '-o', out], { encoding: 'utf8' });
+    assert.equal(res.status, 0, res.stderr);
   });
 });
 
@@ -393,6 +461,7 @@ describe('Run & Trace (failures)', () => {
     assert.equal(tr.exit.code, 0, 'the thread dies, the program does not');
     assert.deepEqual(tr.threads.map((t) => t.name), ['MainThread', 'calc']);
     assert.equal(tr.threads[1].parent, 1);
+    assert.equal(tr.fns[tr.threads[1].by!]?.name, 'main', 'started in main()');
     const avg = tr.fns.findIndex((f) => f.name === 'average');
     const ok = tr.spans.fn.findIndex((f, i) => f === avg && tr.spans.th[i] === 1);
     assert.deepEqual(tr.args[ok][0].slice(0, 3), ['xs', 'c', '[1, 2, 3]']);

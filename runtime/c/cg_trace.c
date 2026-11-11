@@ -13,6 +13,10 @@
  *   CODE_GRAPH_LIVE        1 = every 200 ms, append what runs right now (each thread's call stack, call
  *                          counts, caller → callee counts) so a viewer can follow the program while it runs
  *
+ * Threads started with pthread_create (std::thread and std::async end there too) are started through
+ * a small trampoline, so each thread's record says which thread started it and in which function
+ * ("parent", "by"). Not in static programs (built with CGT_NO_INTERPOSE), which keep the viewer's guess.
+ *
  * Every thread buffers its own events and appends them to the file under one
  * mutex. A per-thread shadow stack (fids of the active calls) lets a crash be
  * attributed to the function that was running, in every thread. The header
@@ -32,6 +36,10 @@
 #include <string.h>
 #include <time.h>
 #include <unistd.h>
+#if !defined(_WIN32) && !defined(CGT_NO_INTERPOSE)
+#define CGT_INTERPOSE 1
+#include <dlfcn.h>
+#endif
 
 #ifndef CGT_NFN
 #define CGT_NFN 1
@@ -73,6 +81,10 @@ static uint64_t g_ekey[CGT_EDGES];
 static unsigned long long g_ecnt[CGT_EDGES];
 static __thread cgt_ts *t_ts;
 static __thread int t_busy;
+/* set by the trampoline before a new thread runs: the id of the thread that started it and the function
+   that thread was in (0 / UINT_MAX: not known) */
+static __thread int t_parent;
+static __thread unsigned t_by = 0xFFFFFFFFu;
 
 static uint64_t cgt_now(void) {
   struct timespec ts;
@@ -226,6 +238,59 @@ static void cgt_exe_name(char *out, size_t cap) {
 #endif
 }
 
+static cgt_ts *cgt_thread(void);
+
+#ifdef CGT_INTERPOSE
+/*
+ * pthread_create, defined in the program so that its own calls and those of the libraries it loads
+ * (libstdc++'s std::thread) come here first. The thread runs the same function with the same argument;
+ * the trampoline only notes who started it. Without CODE_GRAPH_TRACE it passes straight through.
+ */
+typedef int (*cgt_create_fn)(pthread_t *, const pthread_attr_t *, void *(*)(void *), void *);
+typedef struct {
+  void *(*fn)(void *);
+  void *arg;
+  int parent;
+  unsigned by;
+} cgt_start;
+
+static cgt_create_fn cgt_real_create(void) {
+  static cgt_create_fn real;
+  cgt_create_fn r = __atomic_load_n(&real, __ATOMIC_ACQUIRE);
+  if (!r) {
+    r = (cgt_create_fn)dlsym(RTLD_NEXT, "pthread_create");
+    __atomic_store_n(&real, r, __ATOMIC_RELEASE);
+  }
+  return r;
+}
+
+static void *cgt_trampoline(void *p) {
+  cgt_start s = *(cgt_start *)p;
+  free(p);
+  t_parent = s.parent;
+  t_by = s.by;
+  return s.fn(s.arg);
+}
+
+__attribute__((weak)) int pthread_create(pthread_t *th, const pthread_attr_t *attr, void *(*fn)(void *), void *arg) {
+  cgt_create_fn real = cgt_real_create();
+  if (!real) return EAGAIN;
+  cgt_ts *ts = t_busy ? t_ts : cgt_thread();
+  cgt_start *s = ts && g_on ? (cgt_start *)malloc(sizeof *s) : 0;
+  if (!s) return real(th, attr, fn, arg);
+  s->fn = fn;
+  s->arg = arg;
+  s->parent = ts->id;
+  s->by = ts->depth > 0 && ts->depth <= CGT_DEPTH ? ts->stack[ts->depth - 1] : 0xFFFFFFFFu;
+  int rc = real(th, attr, cgt_trampoline, s);
+  if (rc != 0) free(s);
+  return rc;
+}
+#define cgt_create_thread(th, fn) (cgt_real_create() ? cgt_real_create()((th), 0, (fn), 0) : EAGAIN)
+#else
+#define cgt_create_thread(th, fn) pthread_create((th), 0, (fn), 0)
+#endif
+
 static void cgt_init(void) {
   const char *path = getenv("CODE_GRAPH_TRACE");
   if (!path || !*path) return;
@@ -265,7 +330,7 @@ static void cgt_init(void) {
   g_on = 1;
   if (g_live) {
     pthread_t th;
-    if (pthread_create(&th, 0, cgt_live_loop, 0) == 0) pthread_detach(th);
+    if (cgt_create_thread(&th, cgt_live_loop) == 0) pthread_detach(th); /* not through the trampoline */
   }
 }
 
@@ -293,11 +358,15 @@ static cgt_ts *cgt_thread(void) {
   } else if (!name[0] || strcmp(name, g_main_name) == 0)
     snprintf(name, sizeof name, "thread-%d", ts->id);
   memcpy(ts->name, name, sizeof ts->name);
-  cgt_putf(ts, "{\"k\":\"t\",\"id\":%d,\"t\":%llu,\"name\":", ts->id, (unsigned long long)cgt_now());
+  cgt_putf(ts, "{\"k\":\"t\",\"id\":%d,\"t\":%llu,", ts->id, (unsigned long long)cgt_now());
+  if (t_parent > 0) cgt_putf(ts, "\"parent\":%d,", t_parent);
+  if (t_parent > 0 && t_by != 0xFFFFFFFFu) cgt_putf(ts, "\"by\":%u,", t_by);
+  cgt_put(ts, "\"name\":", 7);
   cgt_put_str(ts, name, 60);
   cgt_put(ts, "}\n", 2);
   return ts;
 }
+
 
 static int cgt_take_event(void) {
   long long n = __atomic_add_fetch(&g_events, 1, __ATOMIC_RELAXED);
