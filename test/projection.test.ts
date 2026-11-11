@@ -10,7 +10,7 @@ const ROOT = path.resolve(__dirname, '..');
 
 async function sample(name: string): Promise<CodeGraph> {
   const pool = new ParsePool(path.join(ROOT, 'dist', 'wasm'), undefined, 0);
-  const dir = path.join(ROOT, 'samples', name);
+  const dir = path.join(ROOT, 'examples', name);
   return new AnalysisSession(dir, pool).analyze(walk(dir).files);
 }
 
@@ -18,7 +18,7 @@ let g: CodeGraph;
 let py: CodeGraph;
 let c: CodeGraph;
 before(async () => {
-  [g, py, c] = await Promise.all([sample('cpp-router'), sample('py-pipeline'), sample('c-ringbuf')]);
+  [g, py, c] = await Promise.all([sample('cpp/router'), sample('python/pipeline'), sample('c/ringbuf')]);
 });
 
 describe('language-aware levels', () => {

@@ -13,7 +13,7 @@ npm test
 Run the extension from source without installing it (rebuild with `npm run build`, then reload that window):
 
 ```bash
-code --extensionDevelopmentPath="$PWD" samples/cpp-router
+code --extensionDevelopmentPath="$PWD" examples/cpp/router
 ```
 
 Open the command palette there and run **CodeGraph: Open Circuit View**. Editor settings and debug
@@ -22,9 +22,9 @@ configurations (`.vscode/`) are personal and are not part of the repository.
 Without VS Code:
 
 ```bash
-node dist/cli.js samples/py-pipeline -o out/graph.json            # analyzer only
-node dist/cli.js samples/broken-cpp --verify -o out/broken.json   # + compile check
-node dist/cli.js trace samples/cpp-router -o out/run.json         # Run & Trace
+node dist/cli.js examples/python/pipeline -o out/graph.json        # analyzer only
+node dist/cli.js examples/cpp/features/problems --verify -o out/broken.json  # + compile check
+node dist/cli.js trace examples/cpp/router -o out/run.json        # Run & Trace
 npm run demo                                                      # out/demo.html — the webview with sample data and traces
 # small hostable page that loads ELK from a CDN instead of inlining it:
 ELK_CDN=https://cdn.jsdelivr.net/npm/elkjs@0.12.1/lib/ node scripts/build-demo.mjs out/site/index.html en out/cpp-router.json:C++
@@ -32,16 +32,22 @@ ELK_CDN=https://cdn.jsdelivr.net/npm/elkjs@0.12.1/lib/ node scripts/build-demo.m
 
 ## Layout
 
-- `src/core` — analyzer, no `vscode` import allowed (it runs in the CLI, worker threads and tests).
-- `src/host` — VS Code glue.
-- `src/webview` — the view (browser code, no Node APIs).
-- `runtime/` — the tracers that run inside the user's program (Python stdlib only; C99 + pthreads, C++11).
-  Keep them dependency-free and never let them change what the program does when tracing is off.
-- `samples/` — small projects used by tests and the demo (`broken-*` fail on purpose; `net-pair` is a client and
-  a server with a makefile and two compose files — mounted, and built into the image; `py-pipeline` has a compose
-  file too).
-- `schemas/codegraph.schema.json` — `.codegraph.json` for the editor; keep it in step with `src/core/config.ts`
-  (a test compares their keys).
+| folder | what is in it | rules |
+| --- | --- | --- |
+| `src/core/` | the analyzer and everything that runs without VS Code: extractors (`extract/`, one file per language, `cppnames.ts` for C/C++ names and library APIs), linker, compile check, Run & Trace (build, run, Compose, live), trace model | no `vscode` import: it runs in the CLI, worker threads and tests |
+| `src/host/` | the VS Code side: commands, the circuit panel, Run & Trace and its messages, project settings | |
+| `src/webview/` | the circuit view: projection, layout, rendering, timeline, live lanes, container cards, panels | browser code, no Node APIs; UI strings in `i18n.ts` (English and Korean) |
+| `src/shared/` | the messages between host and view (`protocol.ts`) | |
+| `src/extension.ts`, `src/cli.ts` | entry points of the extension and of `code-graph` on the command line | |
+| `runtime/` | the tracers that run inside the user's program: `c/` (C99 + pthreads, C++11 part), `python/` (standard library only) | no dependencies; with tracing off the program must behave exactly as without them |
+| `examples/` | programs to try every feature on, per language: `features/<feature>/` folders with a checklist each, and a few realistic programs — see [examples/README.md](examples/README.md) | every README claim is checked in `test/examples.test.ts`; generic names only |
+| `test/` | `node --test` suites, one per area (`analyzer`, `trace`, `live`, `compose`, `timeline` …); `examples.test.ts` runs the examples | fixtures written to a temporary folder, with generic names |
+| `scripts/` | the build (esbuild), the demo page, the release version and notes | |
+| `schemas/` | `codegraph.schema.json`, `.codegraph.json` for the editor | keep it in step with `src/core/config.ts` (a test compares their keys) |
+| `l10n/`, `package.nls*.json` | Korean strings of the host and of `package.json` | English is the source; add both |
+| `media/` | the icons the extension ships | |
+| `docs/` | [GUIDE](docs/GUIDE.md), [ARCHITECTURE](docs/ARCHITECTURE.md), [VERSIONING](docs/VERSIONING.md), [ROADMAP](docs/ROADMAP.md) (English and Korean where users read them), `images/` for the README | |
+| `.github/workflows/` | `ci.yml` (type check and tests on pull requests), `publish.yml` (release on every push to `main`) | |
 
 The Docker Compose tests run real containers and are skipped unless `CODE_GRAPH_DOCKER_TEST=1` and Docker is
 running (CI sets it): `CODE_GRAPH_DOCKER_TEST=1 npm test`. The GIFs in the README are recorded from code-server with
@@ -67,7 +73,8 @@ hand (*Actions* → *Publish* → *Run workflow*).
 ## Pull requests
 
 - `npm run typecheck && npm test` must pass.
-- New resolution rules come with a sample snippet and a test assertion.
+- New resolution rules come with an example (a line in the matching `examples/<language>/features/` folder and its
+  README checklist, or a snippet in a test) and a test assertion.
 - Prefer marking a link `guess` over inventing one; never draw a link the analyzer cannot justify.
 - Changes to the instrumenter must keep line numbers stable (probes go on the line of the `{`) and come with a
   test in `test/trace.test.ts`.

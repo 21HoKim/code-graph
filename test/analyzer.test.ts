@@ -26,7 +26,7 @@ function rel(g: CodeGraph, kind: string, from: string, to: string): Relation | u
 describe('C++ router sample', () => {
   let g: CodeGraph;
   before(async () => {
-    g = await analyze(path.join(ROOT, 'samples', 'cpp-router'), 2);
+    g = await analyze(path.join(ROOT, 'examples', 'cpp/router'), 2);
   });
 
   it('merges header declarations with out-of-line definitions', () => {
@@ -80,7 +80,7 @@ describe('C++ router sample', () => {
 describe('Python pipeline sample', () => {
   let g: CodeGraph;
   before(async () => {
-    g = await analyze(path.join(ROOT, 'samples', 'py-pipeline'));
+    g = await analyze(path.join(ROOT, 'examples', 'python/pipeline'));
   });
   const id = (p: string) => `py:${p}`;
 
@@ -113,7 +113,7 @@ describe('Python pipeline sample', () => {
 
 describe('C ring buffer sample', () => {
   it('detects pthread_create thread entries', async () => {
-    const g = await analyze(path.join(ROOT, 'samples', 'c-ringbuf'));
+    const g = await analyze(path.join(ROOT, 'examples', 'c/ringbuf'));
     assert.ok(rel(g, 'spawn', 'cc:main', 'cc:producer@main.c'));
     assert.ok(rel(g, 'spawn', 'cc:main', 'cc:consumer@main.c'));
     assert.ok(rel(g, 'call', 'cc:producer@main.c', 'cc:rb_put'));

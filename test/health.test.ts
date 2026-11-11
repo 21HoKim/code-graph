@@ -11,7 +11,7 @@ const ROOT = path.resolve(__dirname, '..');
 const tc = detectToolchain();
 
 async function analyze(name: string): Promise<{ g: CodeGraph; dir: string; session: AnalysisSession }> {
-  const dir = path.join(ROOT, 'samples', name);
+  const dir = path.join(ROOT, 'examples', name);
   const session = new AnalysisSession(dir, new ParsePool(path.join(ROOT, 'dist', 'wasm'), undefined, 0));
   const g = await session.analyze(walk(dir).files);
   return { g, dir, session };
@@ -59,9 +59,9 @@ describe('broken C++ sample', () => {
   let g: CodeGraph;
   let diags: Diagnostic[];
   before(async () => {
-    const a = await analyze('broken-cpp');
+    const a = await analyze('cpp/features/problems');
     g = a.g;
-    const v = tc.cxx ? await verify('broken-cpp', g, a.dir, a.session) : undefined;
+    const v = tc.cxx ? await verify('cpp/features/problems', g, a.dir, a.session) : undefined;
     diags = attachDiagnostics(g, [...(g.diagnostics ?? []), ...(v?.diagnostics ?? [])]);
   });
 
@@ -96,9 +96,9 @@ describe('broken Python sample', () => {
   let g: CodeGraph;
   let diags: Diagnostic[];
   before(async () => {
-    const a = await analyze('broken-py');
+    const a = await analyze('python/features/problems');
     g = a.g;
-    const v = tc.python ? await verify('broken-py', g, a.dir, a.session) : undefined;
+    const v = tc.python ? await verify('python/features/problems', g, a.dir, a.session) : undefined;
     // the interpreter's verdict replaces tree-sitter's coarse one
     const stat = (g.diagnostics ?? []).filter((d) => !(v?.pyChecked && d.source === 'syntax'));
     diags = attachDiagnostics(g, [...stat, ...(v?.diagnostics ?? [])]);

@@ -31,7 +31,11 @@
   npx @vscode/vsce package --no-dependencies   # -> code-graph-vscode-<버전>.vsix
   ```
 
-  설치 없이 개발 빌드를 써 보려면 `code --extensionDevelopmentPath="$PWD" samples/cpp-router`.
+  설치 없이 개발 빌드를 써 보려면 `code --extensionDevelopmentPath="$PWD" examples/cpp/router`.
+
+**써 볼 코드**: [examples/](../examples/README.ko.md)에 C·C++·Python마다 기능별 작은 폴더(calls, threads, classes,
+returns, trace, failures, live, problems)가 있고, 폴더마다 무엇을 보면 되는지 확인표가 있어요. 실제 코드처럼 보이는
+프로그램 몇 개와 Docker Compose로 돌리는 컨테이너 두 개짜리 예제도 있어요.
 
 컴파일 검사와 실행 & 추적은 내 컴파일러와 프로그램을 실행하므로 신뢰하지 않는 워크스페이스에서는 꺼져 있어요.
 `gcc`나 `clang`(Linux, macOS. Windows MinGW는 미검증), Python 3.8+ 중 필요한 것과, 컨테이너용 Docker(Compose v2)가

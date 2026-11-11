@@ -1,59 +1,52 @@
 # Roadmap
 
-## v0.1 — static circuit
+What CodeGraph may do next. Nothing here is promised or dated; what each released version brought is in the
+[changelog](../CHANGELOG.md) and [VERSIONING](VERSIONING.md). Ideas and requests are welcome as issues.
 
-C/C++/Python extraction, cross-file linking with confidence, abstraction levels, files/symbols grouping,
-circuit/network layouts, electric flow (arguments and return values), static thread-spawn detection, search,
-focus, follow-cursor, incremental re-analysis, CLI.
+## Seeing more of a function
 
-## v0.2 — problems and runtime
+- **Method blocks as nodes with pins**: open a function block to see an input pin per parameter (name and type), an
+  output pin for the return value, and one row per call it makes — which argument goes into which parameter, what
+  comes back and where it is stored — with the wire leaving from that row. During a replay the pins show the values
+  of that moment.
+- **Members from configuration**: follow a value read from a configuration file to the member chain it ends up in;
+  mark types the analysis can only guess (`auto`, templates) as guesses.
 
-- Language-aware levels (namespaces only for C++, packages/modules for Python).
-- Compile check with the real toolchain, static problem checks, impact overlay (broken / affected / no current),
-  problems panel, re-check on save, CLI `--verify`.
-- Run & Trace for Python and C/C++: threads, values, object identities, crashes; swimlane replay, data trail,
-  shared objects, runtime-only wires, CLI `trace`.
+## Between programs
 
-## v0.3 — real projects
-
-- Run & Trace builds programs from the project's makefile (`make -n`) or CMake link files: flags, libraries,
-  run directory, a pick when one `main` goes into several programs; library guesses for failed links.
-- Run & Trace with Docker Compose: services traced inside their own containers and network, merged on one
-  timeline per container.
-
-## v0.4 — any setup (this release)
-
-- Compose services traced however they get the code: mounted, or copied in by the Dockerfile (images rebuilt
-  from the traced copy, multi-stage included); any compiler on `PATH`, Python however it is started.
-- `.codegraph.json` for what CodeGraph cannot find out by itself: build scripts, programs, compose files and
-  profiles, per-service builds and source paths. Offered when a run cannot be set up, with completion in the
-  editor.
-
-## Next — distributed runs
-
-- **Messages between processes**: pair a `send` in one container with the `recv` in another (socket addresses,
-  payload digests) and draw the hop as a wire between their blocks.
+- **An *Outside* block** for what a program talks to beyond the workspace — one child per endpoint (host, port,
+  path), resolved from the code with a confidence and confirmed by a run.
+- **Messages between processes**: pair a `send` in one container with the `recv` in another and draw the hop as a
+  wire between their blocks.
 - **Kubernetes pods** and dev containers, with the same wrappers as Compose.
 
-## Next — precision
+## Runtime
 
-- **Language-server confirmation**: ask the active language server through `vscode.prepareCallHierarchy` /
-  `vscode.provideOutgoingCalls` (clangd, Microsoft C/C++, Pylance); matching results upgrade `guess`/`likely`
-  links to `exact`.
-- **Virtual dispatch fan-out**: optional dashed wires from `Base::send` to every override.
-- **Callbacks & function pointers** as a separate `ref` relation kind (`signal(SIGINT, onSignal)`,
-  `add_done_callback(self._collect)`, registration tables).
-- **Macros**: honour `compile_commands.json` defines for `#if` branches.
+- **Stop on a wire**: pause the program when a call goes along a chosen wire, optionally only when a condition on its
+  values holds.
+- **System calls**: an optional interception layer for the C library — files, sockets, processes — shown on the blocks
+  that made them; which libraries are traced is set in `.codegraph.json`.
+- **Follow a value**: track one value (a request id, a key) through every function and thread it passes, recording
+  a fingerprint rather than the value itself.
+- **Hot spots and data volume**: time spent per block as heat, bytes passed per wire as its thickness.
+- **Locks and waiting**: mutex, lock, condition and queue waits, with contention shown between threads.
+- **Attach without rebuilding** (Linux uprobes) and **coverage** of the lines that ran.
 
-## Next — runtime
+## Precision
 
-- **Locks and waiting**: record `mutex`/`Lock`/`Condition`/`Queue.get` waits, draw contention heat on blocks and
-  lock pseudo-blocks between threads.
-- **Return values in C/C++** (rewrite `return` statements) and field writes of shared objects.
-- **Attach without rebuilding** (Linux eBPF uprobes) and **live streaming** of a debug session (DAP).
-- **Coverage view** from traces (lines, not only functions).
+- **Language-server confirmation**: ask clangd, the Microsoft C/C++ extension or Pylance for call hierarchies and
+  upgrade `guess` / `likely` wires they confirm to `exact`.
+- **Virtual dispatch fan-out**: optional dashed wires from a virtual method to every override.
+- **Callbacks and function pointers** as a relation of their own (`signal(SIGINT, onSignal)`, registration tables).
+- **Macros**: honour the defines of `compile_commands.json` in `#if` branches.
 
-## More languages
+## Change impact
 
-Rust, Go, Java, TypeScript via tree-sitter adapters (one extractor file + linker rules each), plus a tracer per
-runtime.
+- **What a change touches**: from a `git diff`, the functions it changes and everything that calls them, as a
+  highlighted region of the circuit.
+
+## More languages and places
+
+- **JavaScript / TypeScript, Go, Rust**: an extractor per language with the same rules as the others (see
+  *Adding a language* in [ARCHITECTURE](ARCHITECTURE.md)), and a tracer per runtime.
+- **A standalone viewer** in the browser, and later plugins for other IDEs.

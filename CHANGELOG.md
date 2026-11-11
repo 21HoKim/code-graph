@@ -8,6 +8,9 @@ into the version's section and its [release notes](https://github.com/21HoKim/co
 ## Unreleased
 
 ### Added
+- [examples/](https://github.com/21HoKim/code-graph/tree/main/examples) in the repository: for C, C++ and Python,
+  one small folder per feature (calls, threads, classes, returns, trace, failures, live, problems) with a checklist
+  of what to look for, next to the realistic programs (formerly `samples/`).
 - Container cards: with several containers, the right side of the circuit has a card for each, live and in the
   replay (running or how it ended, threads, calls, calls per second, activity). Click one to show only that
   container's code and threads, Ctrl (⌘) + click to add or remove one; ⧉ opens it in its own view, also while the

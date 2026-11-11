@@ -7,6 +7,9 @@
 ## Unreleased
 
 ### 추가
+- 저장소의 [examples/](https://github.com/21HoKim/code-graph/tree/main/examples): C·C++·Python마다 기능별 작은
+  폴더(calls, threads, classes, returns, trace, failures, live, problems)와 무엇을 보면 되는지 확인표, 실제 코드처럼 보이는
+  프로그램들(예전 `samples/`).
 - 컨테이너 카드: 컨테이너가 여럿이면 실시간 보기와 재생 모두 회로 오른쪽에 컨테이너마다 카드가 떠요(실행 중·끝난 상태,
   스레드·호출 수, 초당 호출, 활동 그래프). 누르면 그 컨테이너의 코드와 스레드만 보이고, Ctrl(⌘) + 클릭으로 더하거나 빼요.
   ⧉는 따로 열기예요. 실행 중에도 열리고, 그 창은 자기 컨테이너를 실시간으로 따라가요. 실시간으로 고른 것은 재생에서도

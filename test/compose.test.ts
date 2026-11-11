@@ -28,8 +28,8 @@ import { detectToolchain } from '../src/core/verify';
 
 const ROOT = path.resolve(__dirname, '..');
 const WASM = path.join(ROOT, 'dist', 'wasm');
-const PAIR = path.join(ROOT, 'samples', 'net-pair');
-const PIPE = path.join(ROOT, 'samples', 'py-pipeline');
+const PAIR = path.join(ROOT, 'examples', 'compose/net-pair');
+const PIPE = path.join(ROOT, 'examples', 'python/pipeline');
 const tc = detectToolchain();
 const tmp = (name: string) => fs.mkdtempSync(path.join(os.tmpdir(), `cc-compose-${name}-`));
 const has = (cmd: string, args: string[]) => spawnSync(cmd, args, { stdio: 'ignore' }).status === 0;

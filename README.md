@@ -24,6 +24,9 @@ containers. The circuit view itself needs nothing.
 
 ## Examples
 
+Everything below can be tried on the programs in [examples/](examples/README.md): for C, C++ and Python, one small
+folder per feature with a checklist of what to look for, and the projects pictured here.
+
 ### A C++ program built with make or CMake
 
 Click **▶ Run**. CodeGraph builds the program the way your makefile or CMake does (defines, include and library

@@ -227,7 +227,7 @@ describe('C/C++ instrumentation', () => {
   });
 
   it('selects the translation units main needs (and not other mains)', async () => {
-    const { g, files } = await analyze(path.join(ROOT, 'samples', 'cpp-router'));
+    const { g, files } = await analyze(path.join(ROOT, 'examples', 'cpp/router'));
     const main = g.entities.find((e) => e.name === 'main')!;
     const units = selectUnits(g, main, files);
     assert.ok(units.includes('src/main.cpp'));
@@ -241,7 +241,7 @@ const py = !!tc.python;
 
 describe('Run & Trace (C++ threads)', { skip: !native }, () => {
   it('records rx/tx threads, values and the shared router/queue', async () => {
-    const { r } = await trace(path.join(ROOT, 'samples', 'cpp-router'));
+    const { r } = await trace(path.join(ROOT, 'examples', 'cpp/router'));
     assert.ok(r.ok, r.notes.join('\n'));
     const tr = r.trace!;
     assert.equal(tr.exit.code, 0);
@@ -264,7 +264,7 @@ describe('Run & Trace (C++ threads)', { skip: !native }, () => {
 describe('Run & Trace (C producer/consumer)', { skip: !native }, () => {
   it('sees the ring buffer shared by both threads', async () => {
     const workDir = tmp('run');
-    const { r } = await trace(path.join(ROOT, 'samples', 'c-ringbuf'), undefined, [], { workDir });
+    const { r } = await trace(path.join(ROOT, 'examples', 'c/ringbuf'), undefined, [], { workDir });
     const tr = r.trace!;
     // thousands of calls fill the per-thread buffers: they go to the file in whole lines, never interleaved
     const lines = fs.readFileSync(path.join(workDir, 'trace.jsonl'), 'utf8').split('\n').filter(Boolean);
@@ -367,7 +367,7 @@ describe('Run & Trace (calls in a return)', { skip: !native }, () => {
 });
 
 describe('Run & Trace (build system)', { skip: !native }, () => {
-  const PAIR = path.join(ROOT, 'samples', 'net-pair');
+  const PAIR = path.join(ROOT, 'examples', 'compose/net-pair');
 
   it('builds the makefile program with its defines and libraries, and runs it where make links it', async () => {
     const { targets } = await readMakeTargets(PAIR);
@@ -424,7 +424,7 @@ describe('Run & Trace (failures)', () => {
   });
 
   it('build errors come back as diagnostics instead of a trace', { skip: !native }, async () => {
-    const { r } = await trace(path.join(ROOT, 'samples', 'broken-cpp'));
+    const { r } = await trace(path.join(ROOT, 'examples', 'cpp/features/problems'));
     assert.equal(r.ok, false);
     assert.ok(r.buildDiagnostics.some((d) => d.file === 'src/sensor.cpp' && d.line === 17));
   });

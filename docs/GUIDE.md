@@ -31,7 +31,11 @@
   npx @vscode/vsce package --no-dependencies   # -> code-graph-vscode-<version>.vsix
   ```
 
-  To try a development build without installing it: `code --extensionDevelopmentPath="$PWD" samples/cpp-router`.
+  To try a development build without installing it: `code --extensionDevelopmentPath="$PWD" examples/cpp/router`.
+
+**Something to try it on**: [examples/](../examples/README.md) has, for C, C++ and Python, one small folder per
+feature (calls, threads, classes, returns, trace, failures, live, problems), each with a checklist of what to look
+for, and a few realistic programs, including two containers to run with Docker Compose.
 
 The compile check and Run & Trace execute your compiler and your program, so they are off in untrusted workspaces.
 They need `gcc` or `clang` (Linux, macOS; MinGW on Windows is untested) and/or Python 3.8+, and Docker with

@@ -4,7 +4,7 @@ import * as path from 'node:path';
 import { describe, it } from 'node:test';
 import { analyzeDockerfile, copiedBy, parseDockerfile, traceDockerfile } from '../src/core/dockerfile';
 
-const PAIR = path.resolve(__dirname, '..', 'samples', 'net-pair');
+const PAIR = path.resolve(__dirname, '..', 'examples', 'compose/net-pair');
 
 describe('Dockerfile', () => {
   it('reads instructions across continuations, comments, heredocs and the escape directive', () => {

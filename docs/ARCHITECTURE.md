@@ -387,7 +387,8 @@ projected wire of each call.
 1. Add the grammar's `.wasm` to `scripts/build.mjs` and `extract/index.ts` (`loadParsers`, `languageOf`).
 2. Write `extract/<lang>.ts` producing `RawEntity` / `RawCall` / imports.
 3. Teach `link.ts` the language's scoping and import rules (or reuse the C++ or Python path).
-4. Add a sample under `samples/` and assertions in `test/analyzer.test.ts`.
+4. Add `examples/<language>/features/` with the same feature folders as the other languages (each with its README
+   checklist), and their checks in `test/examples.test.ts`.
 
 Every extractor keeps the same rules, so a feature works the same in every language:
 

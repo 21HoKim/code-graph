@@ -4,7 +4,7 @@ import { describe, it } from 'node:test';
 import { collectTargets, guessLibraries, libraryFlags, parseMakeDryRun, readMakeTargets, shellCommands, targetsFor } from '../src/core/buildinfo';
 
 const ROOT = path.resolve(__dirname, '..');
-const PAIR = path.join(ROOT, 'samples', 'net-pair');
+const PAIR = path.join(ROOT, 'examples', 'compose/net-pair');
 
 describe('build info: shell words', () => {
   it('splits commands and honours quotes', () => {
