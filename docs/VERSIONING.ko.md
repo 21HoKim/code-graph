@@ -33,7 +33,7 @@
 - 새 MINOR·MAJOR: `package.json`에 그 버전 기록(`npm version minor --no-git-tag-version`) 후 푸시
 - 그 뒤 다음 변경까지: 릴리스마다 PATCH만 증가(0.5.0 → 0.5.1, 0.5.2, …)
   - 마켓플레이스가 0.5.3이어도 저장소 `package.json`은 0.5.0 그대로, 정확한 버전은 배포 패키지에만 기록
-- 문서만 바꾼 커밋(`README`, `CHANGELOG`, `docs/`): 릴리스 없음, README·CHANGELOG 변경은 다음 릴리스 때 마켓플레이스 페이지에 반영
+- 문서만 바꾼 커밋(`README`, `CHANGELOG`, `docs/`): 릴리스 제외, README·CHANGELOG 변경은 다음 릴리스 때 마켓플레이스 페이지에 반영
 
 ## 변경 내용 확인 위치
 
