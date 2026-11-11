@@ -371,7 +371,15 @@ h3 a.bad, h3 .nocase { text-transform: none; letter-spacing: 0; font-size: 12px;
 .legend.folded .lg-body { grid-template-rows: 0fr; }
 .legend .lg-grid { overflow: hidden; min-height: 0; display: grid; grid-template-columns: auto auto; gap: 3px 14px; padding-top: 3px; }
 .legend .lg-grid div { display: flex; align-items: center; gap: 6px; white-space: nowrap; }
-.legend .lg-more { color: var(--cc-muted); cursor: default; }
+.legend .lg-grid .lg-threads { grid-column: 1 / -1; display: grid; grid-template-columns: auto auto; gap: 3px 14px; }
+.legend .lg-threads div { display: flex; align-items: center; gap: 6px; white-space: nowrap; }
+/* every thread: about eight rows, the wheel scrolls the rest */
+.legend .lg-grid .lg-threads.all { max-height: 132px; overflow-y: auto; overscroll-behavior: contain; padding-right: 4px; }
+.legend .lg-more {
+  grid-column: 1 / -1; justify-self: start; border: 0; background: none; padding: 0; cursor: pointer;
+  color: var(--vscode-textLink-foreground, var(--cc-call)); font: inherit;
+}
+.legend .lg-more:hover { text-decoration: underline; }
 @media (prefers-reduced-motion: reduce) {
   .legend .lg-body, .legend .lg-caret { transition: none; }
 }

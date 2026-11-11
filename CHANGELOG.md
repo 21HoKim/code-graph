@@ -16,8 +16,9 @@ into the version's section and its [release notes](https://github.com/21HoKim/co
   earlier moment, *Now* to follow again. Click a thread to follow only it in the circuit.
 - Timeline: a horizontal scrollbar under the swimlanes once you zoom in; its thumb is the part of the run in view.
   Drag it, or click beside it to move one view's width.
-- The legend folds to its title (click *Legend*); it stays folded. With more than eight threads it says how many
-  more there are.
+- The legend folds to its title (click *Legend*); it stays folded. With more than eight threads, *+N more* opens the
+  full list inside the legend, which the wheel scrolls (the wheel over the legend or the container cards scrolls
+  them instead of zooming the circuit).
 
 ### Changed
 - Timeline: the wheel scrolls the swimlanes up and down, Ctrl (⌘) + wheel or a trackpad pinch zooms around the

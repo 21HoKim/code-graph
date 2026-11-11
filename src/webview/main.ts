@@ -330,6 +330,8 @@ class App {
   private busy = h('div', { class: 'busy ui', hidden: '' });
   private notice = h('div', { class: 'notice ui', hidden: '' });
   private legend = h('div', { class: 'legend ui' });
+  /** The legend lists every thread (after "+N more"), not only the first ones. */
+  private legendAllThreads = false;
   private empty = h('div', { class: 'empty' });
   private canvas = h('canvas');
 
@@ -957,11 +959,16 @@ class App {
       item('inherit', `${KIND_ICON.inherit} ${t('inherit')}`) +
       item('include', `${t('include')} / ${t('import')}`, true) +
       (this.trace
-        ? threads
-            .slice(0, LEGEND_THREADS)
+        ? // every thread once "+N more" is clicked, in a list of its own that the wheel scrolls
+          `<div class="lg-threads${this.legendAllThreads ? ' all' : ''}">` +
+          threads
+            .slice(0, this.legendAllThreads ? threads.length : LEGEND_THREADS)
             .map((th) => `<div class="lg-x"><span class="sw" style="background:${threadColor(th.id)}"></span>${esc(th.name)}</div>`)
             .join('') +
-          (more > 0 ? `<div class="lg-x lg-more" title="${esc(threads.slice(LEGEND_THREADS).map((th) => th.name).join(', '))}">${esc(t('legendMore', { n: more }))}</div>` : '') +
+          '</div>' +
+          (more > 0
+            ? `<button class="lg-more" data-act="threads">${esc(this.legendAllThreads ? t('legendFewer') : t('legendMore', { n: more }))}</button>`
+            : '') +
           `<div class="lg-x"><span class="sw" style="background:var(--cc-muted);opacity:.35"></span>${esc(t('coldCode'))}</div>`
         : '') +
       (this.overlay
@@ -978,6 +985,13 @@ class App {
       this.save();
       this.buildLegend();
     };
+    const moreBtn = this.legend.querySelector<HTMLElement>('[data-act=threads]');
+    if (moreBtn) {
+      moreBtn.onclick = () => {
+        this.legendAllThreads = !this.legendAllThreads;
+        this.buildLegend();
+      };
+    }
   }
 
   // -------------------------------------------------------------------------

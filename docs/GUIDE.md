@@ -114,8 +114,8 @@ Compose v2 for containers.
   Shift + wheel moves it too (down: later, up:
   earlier), as does a sideways trackpad scroll. The wheel scrolls the lanes, Ctrl (⌘) + wheel or a pinch zooms
   around the pointer, a click jumps there and a double-click shows the whole run. On the circuit, Shift + wheel
-  moves sideways the same way. The legend in the bottom left gives each thread's colour (eight of them, then how
-  many more); click its title to fold it out of the way.
+  moves sideways the same way. The legend in the bottom left gives each thread's colour (eight of them; *+N more*
+  lists all, scrolled with the wheel); click its title to fold it out of the way.
 - **Data tracking**: objects used by several threads are listed (*the same `Router`, `PacketQueue`, `ringbuf_t*`
   in every thread*). Click one to light up every function it passed through, in order.
 

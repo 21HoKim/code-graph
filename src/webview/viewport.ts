@@ -86,6 +86,8 @@ export class Viewport {
   }
 
   private onWheel = (e: WheelEvent): void => {
+    // over a panel on the circuit (legend, container cards) the wheel scrolls that panel
+    if ((e.target as Element)?.closest?.('.ui')) return;
     e.preventDefault();
     // Shift + wheel: sideways, down = right, like the timeline
     const shift = shiftPan(e);
