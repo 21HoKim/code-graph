@@ -6,6 +6,8 @@
 
 ## Unreleased
 
+## 0.5.10
+
 ### 추가
 - Open VSX에도 올라가요. Cursor, VSCodium, Windsurf, Theia에서도 확장 뷰에서 바로 설치할 수 있어요.
 

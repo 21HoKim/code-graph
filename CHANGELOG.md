@@ -7,6 +7,8 @@ into the version's section and its [release notes](https://github.com/21HoKim/co
 
 ## Unreleased
 
+## 0.5.10
+
 ### Added
 - Published to Open VSX as well, so Cursor, VSCodium, Windsurf and Theia can install it from their own extension view.
 
