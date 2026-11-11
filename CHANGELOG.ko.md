@@ -6,6 +6,8 @@
 
 ## Unreleased
 
+## 0.6.0
+
 ### 추가
 - 저장소의 [examples/](https://github.com/21HoKim/code-graph/tree/main/examples): C·C++·Python마다 기능별 작은
   폴더(calls, threads, classes, returns, trace, failures, live, problems)와 무엇을 보면 되는지 확인표, 실제 코드처럼 보이는

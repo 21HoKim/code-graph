@@ -7,6 +7,8 @@ into the version's section and its [release notes](https://github.com/21HoKim/co
 
 ## Unreleased
 
+## 0.6.0
+
 ### Added
 - [examples/](https://github.com/21HoKim/code-graph/tree/main/examples) in the repository: for C, C++ and Python,
   one small folder per feature (calls, threads, classes, returns, trace, failures, live, problems) with a checklist
