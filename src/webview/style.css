@@ -465,7 +465,9 @@ pre.sig.out { max-height: 220px; overflow: auto; font-size: 10.5px; }
 .tl-threads { display: flex; gap: 4px; flex-wrap: wrap; overflow: hidden; max-height: 22px; }
 .tl-body { position: relative; overflow-y: auto; overflow-x: hidden; max-height: 34vh; min-height: 48px; }
 .tl-body canvas { position: absolute; left: 0; top: 0; }
-.tl-over { cursor: crosshair; }
+.tl-over { cursor: crosshair; touch-action: none; }
+.tl-over.scrub { cursor: ew-resize; }
+.tl-over.panning { cursor: grabbing; }
 .timeline .tooltip { position: absolute; z-index: 30; }
 .live-bar .tl-head { min-height: 24px; }
 .live-dot { width: 8px; height: 8px; border-radius: 50%; background: var(--cc-broken); box-shadow: 0 0 6px var(--cc-broken); animation: live-blink 1.2s ease-in-out infinite; }

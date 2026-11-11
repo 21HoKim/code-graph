@@ -104,7 +104,9 @@ Compose v2 for containers.
   follows. A long run is replayed with its first `run.maxEvents` calls in detail; the live view covers all of it.
 - **Replay**: thread swimlanes with play, scrub and step. Blocks on each thread's call stack glow in the thread's
   colour, pulses run along the wires, values ride into the blocks. Blocks that never ran fade out; calls only the
-  run revealed (virtual dispatch, callbacks) get wires of their own.
+  run revealed (virtual dispatch, callbacks) get wires of their own. In the swimlanes, drag the playhead (or the
+  time axis) to scrub and drag anywhere else to move the view; Shift + wheel moves it too (down: earlier, up:
+  later), the wheel zooms, a click jumps there and a double-click shows the whole run.
 - **Data tracking**: objects used by several threads are listed (*the same `Router`, `PacketQueue`, `ringbuf_t*`
   in every thread*). Click one to light up every function it passed through, in order.
 

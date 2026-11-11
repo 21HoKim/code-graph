@@ -7,6 +7,13 @@ into the version's section and its [release notes](https://github.com/21HoKim/co
 
 ## Unreleased
 
+### Added
+- Timeline: drag the swimlanes sideways to move the view, and Shift + wheel moves it too (down: earlier,
+  up: later). Dragging the playhead or the time axis still scrubs, and a click still jumps to that moment.
+
+### Changed
+- While playing, the view no longer jumps back to the playhead after you move it; play or a click brings it back.
+
 ### Fixed
 - *Where it returns* lists only the function's own `return` statements: those of a lambda or a local class
   written inside it no longer show up (a `void` function holding `[] { return g(); }` says it has no return).

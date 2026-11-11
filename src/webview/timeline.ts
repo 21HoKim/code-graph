@@ -40,6 +40,8 @@ export class Timeline {
   private highlightFns = new Set<number>();
   private marks: { t: number; th: number }[] = [];
   private solo: number | null = null;
+  /** The view keeps the playhead in sight while playing, until the user moves the view away. */
+  private follow = true;
   playing = false;
   speed = 1;
 
@@ -122,6 +124,7 @@ export class Timeline {
   }
 
   setPlaying(p: boolean): void {
+    if (p && !this.playing) this.follow = true;
     this.playing = p;
     const b = this.head.querySelector<HTMLElement>('[data-a=play]');
     if (b) b.textContent = p ? '⏸' : '▶';
@@ -136,7 +139,7 @@ export class Timeline {
   setTime(t: number): void {
     this.now = t;
     // keep the playhead in view while playing
-    if (this.playing && (t > this.v1 || t < this.v0)) {
+    if (this.playing && this.follow && (t > this.v1 || t < this.v0)) {
       const w = this.v1 - this.v0;
       this.v0 = Math.max(0, Math.min(this.m.duration - w, t - w * 0.1));
       this.v1 = this.v0 + w;
@@ -310,24 +313,47 @@ export class Timeline {
   }
 
   private bind(): void {
-    let dragging = false;
+    // Press and drag: on the playhead or the time axis it scrubs; anywhere else in the lanes it pans the view
+    // (once the pointer has moved a few pixels). A press without a move seeks there and picks the call under it.
+    type Drag = { mode: 'scrub' | 'pan' | 'press'; x0: number; v0: number; id: number };
+    let drag: Drag | null = null;
     const at = (e: PointerEvent | MouseEvent) => {
       const r = this.over.getBoundingClientRect();
       return { x: e.clientX - r.left, y: e.clientY - r.top, w: r.width };
     };
+    const seekTo = (px: number, w: number) => {
+      this.follow = true;
+      this.host.seek(Math.max(0, Math.min(this.m.duration, this.tAt(px, w))));
+    };
+    const onPlayhead = (px: number, py: number, w: number) => py < 14 || Math.abs(px - this.x(this.now, w)) <= 5;
     this.over.addEventListener('pointerdown', (e) => {
+      if (e.button !== 0) return;
       const p = at(e);
       if (p.x < NAME_W) return;
-      dragging = true;
       this.over.setPointerCapture(e.pointerId);
-      this.host.seek(Math.max(0, Math.min(this.m.duration, this.tAt(p.x, p.w))));
+      this.tip.hidden = true;
+      if (onPlayhead(p.x, p.y, p.w)) {
+        drag = { mode: 'scrub', x0: p.x, v0: this.v0, id: e.pointerId };
+        seekTo(p.x, p.w);
+      } else drag = { mode: 'press', x0: p.x, v0: this.v0, id: e.pointerId };
+      this.over.classList.toggle('scrub', drag.mode === 'scrub');
     });
     this.over.addEventListener('pointermove', (e) => {
       const p = at(e);
-      if (dragging) {
-        this.host.seek(Math.max(0, Math.min(this.m.duration, this.tAt(p.x, p.w))));
+      if (drag) {
+        if (drag.mode === 'press' && Math.abs(p.x - drag.x0) > 4) {
+          drag.mode = 'pan';
+          this.over.classList.add('panning');
+        }
+        if (drag.mode === 'scrub') seekTo(p.x, p.w);
+        else if (drag.mode === 'pan') {
+          // the time under the pointer stays under the pointer
+          const per = (this.v1 - this.v0) / Math.max(1, p.w - NAME_W - 8);
+          this.setView(drag.v0 - (p.x - drag.x0) * per);
+        }
         return;
       }
+      this.over.classList.toggle('scrub', onPlayhead(p.x, p.y, p.w) && p.x >= NAME_W);
       const span = this.spanAt(p.x, p.y, p.w);
       if (span < 0) {
         this.tip.hidden = true;
@@ -341,44 +367,57 @@ export class Timeline {
       this.tip.style.left = `${Math.min(p.x + 12, r.width - 220)}px`;
       this.tip.style.top = `${o.top - r.top + p.y - 34}px`;
     });
-    this.over.addEventListener('pointerup', (e) => {
-      if (!dragging) return;
-      dragging = false;
+    const end = (e: PointerEvent) => {
+      if (!drag || drag.id !== e.pointerId) return;
+      const was = drag.mode;
+      drag = null;
+      this.over.classList.remove('panning');
+      if (was !== 'press' || e.type === 'pointercancel') return;
       const p = at(e);
+      seekTo(p.x, p.w);
       const span = this.spanAt(p.x, p.y, p.w);
       if (span >= 0) this.host.selectSpan(span);
-    });
+    };
+    this.over.addEventListener('pointerup', end);
+    this.over.addEventListener('pointercancel', end);
     this.over.addEventListener('pointerleave', () => (this.tip.hidden = true));
     this.over.addEventListener(
       'wheel',
       (e) => {
         e.preventDefault();
         const p = at(e);
-        if (Math.abs(e.deltaX) > Math.abs(e.deltaY)) {
-          const w = this.v1 - this.v0;
-          const dt = (e.deltaX / p.w) * w;
-          this.v0 = Math.max(0, Math.min(this.m.duration - w, this.v0 + dt));
-          this.v1 = this.v0 + w;
-        } else {
-          const tc = this.tAt(Math.max(NAME_W, p.x), p.w);
-          const f = Math.exp(e.deltaY * 0.0015);
-          const w = Math.max(this.m.duration / 5e5, Math.min(this.m.duration, (this.v1 - this.v0) * f));
-          const u = (tc - this.v0) / (this.v1 - this.v0);
-          this.v0 = Math.max(0, tc - u * w);
-          this.v1 = Math.min(this.m.duration, this.v0 + w);
-          this.v0 = Math.max(0, this.v1 - w);
+        const pan = wheelPan(e);
+        if (pan !== null) {
+          this.setView(this.v0 + (pan / Math.max(1, p.w - NAME_W - 8)) * (this.v1 - this.v0));
+          return;
         }
+        const tc = this.tAt(Math.max(NAME_W, p.x), p.w);
+        const f = Math.exp(e.deltaY * 0.0015);
+        const w = Math.max(this.m.duration / 5e5, Math.min(this.m.duration, (this.v1 - this.v0) * f));
+        const u = (tc - this.v0) / (this.v1 - this.v0);
+        this.v0 = Math.max(0, tc - u * w);
+        this.v1 = Math.min(this.m.duration, this.v0 + w);
+        this.v0 = Math.max(0, this.v1 - w);
         this.dirty = true;
         this.draw();
       },
       { passive: false },
     );
     this.over.addEventListener('dblclick', () => {
+      this.follow = true;
       this.v0 = 0;
       this.v1 = this.m.duration;
       this.dirty = true;
       this.draw();
     });
+  }
+
+  /** Show the same span of time from `v0` on, kept inside the run. */
+  private setView(v0: number): void {
+    this.follow = false;
+    [this.v0, this.v1] = panView(v0, this.v1 - this.v0, this.m.duration);
+    this.dirty = true;
+    this.draw();
   }
 
   private spanAt(px: number, py: number, w: number): number {
@@ -400,6 +439,26 @@ export class Timeline {
     const stack = this.m.stackOf(act);
     return stack[depth] ?? -1;
   }
+}
+
+/**
+ * How far a wheel event moves the timeline, in pixels (positive = later), or null when it zooms.
+ * Shift + wheel moves it: down = earlier (left), up = later (right). A sideways scroll (trackpad, tilt wheel)
+ * moves it the way it scrolls. A plain vertical wheel zooms.
+ */
+export function wheelPan(e: Pick<WheelEvent, 'deltaX' | 'deltaY' | 'deltaMode' | 'shiftKey'>): number | null {
+  const unit = e.deltaMode === 1 ? 16 : e.deltaMode === 2 ? 400 : 1; // lines, pages
+  // browsers may turn Shift + wheel into a sideways scroll themselves (deltaX instead of deltaY)
+  if (e.shiftKey) return -(e.deltaY || e.deltaX) * unit;
+  if (Math.abs(e.deltaX) > Math.abs(e.deltaY)) return e.deltaX * unit;
+  return null;
+}
+
+/** A view of `width` starting at `v0`, moved back inside 0 … `duration`. */
+export function panView(v0: number, width: number, duration: number): [number, number] {
+  const w = Math.min(width, duration);
+  const a = Math.max(0, Math.min(duration - w, v0));
+  return [a, a + w];
 }
 
 function truncate(s: string, n: number): string {
