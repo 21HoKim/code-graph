@@ -14,6 +14,12 @@
 - 재생 중에 보이는 구간을 옮겨도 재생 위치로 다시 튀지 않아요. 재생을 다시 누르거나 클릭하면 따라가기가 돌아와요.
 
 ### 수정
+- 클래스 상세: Python 타입은 그 파일의 import를 보고 찾아요. 모듈만 다르고 이름이 같은 클래스를 섞지 않아요
+  (`from .models import Config`, `from .legacy import Config as LegacyConfig`, `import legacy as old` → `old.Config`,
+  `if TYPE_CHECKING:` 안의 import, `Optional[Config]`, `Config | None`, `"Config"`).
+- 클래스 상세, C/C++: 같은 이름의 구조체가 두 파일에 따로 있으면 그 타입을 적은 파일(또는 그 파일이 포함한 헤더)의 것으로
+  봐요. `typedef struct buffer buffer_t;`, `typedef Packet Datagram;`, `using Frame = Packet;`도 클래스가 다른 파일에
+  정의돼 있어도 그 클래스로 쳐요.
 - *반환하는 곳*에 그 함수의 `return`만 나와요. 함수 안에 적은 람다나 지역 클래스의 `return`은 더 이상 섞이지 않아요
   (`[] { return g(); }`를 가진 `void` 함수는 return 문이 없다고 나와요).
 - 여러 줄에 걸친 `return`이나 한 줄 블록 안의 `return`(`if (ok) { return g(a, b); }`)을 `return`부터 그 문장의 `;`까지

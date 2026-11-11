@@ -4,7 +4,7 @@ import * as os from 'node:os';
 import * as path from 'node:path';
 import { before, describe, it } from 'node:test';
 import { AnalysisSession, walk } from '../src/core/analyze';
-import type { CodeGraph, Relation } from '../src/core/model';
+import type { CodeGraph, Entity, Relation } from '../src/core/model';
 import { ParsePool } from '../src/core/pool';
 
 const ROOT = path.resolve(__dirname, '..');
@@ -152,6 +152,85 @@ describe('where a class\'s objects live', () => {
     const u = typeUsages(g, cls('shop::billing::Order'));
     assert.deepEqual(u.takers.map((t) => t.name), ['o']);
     assert.deepEqual(typeUsages(g, cls('shop::billing::Customer')).givers.map((t) => t.type), ['shop::billing::Customer']);
+  });
+
+  it('C: the same struct name in two files is the one of the file (or its headers) that writes it', async () => {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'cc-usage-c-'));
+    fs.writeFileSync(path.join(dir, 'buf.h'), ['typedef struct buffer buffer_t;', 'struct pool { buffer_t* free; };', 'void buf_init(buffer_t* b);'].join('\n'));
+    fs.writeFileSync(path.join(dir, 'buf.c'), ['#include "buf.h"', 'struct buffer { int len; };', 'struct cache { struct buffer* head; };', 'void buf_init(buffer_t* b) { b->len = 0; }'].join('\n'));
+    fs.writeFileSync(path.join(dir, 'net.c'), ['struct buffer { char data[64]; };', 'struct conn { struct buffer in; };'].join('\n'));
+    fs.writeFileSync(path.join(dir, 'anon.c'), ['typedef struct { int x; } point_t;', 'struct shape { point_t origin; };'].join('\n'));
+    const g = await analyze(dir);
+    const { typeUsages } = await import('../src/webview/usage');
+    const buffers = g.entities.filter((e) => e.kind === 'class' && e.name === 'buffer');
+    assert.equal(buffers.length, 2);
+    const inFile = (f: string) => buffers.find((b) => b.def?.file === f)!;
+    const names = (e: Entity) => typeUsages(g, e).holders.map((u) => `${g.entities.find((x) => x.id === u.id)!.name}.${u.name}`).sort();
+    assert.deepEqual(names(inFile('buf.c')), ['cache.head', 'pool.free'], 'pool is in buf.h, written as the typedef buffer_t declared there');
+    assert.deepEqual(names(inFile('net.c')), ['conn.in']);
+    assert.deepEqual(typeUsages(g, inFile('buf.c')).takers.map((t) => t.name), ['b'], 'buffer_t* b');
+    const point = g.entities.find((e) => e.kind === 'class' && e.name === 'point_t')!;
+    assert.deepEqual(names(point), ['shape.origin'], 'an anonymous struct named by its typedef');
+  });
+
+  it('C++: a `using` or `typedef` name for a class counts as the class', async () => {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'cc-usage-alias-'));
+    fs.writeFileSync(path.join(dir, 'net.hpp'), ['namespace net {', 'struct Packet { int len; };', 'using Frame = Packet;', 'typedef Packet Datagram;', 'using FramePtr = Packet*;', '}'].join('\n'));
+    fs.writeFileSync(path.join(dir, 'link.hpp'), ['#include "net.hpp"', 'struct Link { net::Frame last; net::Datagram first; void send(const net::Frame& f); };'].join('\n'));
+    const g = await analyze(dir);
+    const { typeUsages } = await import('../src/webview/usage');
+    const pkt = g.entities.find((e) => e.kind === 'class' && e.qname === 'net::Packet')!;
+    assert.deepEqual(pkt.aliases?.sort(), ['Datagram', 'Frame'], 'not FramePtr, a pointer');
+    const u = typeUsages(g, pkt);
+    assert.deepEqual(u.holders.map((h) => h.name).sort(), ['first', 'last']);
+    assert.deepEqual(u.takers.map((t) => t.name), ['f']);
+  });
+
+  it('Python: the same class name in two modules is the one the file imports', async () => {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'cc-usage-py-'));
+    fs.mkdirSync(path.join(dir, 'app'));
+    fs.writeFileSync(path.join(dir, 'app', '__init__.py'), 'from .models import User\n');
+    fs.writeFileSync(path.join(dir, 'app', 'models.py'), ['class User:', '    pass', 'class Config:', '    pass'].join('\n'));
+    fs.writeFileSync(path.join(dir, 'app', 'legacy.py'), ['class Config:', '    pass'].join('\n'));
+    fs.writeFileSync(
+      path.join(dir, 'app', 'service.py'),
+      [
+        'from typing import TYPE_CHECKING, Optional',
+        'from .models import Config',
+        'from . import legacy as old',
+        'from .legacy import Config as LegacyConfig',
+        'from app import User',
+        'if TYPE_CHECKING:',
+        '    from .models import Config as Settings',
+        'class Service:',
+        '    def __init__(self, cfg: Config, prev: "LegacyConfig", back: old.Config, opt: Optional[Settings] = None):',
+        '        self.cfg: Config | None = cfg',
+        '        self.users: list[User] = []',
+        '    def legacy(self) -> "old.Config":',
+        '        return old.Config()',
+      ].join('\n'),
+    );
+    const g = await analyze(dir);
+    const { typeUsages } = await import('../src/webview/usage');
+    const cls = (file: string, name: string) => g.entities.find((e) => e.kind === 'class' && e.name === name && e.def?.file === file)!;
+    const modern = typeUsages(g, cls('app/models.py', 'Config'));
+    const old = typeUsages(g, cls('app/legacy.py', 'Config'));
+    assert.deepEqual(modern.takers.map((t) => t.name), ['cfg'], 'Config from .models');
+    assert.deepEqual(modern.holders.map((h) => h.name), ['cfg'], 'self.cfg: Config | None');
+    assert.deepEqual(old.takers.map((t) => t.name), ['prev'], '"LegacyConfig" (string annotation, imported under another name)');
+    assert.deepEqual(old.givers.map((t) => t.type), ['"old.Config"'], 'a module imported under another name');
+    const users = typeUsages(g, cls('app/models.py', 'User'));
+    assert.deepEqual(users.holders.map((h) => h.name), ['users'], 'list[User], re-exported by the package');
+    // each parameter on its own: which file's Config it names
+    const { TypeIndex, writerOf } = await import('../src/webview/usage');
+    const index = new TypeIndex(g);
+    const svc = g.entities.find((e) => e.qname.endsWith('Service.__init__'))!;
+    const fileOf = (type: string) => [...index.classesIn(type, writerOf(svc))].map((id) => g.entities.find((e) => e.id === id)!.def!.file);
+    assert.deepEqual(
+      Object.fromEntries((svc.params ?? []).filter((p) => p.type).map((p) => [p.name, fileOf(p.type!)])),
+      { cfg: ['app/models.py'], prev: ['app/legacy.py'], back: ['app/legacy.py'], opt: ['app/models.py'] },
+      'opt: Optional[Settings] comes from an import under `if TYPE_CHECKING:`',
+    );
   });
 });
 

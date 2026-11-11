@@ -193,8 +193,10 @@ class Linker {
     }
     this.ccEntities();
     this.ccIncludes();
+    this.ccTypedefs();
     this.pyEntities();
     this.pyImportTables();
+    this.pyNameTables();
     this.inheritance();
     this.calls();
     this.markEntries();
@@ -572,6 +574,47 @@ class Linker {
     }
   }
 
+  /**
+   * Typedef and `using` names become aliases of the class they name, so a type written with them is found:
+   * `typedef struct buffer buffer_t;` in a header, `struct buffer {…}` in a source. When several classes have that
+   * name, the one in the same file wins, then one in a file it includes, then one in a file that includes it.
+   */
+  private ccTypedefs(): void {
+    const includes = new Map<string, Set<string>>();
+    const includedBy = new Map<string, Set<string>>();
+    for (const r of this.relations.values()) {
+      if (r.kind !== 'include') continue;
+      const [a, b] = [r.from.slice(2), r.to.slice(2)];
+      (includes.get(a) ?? includes.set(a, new Set()).get(a)!).add(b);
+      (includedBy.get(b) ?? includedBy.set(b, new Set()).get(b)!).add(a);
+    }
+    const closure = (file: string): Set<string> => {
+      const seen = new Set<string>();
+      const todo = [file];
+      while (todo.length) for (const n of includes.get(todo.pop()!) ?? []) if (!seen.has(n)) (seen.add(n), todo.push(n));
+      return seen;
+    };
+    for (const f of this.cc) {
+      for (const td of f.typedefs ?? []) {
+        const parts = td.target.split('::');
+        const suffix = '::' + td.target;
+        const cands = (this.ccClassesByName.get(parts[parts.length - 1]) ?? []).filter((c) => parts.length === 1 || ('::' + c.qname).endsWith(suffix));
+        if (!cands.length) continue;
+        const inc = closure(f.path);
+        const tiers: ((file: string) => boolean)[] = [(x) => x === f.path, (x) => inc.has(x), (x) => !!includedBy.get(f.path)?.has(x)];
+        let pick = cands.length === 1 ? cands : [];
+        for (const tier of tiers) {
+          const hit = cands.filter((c) => tier(c.def?.file ?? ''));
+          if (hit.length) {
+            pick = hit;
+            break;
+          }
+        }
+        for (const c of pick) if (c.name !== td.name && !c.aliases?.includes(td.name)) (c.aliases ??= []).push(td.name);
+      }
+    }
+  }
+
   private ccIncludes(): void {
     const byBase = new Map<string, string[]>();
     for (const p of this.filePaths) push(byBase, p.slice(p.lastIndexOf('/') + 1), p);
@@ -928,6 +971,21 @@ class Linker {
       }
       this.pyImports.set(f.path, binds);
       if (wild.length) this.pyWildcards.set(f.path, wild);
+    }
+  }
+
+  /** Python: what each file's imported names are (classes and modules only), for type names written with them. */
+  private pyNameTables(): void {
+    const infos = new Map(this.files.map((x) => [x.path, x]));
+    for (const f of this.py) {
+      const info = infos.get(f.path);
+      if (!info) continue;
+      const names: Record<string, string> = {};
+      for (const name of this.pyImports.get(f.path)?.keys() ?? []) {
+        const { ent } = this.resolvePyDotted(name.split('.'), f.path);
+        if (ent && (ent.kind === 'class' || ent.kind === 'namespace')) names[name] = ent.id;
+      }
+      if (Object.keys(names).length) info.names = names;
     }
   }
 

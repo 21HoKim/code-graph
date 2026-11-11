@@ -38,6 +38,8 @@ export interface FileInfo {
   path: string;
   lang: Lang;
   lines: number;
+  /** Python: names the file's imports bind to workspace classes and modules (`Config`, `AC`, `x`) → entity id. */
+  names?: Record<string, string>;
 }
 
 export interface Entity {
@@ -233,6 +235,16 @@ export interface RawImport {
   line: number;
 }
 
+export interface RawTypedef {
+  /** The new name. */
+  name: string;
+  /** The type it names, as written without `struct`/`class` (`buffer`, `net::Packet`). */
+  target: string;
+  /** Namespaces / classes it is written in. */
+  scope: string[];
+  line: number;
+}
+
 export interface FileFacts {
   path: string;
   lang: Lang;
@@ -247,6 +259,9 @@ export interface FileFacts {
   error?: string;
   /** Regions tree-sitter could not parse (imprecise: error recovery can swallow neighbouring code). */
   syntaxErrors?: { line: number; endLine: number; message: string }[];
+  /** C/C++: `typedef struct buffer buffer_t;`, `typedef Foo Bar;`, `using Bar = Foo;` — other names of a class
+   *  that may be defined in another file. */
+  typedefs?: RawTypedef[];
   /** Python: every name bound anywhere in the module (defs, assignments, params, imports, …). */
   boundNames?: string[];
   /** Python: `from x import *` present, so unbound names cannot be judged. */

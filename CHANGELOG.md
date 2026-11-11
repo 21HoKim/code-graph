@@ -15,6 +15,13 @@ into the version's section and its [release notes](https://github.com/21HoKim/co
 - While playing, the view no longer jumps back to the playhead after you move it; play or a click brings it back.
 
 ### Fixed
+- Class details: Python types are looked up through the file's imports, so two classes with the same name in
+  different modules stay apart (`from .models import Config`, `from .legacy import Config as LegacyConfig`,
+  `import legacy as old` → `old.Config`, imports under `if TYPE_CHECKING:`, `Optional[Config]`, `Config | None`,
+  `"Config"`).
+- Class details, C/C++: a struct defined with the same name in two files is the one of the file that writes the
+  type (or a header it includes), and `typedef struct buffer buffer_t;`, `typedef Packet Datagram;` and
+  `using Frame = Packet;` count as the class even when it is defined in another file.
 - *Where it returns* lists only the function's own `return` statements: those of a lambda or a local class
   written inside it no longer show up (a `void` function holding `[] { return g(); }` says it has no return).
 - A `return` spread over several lines, or written in a one-line block (`if (ok) { return g(a, b); }`), is shown

@@ -87,6 +87,7 @@ export function extractFile(parsers: Parsers, relPath: string, text: string): Fi
       base.calls = r.calls;
       base.includes = r.includes;
       base.usingNamespaces = r.usingNamespaces;
+      if (r.typedefs.length) base.typedefs = r.typedefs;
     }
   } catch (e) {
     base.error = String((e as Error)?.stack ?? e);

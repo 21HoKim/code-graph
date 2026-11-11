@@ -71,7 +71,9 @@ every Python process of a traced container), `c/cg_trace.h` + `c/cg_trace.c` (C9
   be inferred locally, the receiver type (parameters, `auto x = new T`, `T x(…)`, `make_unique<T>`,
   `x = Foo()`, `with Foo() as x`, `for (auto& x : container)`), argument texts, and whether it is a
   *spawn* (a function reference handed to a thread/task API) or an *instantiation*.
-- `#include` / `import` statements.
+- `#include` / `import` statements, and C/C++ `typedef` / `using` names for a class (`typedef struct buffer
+  buffer_t;`), which the linker turns into aliases of the class they name (same file first, then included files,
+  then files including it).
 
 Because facts are local to one file they are cached by `mtime + size`; saving a file re-extracts one file.
 Extraction runs in `worker_threads` (`pool.ts`), one tree-sitter instance per worker.
@@ -112,6 +114,12 @@ Resolution order for a call (C++ shown; Python is analogous with LEGB scopes, im
 
 Calls into `std::`/`boost::` and to methods of known non-workspace types are not guessed. Common container/stdlib
 method names (`push_back`, `append`, `get`, …) are never matched by name alone.
+
+Type names in members, parameters and return types (the class panel's *where its objects live*) are looked up in
+`webview/usage.ts` the same way: Python through the file's imports (`FileInfo.names`, filled by the linker:
+`from .models import Config as Settings`, `import legacy as old` → `old.Config`), C/C++ from the scope they are
+written in outwards; when several classes still share the name, the one in the writing file wins, then one in a
+file it includes, then one in a file including it.
 
 Spawns via containers (`workers_.emplace_back(&Router::txLoop, this)`) are confirmed against the field's declared
 type (`std::vector<std::thread>`); if the field is known not to hold threads the link is dropped.

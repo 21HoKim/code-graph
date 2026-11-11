@@ -5,7 +5,7 @@
  * local variable types) and leaves cross-file resolution to the linker.
  */
 import type { Node } from 'web-tree-sitter';
-import type { Param, RawCall, RawEntity, RawInclude, ScopeKind } from '../model';
+import type { Param, RawCall, RawEntity, RawInclude, RawTypedef, ScopeKind } from '../model';
 import {
   CPP_PRIMITIVES,
   KeyRegistry,
@@ -48,6 +48,7 @@ export interface CppFacts {
   calls: RawCall[];
   includes: RawInclude[];
   usingNamespaces: string[];
+  typedefs: RawTypedef[];
 }
 
 const CLASS_NODES = new Set(['class_specifier', 'struct_specifier', 'union_specifier']);
@@ -57,7 +58,7 @@ const MAX_DEPTH = 600;
 export function extractCpp(root: Node): CppFacts {
   const x = new CppExtractor();
   x.decls(named(root), { names: [], kinds: [] });
-  return { entities: x.entities, calls: x.calls, includes: x.includes, usingNamespaces: x.usingNs };
+  return { entities: x.entities, calls: x.calls, includes: x.includes, usingNamespaces: x.usingNs, typedefs: x.typedefs };
 }
 
 // ---------------------------------------------------------------------------
@@ -206,6 +207,7 @@ function isClassNode(n: Node | null): n is Node {
 class CppExtractor {
   entities: RawEntity[] = [];
   calls: RawCall[] = [];
+  typedefs: RawTypedef[] = [];
   includes: RawInclude[] = [];
   usingNs: string[] = [];
   private keys = new KeyRegistry();
@@ -260,9 +262,12 @@ class CppExtractor {
         if (isClassNode(t)) {
           const alias = declName(n.childForFieldName('declarator'));
           this.klass(t, scope, alias, flags);
-        }
+        } else this.typedef(n, scope);
         return;
       }
+      case 'alias_declaration':
+        this.typedef(n, scope);
+        return;
       case 'function_definition':
         this.fn(n, scope, flags, true);
         return;
@@ -292,6 +297,34 @@ class CppExtractor {
   }
 
   /** `declaration` at namespace scope or `field_declaration`/`declaration` in a class body. */
+  /**
+   * `typedef struct buffer buffer_t;`, `typedef Packet Frame;`, `using Frame = net::Packet;`: another name for a
+   * class that may be defined elsewhere. Only plain names: not pointers, functions or templates.
+   */
+  private typedef(n: Node, scope: Scope): void {
+    let t: Node | null;
+    let name: string | undefined;
+    if (n.type === 'alias_declaration') {
+      name = n.childForFieldName('name')?.text;
+      t = n.childForFieldName('type');
+      if (t?.type === 'type_descriptor') {
+        if (named(t).some((c) => c.type.endsWith('_declarator'))) return; // using P = Foo*;
+        t = t.childForFieldName('type');
+      }
+    } else {
+      const d = n.childForFieldName('declarator');
+      if (d?.type !== 'type_identifier') return; // typedef struct x *xp; typedef int (*fn)(void);
+      name = d.text;
+      t = n.childForFieldName('type');
+    }
+    if (!t || !name) return;
+    if (CLASS_NODES.has(t.type)) t = t.childForFieldName('name');
+    if (!t || (t.type !== 'type_identifier' && t.type !== 'qualified_identifier')) return;
+    if (/[<*&(]/.test(t.text)) return;
+    const target = t.text.replace(/\s+/g, '').replace(/^::/, '');
+    if (target !== name) this.typedefs.push({ name, target, scope: scope.names, line: lineOf(n) });
+  }
+
   private declaration(n: Node, scope: Scope, flags?: string[]): void {
     const type = n.childForFieldName('type');
     if (isClassNode(type)) this.klass(type, scope, undefined, flags);
@@ -400,8 +433,12 @@ class CppExtractor {
         case 'type_definition': {
           const t = m.childForFieldName('type');
           if (isClassNode(t)) this.klass(t, scope, declName(m.childForFieldName('declarator')));
+          else this.typedef(m, scope);
           break;
         }
+        case 'alias_declaration':
+          this.typedef(m, scope);
+          break;
         default:
           if (m.type.startsWith('preproc_')) this.members(named(m), scope);
       }
