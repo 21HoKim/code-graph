@@ -7,6 +7,8 @@ into the version's section and its [release notes](https://github.com/21HoKim/co
 
 ## Unreleased
 
+## 0.5.11
+
 ### Added
 - Class details: *Where members are read and written* — each member says how many functions read and write it,
   following chains through member types and base classes (`cfg.link.peer.port`, `p->len = 0`, `self.port`, a bare
