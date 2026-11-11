@@ -17,6 +17,8 @@ into the version's section and its [release notes](https://github.com/21HoKim/co
 - C++: calls and types written through `using ns::f;`, a namespace alias (`namespace io = lib::net;`), a
   `using namespace` inside a function or a header's `using namespace` are found exactly instead of by name, and
   `Router r(cfg);` counts as creating a `Router`.
+- Python: thread and task APIs imported under another name are found (`from threading import Thread as T`,
+  `from asyncio import create_task as spawn`).
 
 ## 0.5.11
 

@@ -181,6 +181,8 @@ class PyExtractor {
   imports: RawImport[] = [];
   access = new AccessLog();
   private keys = new KeyRegistry();
+  /** Names bound by `import a as b` (b → a) and `from m import X as Y` (Y → X): what an API name was imported as. */
+  private importedAs = new Map<string, string>();
 
   block(nodes: Node[], scope: Scope, f: FnCtx, depth: number): void {
     for (const n of nodes) this.visit(n, scope, f, depth);
@@ -193,12 +195,10 @@ class PyExtractor {
         for (const c of named(n)) {
           if (c.type === 'dotted_name') this.imports.push({ module: c.text, level: 0, line: lineOf(n) });
           else if (c.type === 'aliased_import') {
-            this.imports.push({
-              module: c.childForFieldName('name')?.text ?? '',
-              level: 0,
-              alias: c.childForFieldName('alias')?.text,
-              line: lineOf(n),
-            });
+            const module = c.childForFieldName('name')?.text ?? '';
+            const alias = c.childForFieldName('alias')?.text;
+            this.imports.push({ module, level: 0, alias, line: lineOf(n) });
+            if (alias) this.importedAs.set(alias, module);
           }
         }
         return;
@@ -216,7 +216,10 @@ class PyExtractor {
           if (!c) continue;
           if (c.type === 'dotted_name') names.push({ name: c.text });
           else if (c.type === 'aliased_import') {
-            names.push({ name: c.childForFieldName('name')?.text ?? '', alias: c.childForFieldName('alias')?.text });
+            const name = c.childForFieldName('name')?.text ?? '';
+            const alias = c.childForFieldName('alias')?.text;
+            names.push({ name, alias });
+            if (alias) this.importedAs.set(alias, name);
           }
         }
         if (named(n).some((c) => c.type === 'wildcard_import')) names.push({ name: '*' });
@@ -426,19 +429,23 @@ class PyExtractor {
     };
 
     if (fn?.type === 'identifier') {
-      const name = fn.text;
+      // the API under the name it was imported as: `from threading import Thread as T` → T(target=…) is a Thread
+      const name = this.importedAs.get(fn.text)?.split('.').pop() ?? fn.text;
       if ((name === 'Thread' || name === 'Process') && kw.has('target')) spawn(kw.get('target'), name);
       else if (name === 'Timer') spawn(kw.get('function') ?? pos[1], 'Timer');
       else if (name === 'start_new_thread') spawn(pos[0], '_thread.start_new_thread');
       else if (name === 'create_task' || name === 'ensure_future') spawn(pos[0], 'asyncio.' + name, true);
-      else this.calls.push({ caller: f.key, form: 'plain', name, line, args });
+      else if (name === 'to_thread' && pos[0]) spawn(pos[0], 'asyncio.to_thread');
+      else this.calls.push({ caller: f.key, form: 'plain', name: fn.text, line, args });
     } else if (fn?.type === 'attribute') {
       const obj = fn.childForFieldName('object');
       const attr = fn.childForFieldName('attribute')?.text ?? '';
-      const path = dotted(obj);
+      const written = dotted(obj);
+      // `import threading as th` → th.Thread is threading.Thread
+      const path = written && this.importedAs.has(written[0]) ? [...this.importedAs.get(written[0])!.split('.'), ...written.slice(1)] : written;
       const recvName = path?.[path.length - 1] ?? '';
       // Foo().method(): the receiver is a fresh Foo
-      const recvType = path && path.length === 1 ? f.locals.get(path[0]) : !path && obj?.type === 'call' ? constructedType(obj) : undefined;
+      const recvType = written && written.length === 1 ? f.locals.get(written[0]) : !written && obj?.type === 'call' ? constructedType(obj) : undefined;
       const isExecutor = EXECUTOR_TYPES.test(recvType ?? '') || EXECUTOR_NAMES.test(recvName);
       if ((attr === 'Thread' || attr === 'Process') && kw.has('target')) spawn(kw.get('target'), `${path?.join('.') ?? ''}.${attr}`);
       else if (attr === 'Timer' && (path?.[0] === 'threading' || pos.length >= 2)) spawn(kw.get('function') ?? pos[1], 'threading.Timer');
@@ -453,7 +460,7 @@ class PyExtractor {
       } else if (obj?.type === 'call' && obj.childForFieldName('function')?.text === 'super') {
         this.calls.push({ caller: f.key, form: 'super', name: attr, line, args });
       } else {
-        this.calls.push({ caller: f.key, form: 'member', name: attr, qualifier: path ?? (recvType ? ['()'] : ['?']), receiverType: recvType, line, args });
+        this.calls.push({ caller: f.key, form: 'member', name: attr, qualifier: written ?? (recvType ? ['()'] : ['?']), receiverType: recvType, line, args });
       }
       if (obj && obj.type !== 'identifier') this.visit(obj, scope, f, depth + 1);
     } else if (fn) {

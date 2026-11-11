@@ -14,6 +14,8 @@
   멤버, `std::jthread` 벡터의 `emplace_back`도 찾아요. 파일이 가져오지 않은 맨이름 `thread`는 추정으로 표시해요.
 - C++: `using ns::f;`, 네임스페이스 별칭(`namespace io = lib::net;`), 함수 안의 `using namespace`, 헤더의
   `using namespace`로 쓴 호출과 타입을 이름 추측 대신 정확히 찾고, `Router r(cfg);`를 `Router` 생성으로 셈해요.
+- Python: 다른 이름으로 가져온 스레드·태스크 API도 찾아요(`from threading import Thread as T`,
+  `from asyncio import create_task as spawn`).
 
 ## 0.5.11
 

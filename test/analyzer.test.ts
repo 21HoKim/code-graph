@@ -236,6 +236,42 @@ describe('threads started through every spelling of the API (every language)', (
     assert.ok(rel(g, 'call', 'cc:f', 'cc:lib::net::Widget::run'));
     assert.equal(rel(g, 'call', 'cc:b', 'cc:other::send'), undefined);
   });
+
+  it('Python: threading and asyncio under any import name', async () => {
+    const g = await analyze(
+      project({
+        'app.py': [
+          'import threading',
+          'import threading as th',
+          'from threading import Thread',
+          'from threading import Thread as T',
+          'from concurrent.futures import ThreadPoolExecutor',
+          'import asyncio as aio',
+          'from asyncio import create_task as spawn_task',
+          'def w1(): pass',
+          'def w2(): pass',
+          'def w3(): pass',
+          'def w4(): pass',
+          'def w5(): pass',
+          'async def c1(): pass',
+          'async def c2(): pass',
+          'def start():',
+          '    threading.Thread(target=w1).start()',
+          '    th.Thread(target=w2).start()',
+          '    Thread(target=w3).start()',
+          '    T(target=w4).start()',
+          '    with ThreadPoolExecutor() as ex:',
+          '        ex.submit(w5)',
+          'async def main():',
+          '    aio.create_task(c1())',
+          '    spawn_task(c2())',
+        ],
+      }),
+    );
+    for (const w of ['w1', 'w2', 'w3', 'w4', 'w5']) assert.ok(spawn(g, 'py:app.py:start', 'py:app.py:' + w), w);
+    for (const c of ['c1', 'c2']) assert.ok(spawn(g, 'py:app.py:main', 'py:app.py:' + c), c);
+    assert.equal(spawn(g, 'py:app.py:start', 'py:app.py:w2')?.via, 'threading.Thread', 'th.Thread named by its module');
+  });
 });
 
 describe('where a class\'s objects live', () => {
