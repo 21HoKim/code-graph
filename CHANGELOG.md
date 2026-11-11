@@ -49,6 +49,8 @@ into the version's section and its [release notes](https://github.com/21HoKim/co
   threads say which function started them too. Statically linked programs keep the guess.
 - Run & Trace (C/C++): an object a thread receives as `void*` is named by the type another function gives it
   (`struct counter*`), not `void*`.
+- Run & Trace with Docker Compose: a container ended by **■ Stop** or the time limit shows as stopped, not as a
+  failure with exit code 143 (the `SIGTERM` of `docker stop`; also 130 and 137).
 - Run & Trace (C/C++): busy threads no longer lose trace lines when their buffer filled up in the middle of a call.
 - Timeline: the speed list can be read in every theme; its open list drew the theme's text colour on the system's
   background, so only the chosen speed was visible.

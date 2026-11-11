@@ -595,7 +595,10 @@ export async function runComposeTrace(o: ComposeRunInput): Promise<ComposeRunRes
       const label = mine.length > 1 && c?.container ? c.container.replace(new RegExp(`^${escapeRe(pname)}[-_]`), '') : p.name;
       for (const l of list) {
         // the container's exit code is its main process's: PID 1, or its only traced program
-        if (c && (l.trace.pid === 1 || list.length === 1)) l.trace.exit = { ...l.trace.exit, code: c.exit };
+        // except when the run was stopped (Stop, time limit): docker stop's SIGTERM / SIGINT / SIGKILL (143, 130, 137) is
+        // that stop, not a failure of the program
+        const byStop = (timedOut || stoppedByYou) && (c?.exit === 143 || c?.exit === 130 || c?.exit === 137);
+        if (c && (l.trace.pid === 1 || list.length === 1)) l.trace.exit = { ...l.trace.exit, code: byStop ? null : c.exit };
         parts.push({ name: list.length > 1 ? `${label}/${l.trace.exe ?? (l.trace.lang === 'python' ? 'python' : 'pid')}#${l.trace.pid ?? '?'}` : label, trace: l.trace });
       }
     }
