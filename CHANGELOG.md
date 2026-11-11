@@ -16,6 +16,9 @@ into the version's section and its [release notes](https://github.com/21HoKim/co
   up: later). Dragging the playhead or the time axis still scrubs, and a click still jumps to that moment.
 
 ### Changed
+- Opening and closing a block, changing the level or the focus no longer jumps: the block you clicked stays where it
+  is, blocks slide and resize to their new places, what opens grows out of its block and what closes folds into
+  it; wires fade in once everything has arrived. Off when the system asks for reduced motion.
 - While playing, the view no longer jumps back to the playhead after you move it; play or a click brings it back.
 
 ### Fixed

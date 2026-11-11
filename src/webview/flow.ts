@@ -109,6 +109,11 @@ export class FlowLayer {
     document.addEventListener('visibilitychange', () => (document.hidden ? this.stop() : this.start()));
   }
 
+  /** Hidden while blocks slide into a new layout, then faded in on the new wires. */
+  fadeIn(ms: number): void {
+    this.canvas.animate([{ opacity: 0 }, { opacity: 0, offset: ms / (ms + 160) }, { opacity: 1 }], { duration: ms + 160, easing: 'ease-out' });
+  }
+
   setPalette(p: FlowPalette): void {
     this.palette = p;
     this.sprites.clear();

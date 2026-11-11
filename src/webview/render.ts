@@ -5,6 +5,7 @@
 import type { Overlay } from './overlay';
 import type { PEdge, PNode, Projection } from './projection';
 import { threadColor, type RuntimeOverlay } from './traceview';
+import { applyFit, play, type Fit } from './transition';
 import {
   clipLabel,
   HEADER_H,
@@ -52,7 +53,10 @@ export class Renderer {
   private gNodes: SVGGElement;
   private gLabels: SVGGElement;
   private gLive: SVGGElement;
+  private gGhosts: SVGGElement;
   private els = new Map<string, Element[]>();
+  /** Set by `transitionFrom`: the next `draw` animates from this picture. */
+  private pending?: { boxes: Map<string, Box>; parent: (id: string) => string | null | undefined; world: Fit; maxMove: number };
   private activeIds: string[] = [];
   private current?: { proj: Projection; layout: LayoutResult; style: LayoutStyle };
 
@@ -74,7 +78,7 @@ export class Renderer {
           <path d="M1,1 L11,6 L1,11 z" class="mk mk-inherit"/></marker>
       </defs>
       <g class="world">
-        <g class="grid"></g><g class="zones"></g><g class="edges"></g><g class="breaks"></g><g class="hits"></g><g class="nodes"></g><g class="labels"></g><g class="live"></g>
+        <g class="grid"></g><g class="zones"></g><g class="edges"></g><g class="breaks"></g><g class="hits"></g><g class="ghosts"></g><g class="nodes"></g><g class="labels"></g><g class="live"></g>
       </g>`;
     stage.appendChild(this.svg);
     this.world = this.svg.querySelector('.world')!;
@@ -86,7 +90,24 @@ export class Renderer {
     this.gNodes = this.svg.querySelector('.nodes')!;
     this.gLabels = this.svg.querySelector('.labels')!;
     this.gLive = this.svg.querySelector('.live')!;
+    this.gGhosts = this.svg.querySelector('.ghosts')!;
   }
+
+  /**
+   * Animate the next `draw` from the picture now on screen (see transition.ts). `world` maps the current
+   * picture's world coordinates into the next one's (the viewport moves too); moves longer than `maxMove`
+   * (next picture's world units) cross-fade instead.
+   */
+  transitionFrom(world: Fit, maxMove: number): void {
+    const cur = this.current;
+    if (!cur) return;
+    const boxes = new Map<string, Box>();
+    for (const [id, b] of cur.layout.boxes) boxes.set(id, applyFit(world, b));
+    this.pending = { boxes, parent: (id) => cur.proj.nodes.get(id)?.parent, world, maxMove };
+  }
+
+  /** How long the transition started by the last `draw` runs (0: none). */
+  transitionMs = 0;
 
   setTransform(x: number, y: number, k: number): void {
     this.world.setAttribute('transform', `translate(${x},${y}) scale(${k})`);
@@ -105,6 +126,10 @@ export class Renderer {
     extraClass?: (e: PEdge) => string,
     runtime?: RuntimeOverlay,
   ): void {
+    const tr = this.pending;
+    this.pending = undefined;
+    const oldEls = tr ? new Map(this.els) : undefined;
+    for (const g of this.gGhosts.querySelectorAll('.ghost')) g.remove();
     this.current = { proj, layout, style };
     this.activeIds = [];
     this.gLive.innerHTML = '';
@@ -157,6 +182,19 @@ export class Renderer {
       if (list) list.push(el);
       else this.els.set(id, [el]);
     }
+    this.transitionMs = tr
+      ? play(
+          { boxes: tr.boxes, parent: tr.parent, elements: oldEls!, world: tr.world },
+          {
+            boxes: layout.boxes,
+            parent: (id) => proj.nodes.get(id)?.parent,
+            elements: this.els,
+            ghosts: this.gGhosts,
+            late: [this.gEdges, this.gBreaks, this.gLabels],
+            maxMove: tr.maxMove,
+          },
+        )
+      : 0;
   }
 
   private zone(n: PNode, b: { x: number; y: number; w: number; h: number }, measure: Measure, overlay?: Overlay): string {

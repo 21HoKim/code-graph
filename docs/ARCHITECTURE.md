@@ -47,6 +47,7 @@ every Python process of a traced container), `c/cg_trace.h` + `c/cg_trace.c` (C9
 | `traceview.ts` | trace → what ran in the current view, time queries, data trails |
 | `timeline.ts` | thread swimlanes: scrub, play, step |
 | `render.ts` | SVG zones, blocks, wires, labels and live glows |
+| `transition.ts` | opening / closing / changing level without a jump: blocks slide and resize from their old boxes (FLIP) |
 | `flow.ts` | canvas layer: moving charges, replay pulses |
 | `viewport.ts` | pan, zoom, pinch, tap |
 | `usage.ts` | type names → classes (scopes, imports, includes): where a class's objects live |
@@ -169,7 +170,11 @@ Circuit style uses orthogonal routing (RIGHT on wide screens, DOWN on tall ones)
 as Catmull-Rom curves. If hierarchical layout fails, the view falls back to per-container layout with straight
 wires. ELK runs in a web worker created from a blob (VS Code webviews cannot start workers from resource URLs).
 
-SVG is generated as strings and swapped in at once. Wires get an invisible wide twin for hovering. Zoomed-out
+SVG is generated as strings and swapped in at once. When the same picture is rearranged (a block opened or closed,
+another level, focus), the clicked block keeps its place on screen and `transition.ts` animates the swap: blocks and
+containers that stay move and resize from their old boxes, new ones grow out of their ancestor's old box and fade in,
+vanishing ones fold into their ancestor's new box; wires fade in at the end. Nothing animates with
+`prefers-reduced-motion`. Wires get an invisible wide twin for hovering. Zoomed-out
 views drop secondary text (level of detail).
 
 The flow layer is one `<canvas>` above the SVG (pointer-events: none). Each wire is sampled into a polyline with

@@ -522,7 +522,7 @@ class App {
     return Math.max(16, Math.min(45, (window.innerWidth * window.innerHeight) / 30000));
   }
 
-  async refresh(anchor?: { id: string; sx: number; sy: number }): Promise<void> {
+  async refresh(anchor?: { id: string; sx: number; sy: number }, animate = true): Promise<void> {
     if (!this.graph || !this.tree) return;
     const gen = ++this.gen;
     const s = this.state;
@@ -557,17 +557,26 @@ class App {
     clearTimeout(busyTimer);
     if (gen !== this.gen) return;
     this.busy.hidden = true;
+    // the same picture, rearranged (open / close, level, focus): blocks slide to their new places
+    const before = this.proj && this.layout && this.proj.nodes.size && animate ? { x: this.vp.x, y: this.vp.y, k: this.vp.k } : undefined;
     this.proj = proj;
     this.layout = layout;
     this.dir = dir;
-    this.paint();
     if (anchor) {
+      // the block that was clicked keeps its place on screen
       const b = layout.boxes.get(anchor.id);
       if (b) this.vp.set(anchor.sx - b.x * this.vp.k, anchor.sy - b.y * this.vp.k, this.vp.k);
     } else if (this.fitPending) {
       this.fitPending = false;
       this.fit(false);
     }
+    if (before) {
+      const s1 = before.k / this.vp.k;
+      const r = this.stage.getBoundingClientRect();
+      this.renderer.transitionFrom({ sx: s1, sy: s1, tx: (before.x - this.vp.x) / this.vp.k, ty: (before.y - this.vp.y) / this.vp.k }, (0.8 * Math.hypot(r.width, r.height)) / this.vp.k);
+    }
+    this.paint();
+    if (this.renderer.transitionMs) this.flow.fadeIn(this.renderer.transitionMs);
     this.renderer.setTransform(this.vp.x, this.vp.y, this.vp.k);
     if (this.selectedEdge && proj.edges.some((e) => e.id === this.selectedEdge)) this.selectEdge(this.selectedEdge);
     else this.select(s.selected && proj.nodes.has(s.selected) ? s.selected : null, !this.details.hidden);
