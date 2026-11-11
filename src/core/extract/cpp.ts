@@ -21,6 +21,7 @@ import {
   stripTemplateArgs,
   type ReturnRules,
 } from './common';
+import { CppNames, type LibKind } from './cppnames';
 
 /** A function's own returns: lambdas, local functions and local classes inside it return for themselves. */
 const CPP_RETURNS: ReturnRules = {
@@ -34,6 +35,24 @@ interface Scope {
   /** RawEntity key of the enclosing class, if directly inside a class body. */
   classKey?: string;
   className?: string;
+}
+
+/** How a function reference is handed to another thread. */
+interface Spawn {
+  /** The API, for the wire's label: `std::thread`, `pthread_create`. */
+  via: string;
+  /** Container or member that receives the thread, for the linker to confirm by its declared type. */
+  recv?: string;
+  /** The API was taken from a bare name the file never brings in (see `RawCall.assumed`). */
+  assumed?: string;
+}
+
+/** A thread or task API that a written name stands for, or is most likely meant as. */
+interface ThreadApi {
+  name: string;
+  kind: LibKind;
+  arg?: number;
+  assumed?: boolean;
 }
 
 interface FnCtx {
@@ -58,11 +77,11 @@ export interface CppFacts {
 }
 
 const CLASS_NODES = new Set(['class_specifier', 'struct_specifier', 'union_specifier']);
-const THREAD_TYPE = /(^|::)(thread|jthread)$/;
 const MAX_DEPTH = 600;
 
-export function extractCpp(root: Node): CppFacts {
-  const x = new CppExtractor();
+/** `cxx`: the file is C++ (C has no namespaces, so no `std::thread` is assumed from a bare `thread`). */
+export function extractCpp(root: Node, cxx = true): CppFacts {
+  const x = new CppExtractor(cxx);
   x.decls(named(root), { names: [], kinds: [] });
   return { entities: x.entities, calls: x.calls, includes: x.includes, usingNamespaces: x.usingNs, typedefs: x.typedefs, accesses: x.access.list };
 }
@@ -231,6 +250,12 @@ class CppExtractor {
   private keys = new KeyRegistry();
   private byKey = new Map<string, RawEntity>();
   private fileCtx: FnCtx = { key: '', locals: new Map(), rawLocals: new Map() };
+  /** `using` declarations, namespace and type aliases in reach: what a written name stands for. */
+  private names: CppNames;
+
+  constructor(cxx: boolean) {
+    this.names = new CppNames(cxx);
+  }
 
   decls(nodes: Node[], scope: Scope, flags?: string[]): void {
     for (const n of nodes) this.decl(n, scope, flags);
@@ -255,7 +280,9 @@ class CppExtractor {
           kinds: [...scope.kinds, ...parts.map(() => 'namespace' as ScopeKind)],
         };
         const body = n.childForFieldName('body');
+        this.names.enter();
         if (body) this.decls(named(body), inner);
+        this.names.leave();
         return;
       }
       case 'linkage_specification': {
@@ -280,11 +307,14 @@ class CppExtractor {
         if (isClassNode(t)) {
           const alias = declName(n.childForFieldName('declarator'));
           this.klass(t, scope, alias, flags);
-        } else this.typedef(n, scope);
+        } else this.typedef(n, scope, flags);
         return;
       }
       case 'alias_declaration':
-        this.typedef(n, scope);
+        this.typedef(n, scope, flags);
+        return;
+      case 'namespace_alias_definition':
+        this.usingDecl(n);
         return;
       case 'function_definition':
         this.fn(n, scope, flags, true);
@@ -294,11 +324,8 @@ class CppExtractor {
         this.declaration(n, scope, flags);
         return;
       case 'using_declaration': {
-        const t = n.text;
-        if (/^using\s+namespace\b/.test(t)) {
-          const ns = t.replace(/^using\s+namespace\s+/, '').replace(/;$/, '').trim();
-          if (ns) this.usingNs.push(ns.replace(/^::/, ''));
-        }
+        const ns = this.usingDecl(n);
+        if (ns && !this.usingNs.includes(ns)) this.usingNs.push(ns);
         return;
       }
       case 'expression_statement':
@@ -319,7 +346,8 @@ class CppExtractor {
    * `typedef struct buffer buffer_t;`, `typedef Packet Frame;`, `using Frame = net::Packet;`: another name for a
    * class that may be defined elsewhere. Only plain names: not pointers, functions or templates.
    */
-  private typedef(n: Node, scope: Scope): void {
+  private typedef(n: Node, scope: Scope, flags?: string[]): void {
+    this.typeAlias(n, flags);
     let t: Node | null;
     let name: string | undefined;
     if (n.type === 'alias_declaration') {
@@ -341,6 +369,63 @@ class CppExtractor {
     if (/[<*&(]/.test(t.text)) return;
     const target = t.text.replace(/\s+/g, '').replace(/^::/, '');
     if (target !== name) this.typedefs.push({ name, target, scope: scope.names, line: lineOf(n) });
+  }
+
+  /**
+   * `using namespace X;`, `using X::y;`, `namespace A = B;` (any scope): remembered in `names`. Returns the namespace
+   * of a `using namespace`, for the file's list.
+   */
+  private usingDecl(n: Node): string | undefined {
+    if (n.type === 'namespace_alias_definition') {
+      const alias = named(n).find((c) => c.type === 'namespace_identifier' || c.type === 'identifier');
+      const target = named(n).find((c) => c !== alias);
+      if (alias && target) this.names.namespaceAlias(alias.text, target.text);
+      return undefined;
+    }
+    const t = n.text;
+    if (/^using\s+namespace\b/.test(t)) {
+      const ns = t.replace(/^using\s+namespace\s+/, '').replace(/;$/, '').trim().replace(/^::/, '');
+      if (!ns) return undefined;
+      this.names.usingNamespace(ns);
+      return this.names.expand(ns.split('::'), true).join('::');
+    }
+    const q = named(n).find((c) => c.type === 'qualified_identifier');
+    if (q) this.names.usingName(qualifiedParts(q).join('::'));
+    return undefined;
+  }
+
+  /** Any `using T = X;` / `typedef X T;` with a plain name, for `names` (not alias templates). */
+  private typeAlias(n: Node, flags?: string[]): void {
+    if (flags?.includes('template')) return;
+    let name: string | undefined;
+    let t: Node | null;
+    if (n.type === 'alias_declaration') {
+      name = n.childForFieldName('name')?.text;
+      t = n.childForFieldName('type');
+      if (t?.type === 'type_descriptor' && named(t).some((c) => c.type.endsWith('_declarator'))) return;
+    } else {
+      const d = n.childForFieldName('declarator');
+      if (d?.type !== 'type_identifier') return;
+      name = d.text;
+      t = n.childForFieldName('type');
+    }
+    if (name && t) this.names.typeAlias(name, this.names.type(normCppType(t.text)));
+  }
+
+  /** The thread or task API a written name stands for: `std::thread`, `thread` after `using namespace std;`. */
+  private threadApi(parts: string[], kinds: LibKind[]): ThreadApi | undefined {
+    const hit = this.names.library(parts);
+    if (hit) return kinds.includes(hit.entry.kind) ? { name: hit.name, kind: hit.entry.kind, arg: hit.entry.arg } : undefined;
+    const guess = this.names.assumed(parts, kinds);
+    return guess && { name: guess.name, kind: guess.entry.kind, assumed: true };
+  }
+
+  /** A type spelling with a thread type in it, alone or as an element (`std::vector<std::jthread>`). */
+  private threadish(raw: string): boolean {
+    for (const m of raw.matchAll(/[A-Za-z_]\w*(?:\s*::\s*[A-Za-z_]\w*)*/g)) {
+      if (this.threadApi(m[0].replace(/\s+/g, '').split('::'), ['thread'])) return true;
+    }
+    return false;
   }
 
   private declaration(n: Node, scope: Scope, flags?: string[]): void {
@@ -366,17 +451,29 @@ class CppExtractor {
           const decor = at >= 0 ? (dt.slice(0, at) + dt.slice(at + name.length)).replace(/\s+/g, '') : '';
           (owner.members ??= []).push({ name, type: clip(type.text + decor, 160) });
           owner.fields ??= {};
-          owner.fields[name] = normCppType(type.text);
+          owner.fields[name] = this.names.type(normCppType(type.text));
           const elem = elemCppType(type.text);
-          if (elem) owner.fields[name + '[]'] = elem;
-          if (/\bthread\b/.test(type.text)) owner.fields[name + '#raw'] = type.text;
+          if (elem) owner.fields[name + '[]'] = this.names.type(elem);
+          if (this.threadish(type.text)) owner.fields[name + '#raw'] = type.text;
         }
+        // `std::thread rx_{&Router::rxLoop, this};`, `int n_ = count();`: runs in every constructor of the class
+        const value = n.childForFieldName('default_value');
+        if (value && scope.classKey) this.memberInit(type, value, scope.classKey);
       } else if (d.type === 'init_declarator') {
         // global initializer: may call functions at static-init time
         const value = d.childForFieldName('value');
         if (value) this.body(value, this.fileCtx, 0);
       }
     }
+  }
+
+  /** A default member initializer, recorded for the class (its constructors run it). */
+  private memberInit(type: Node | null, value: Node, classKey: string): void {
+    const ctx: FnCtx = { key: classKey, locals: new Map(), rawLocals: new Map() };
+    const api = type ? this.threadApi(normCppType(type.text).split('::'), ['thread']) : undefined;
+    if (api && (value.type === 'initializer_list' || value.type === 'argument_list')) {
+      this.spawnFromArgs(argNodes(value), ctx, lineOf(value), { via: api.name, assumed: api.assumed ? api.name : undefined }, 0);
+    } else this.body(value, ctx, 0);
   }
 
   private klass(n: Node, scope: Scope, alias?: string, flags?: string[]): void {
@@ -417,13 +514,17 @@ class CppExtractor {
     };
     this.entities.push(ent);
     this.byKey.set(key, ent);
+    this.names.declare(name);
+    if (ent.aliases) for (const a of ent.aliases) this.names.declare(a);
     const inner: Scope = {
       names: [...fullScope, name],
       kinds: [...scope.kinds, ...qualifier.map(() => 'class' as ScopeKind), 'class'],
       classKey: key,
       className: name,
     };
+    this.names.enter(); // type aliases of the class body are seen by its inline methods
     this.members(named(body), inner);
+    this.names.leave();
   }
 
   private members(nodes: Node[], scope: Scope): void {
@@ -457,6 +558,9 @@ class CppExtractor {
         case 'alias_declaration':
           this.typedef(m, scope);
           break;
+        case 'using_declaration':
+          if (/^using\s+namespace\b/.test(m.text)) this.usingDecl(m); // `using Base::f;` in a class is not a name import
+          break;
         default:
           if (m.type.startsWith('preproc_')) this.members(named(m), scope);
       }
@@ -476,6 +580,7 @@ class CppExtractor {
     const dv = n.childForFieldName('default_value');
     if (dv && dv.text.trim() === '0') fl.add('abstract');
     const key = this.keys.unique(`${[...scope.names, ...qualifier, name].join('::')}(${params.map((p) => p.type ?? '').join(',')})`);
+    if (!scope.classKey && !qualifier.length) this.names.declare(name);
     this.entities.push({
       key,
       kind: 'function',
@@ -516,6 +621,7 @@ class CppExtractor {
     const fl = new Set<string>(flags ?? []);
     collectFlags(n, fd, fl);
     const key = this.keys.unique(`${[...scope.names, ...qualifier, name].join('::')}(${params.map((p) => p.type ?? '').join(',')})`);
+    if (!scope.classKey && !qualifier.length) this.names.declare(name);
     this.entities.push({
       key,
       kind: 'function',
@@ -537,7 +643,7 @@ class CppExtractor {
     for (const p of params) {
       if (p.name) ctx.names!.add(p.name);
       if (p.name && p.type) {
-        ctx.locals.set(p.name, normCppType(p.type));
+        ctx.locals.set(p.name, this.names.type(normCppType(p.type)));
         ctx.rawLocals.set(p.name, p.type);
       }
     }
@@ -561,7 +667,7 @@ class CppExtractor {
       case 'new_expression': {
         const t = n.childForFieldName('type');
         if (t) {
-          const parts = qualifiedParts(t);
+          const parts = this.names.type(qualifiedParts(t).join('::')).split('::');
           this.calls.push({
             caller: f.key,
             form: 'new',
@@ -576,6 +682,20 @@ class CppExtractor {
         if (a) this.body(a, f, depth + 1);
         return;
       }
+      case 'compound_statement':
+        // `using namespace std;` inside a function or block holds until its `}`
+        this.names.enterBlock();
+        for (const c of named(n)) this.body(c, f, depth + 1);
+        this.names.leaveBlock();
+        return;
+      case 'using_declaration':
+      case 'namespace_alias_definition':
+        this.usingDecl(n);
+        return;
+      case 'alias_declaration':
+      case 'type_definition':
+        this.typeAlias(n);
+        return;
       case 'declaration':
         this.localDecl(n, f, depth);
         return;
@@ -583,14 +703,14 @@ class CppExtractor {
         // for (auto& x : container) -> x has the container's element type
         const name = declName(n.childForFieldName('declarator'));
         const right = n.childForFieldName('right');
-        const declared = normCppType(n.childForFieldName('type')?.text ?? '');
+        const declared = this.names.type(normCppType(n.childForFieldName('type')?.text ?? ''));
         if (name) f.names?.add(name);
         if (name) {
           if (declared && declared !== 'auto') f.locals.set(name, declared);
           else if (right?.type === 'identifier') {
             const raw = f.rawLocals.get(right.text);
             const elem = raw ? elemCppType(raw) : undefined;
-            f.locals.set(name, elem ?? '[]' + right.text); // '[]x' = element of field x (resolved by linker)
+            f.locals.set(name, elem ? this.names.type(elem) : '[]' + right.text); // '[]x' = element of field x (resolved by linker)
           }
         }
         break;
@@ -609,6 +729,13 @@ class CppExtractor {
         // Router(int p) : port_(p) {} — the constructor sets the member
         const id = named(n).find((c) => c.type === 'field_identifier');
         if (id && f.member) this.access.add(f.key, { self: true, path: [id.text], write: true }, lineOf(id));
+        // Router() : rx_(&Router::rxLoop, this) {} — a thread member started by the constructor
+        const init = named(n).find((c) => c.type === 'argument_list' || c.type === 'initializer_list');
+        const args = init ? argNodes(init) : [];
+        if (id && f.member && args[0] && isFnRef(args[0])) {
+          this.spawnFromArgs(args, f, lineOf(n), { via: 'std::thread', recv: 'this.' + id.text }, depth);
+          return;
+        }
         for (const c of named(n)) if (c !== id) this.body(c, f, depth + 1);
         return;
       }
@@ -656,7 +783,10 @@ class CppExtractor {
   private localDecl(n: Node, f: FnCtx, depth: number): void {
     const typeNode = n.childForFieldName('type');
     const rawType = typeNode?.text ?? '';
-    const tnorm = normCppType(rawType);
+    const written = normCppType(rawType);
+    const tnorm = this.names.type(written);
+    const thread = written ? this.threadApi(written.split('::'), ['thread']) : undefined;
+    const spawn: Spawn | undefined = thread && { via: thread.name, assumed: thread.assumed ? thread.name : undefined };
     for (const d of n.childrenForFieldName('declarator')) {
       if (!d) continue;
       let declNode: Node | null = d;
@@ -673,11 +803,15 @@ class CppExtractor {
         f.locals.set(name, t);
         f.rawLocals.set(name, rawType);
       }
-      if (value && value.type === 'argument_list' && THREAD_TYPE.test(tnorm)) {
-        this.spawnFromArgs(named(value), f, lineOf(n), tnorm.includes('jthread') ? 'std::jthread' : 'std::thread', depth);
+      // `T x(a, b)` / `T x{a, b}`, or `T x(a)` that the grammar reads as a function declaration (a and b are names)
+      let init: Node[] | undefined;
+      if (value && (value.type === 'argument_list' || value.type === 'initializer_list')) init = argNodes(value);
+      else if (!value && declNode?.type === 'function_declarator') init = this.ctorArgs(declNode, f, !!spawn);
+      if (spawn && init) {
+        this.spawnFromArgs(init, f, lineOf(n), spawn, depth);
         continue;
       }
-      if (value && (value.type === 'argument_list' || value.type === 'initializer_list') && tnorm && !CPP_PRIMITIVES.has(tnorm) && !tnorm.startsWith('std::')) {
+      if (init && tnorm && !CPP_PRIMITIVES.has(tnorm) && !tnorm.startsWith('std::')) {
         const parts = tnorm.split('::');
         this.calls.push({
           caller: f.key,
@@ -685,7 +819,7 @@ class CppExtractor {
           name: parts[parts.length - 1],
           qualifier: parts.length > 1 ? parts.slice(0, -1) : undefined,
           line: lineOf(n),
-          args: argTexts(value),
+          args: value ? argTexts(value) : init.map((a) => clip(a.text, 32)),
           instantiate: true,
         });
       }
@@ -693,26 +827,47 @@ class CppExtractor {
     }
   }
 
+  /**
+   * `std::thread t(worker);` or `Router r(cfg);` inside a function: C++ reads it as a variable built from `worker`
+   * or `cfg`, tree-sitter as a declaration of a function `t` with a parameter of type `worker`. The parameters are
+   * the constructor's arguments when each is a bare name with no declarator, and either the type starts a thread
+   * (a local function returning a thread object would be odd) or every name is a variable in reach.
+   */
+  private ctorArgs(fd: Node, f: FnCtx, thread: boolean): Node[] | undefined {
+    const params = named(fd.childForFieldName('parameters')).filter((p) => p.type !== 'comment');
+    if (!params.length) return undefined;
+    const out: Node[] = [];
+    for (const p of params) {
+      const t = p.type === 'parameter_declaration' && !p.childForFieldName('declarator') ? p.childForFieldName('type') : null;
+      if (!t || (t.type !== 'type_identifier' && t.type !== 'qualified_identifier')) return undefined;
+      if (named(p).length !== 1) return undefined; // `const T` and the like is a real parameter
+      out.push(t);
+    }
+    if (thread) return out;
+    return out.every((t) => t.type === 'type_identifier' && (f.names?.has(t.text) || f.locals.has(t.text))) ? out : undefined;
+  }
+
   private inferExprType(v: Node): string | undefined {
     if (v.type === 'new_expression') {
       const t = v.childForFieldName('type');
-      return t ? qualifiedParts(t).join('::') : undefined;
+      return t ? this.names.type(qualifiedParts(t).join('::')) : undefined;
     }
     if (v.type === 'call_expression') {
       const fn = v.childForFieldName('function');
       if (!fn) return undefined;
       const tmpl = fn.type === 'template_function' ? fn : fn.type === 'qualified_identifier' ? named(fn).find((c) => c.type === 'template_function') : undefined;
       if (tmpl) {
-        const nm = tmpl.childForFieldName('name')?.text ?? '';
-        if (/^make_(unique|shared)$/.test(nm)) {
+        const parts = qualifiedParts(fn);
+        const lib = this.names.library(parts) ?? this.names.assumed(parts, ['make']);
+        if (lib?.entry.kind === 'make') {
           const arg = tmpl.childForFieldName('arguments');
           const first = named(arg)[0];
-          if (first) return normCppType(first.text);
+          if (first) return this.names.type(normCppType(first.text));
         }
       }
       if (fn.type === 'identifier' || fn.type === 'qualified_identifier') {
         // `auto x = Router(…)` or `auto x = net::Router(…)`: functional cast if it names a class (verified by linker)
-        return qualifiedParts(fn).join('::');
+        return this.names.type(qualifiedParts(fn).join('::'));
       }
     }
     return undefined;
@@ -721,38 +876,27 @@ class CppExtractor {
   private call(n: Node, f: FnCtx, depth: number): void {
     const fn = n.childForFieldName('function');
     const argList = n.childForFieldName('arguments');
-    const args = named(argList).filter((a) => a.type !== 'comment');
+    const args = argNodes(argList);
     const line = lineOf(n);
     const argT = argTexts(argList);
     let skipArgs = false;
 
     if (fn) {
       switch (fn.type) {
-        case 'identifier': {
-          const name = fn.text;
-          if ((name === 'pthread_create' || name === 'CreateThread' || name === '_beginthreadex') && args.length >= 3) {
-            this.spawnRef(args[2], f, line, name, depth);
-            skipArgs = true;
-          } else if (name === '_beginthread' && args.length >= 1) {
-            this.spawnRef(args[0], f, line, name, depth);
-            skipArgs = true;
-          } else if (name === 'thrd_create' && args.length >= 2) {
-            this.spawnRef(args[1], f, line, name, depth);
-            skipArgs = true;
-          } else {
-            this.calls.push({ caller: f.key, form: 'plain', name, line, args: argT });
-          }
-          break;
-        }
+        case 'identifier':
         case 'qualified_identifier':
         case 'template_function': {
-          const parts = qualifiedParts(fn);
-          const name = parts[parts.length - 1];
-          const full = parts.join('::');
-          if (/^(std::)?(thread|jthread|async)$/.test(full) || full === 'boost::thread') {
-            this.spawnFromArgs(args, f, line, full.startsWith('std::') ? full : 'std::' + full, depth);
+          const parts = fn.type === 'identifier' ? [fn.text] : qualifiedParts(fn);
+          const api = this.threadApi(parts, ['thread', 'task', 'cthread']);
+          if (api?.kind === 'cthread' && args.length > (api.arg ?? 0)) {
+            // pthread_create(&t, NULL, worker, arg)
+            this.spawnRef(args[api.arg ?? 0], f, line, { via: api.name }, depth);
             skipArgs = true;
-          } else if (/^(std::)?make_(unique|shared)$/.test(full)) {
+          } else if (api && api.kind !== 'cthread') {
+            // std::thread(&Server::run, this).detach(), std::async(std::launch::async, load, path)
+            this.spawnFromArgs(args, f, line, { via: api.name, assumed: api.assumed ? api.name : undefined }, depth);
+            skipArgs = true;
+          } else if ((this.names.library(parts) ?? this.names.assumed(parts, ['make']))?.entry.kind === 'make') {
             const t = this.inferExprType(n);
             if (t) {
               const tp = t.split('::');
@@ -766,10 +910,16 @@ class CppExtractor {
                 instantiate: true,
               });
             }
-          } else if (parts.length === 1) {
-            this.calls.push({ caller: f.key, form: 'plain', name, line, args: argT });
           } else {
-            this.calls.push({ caller: f.key, form: 'qualified', name, qualifier: parts.slice(0, -1), line, args: argT });
+            const p = this.names.expand(parts);
+            const name = p[p.length - 1];
+            const call: RawCall =
+              p.length === 1
+                ? { caller: f.key, form: 'plain', name, line, args: argT }
+                : { caller: f.key, form: 'qualified', name, qualifier: p.slice(0, -1), line, args: argT };
+            const usingNames = this.names.scoped(p);
+            if (usingNames) call.usingNames = usingNames;
+            this.calls.push(call);
           }
           break;
         }
@@ -794,7 +944,8 @@ class CppExtractor {
               if (base?.type === 'identifier') {
                 qualifier = [base.text + '[]'];
                 const raw = f.rawLocals.get(base.text);
-                receiverType = raw ? elemCppType(raw) : undefined;
+                const elem = raw ? elemCppType(raw) : undefined;
+                receiverType = elem ? this.names.type(elem) : undefined;
               } else if (base?.type === 'field_expression' && base.childForFieldName('argument')?.type === 'this') {
                 qualifier = ['this', (base.childForFieldName('field')?.text ?? '?') + '[]'];
               }
@@ -813,9 +964,10 @@ class CppExtractor {
             first &&
             (first.type === 'lambda_expression' ||
               (first.type === 'pointer_expression' && first.childForFieldName('argument')?.type === 'qualified_identifier')) &&
-            (/\bthread\b/.test(rawRecvType) || (!rawRecvType && args.length >= 1))
+            (this.threadish(rawRecvType) || (!rawRecvType && args.length >= 1))
           ) {
-            this.spawnRef(first, f, line, rawRecvType ? 'std::thread' : 'thread (emplace)', depth, args.slice(1), rawRecvType ? undefined : qualifier.join('.'));
+            const how: Spawn = rawRecvType ? { via: 'std::thread' } : { via: 'thread (emplace)', recv: qualifier.join('.') };
+            this.spawnRef(first, f, line, how, depth, args.slice(1));
             skipArgs = true;
           } else if (name) {
             this.calls.push({ caller: f.key, form: 'member', name, qualifier, receiverType, line, args: argT });
@@ -831,38 +983,50 @@ class CppExtractor {
     if (!skipArgs) for (const a of args) this.body(a, f, depth + 1);
   }
 
-  private spawnFromArgs(args: Node[], f: FnCtx, line: number, via: string, depth: number): void {
+  private spawnFromArgs(args: Node[], f: FnCtx, line: number, how: Spawn, depth: number): void {
     let i = 0;
     if (args[0] && /launch::/.test(args[0].text)) i = 1; // std::async(std::launch::async, fn, ...)
     const target = args[i];
-    if (target) this.spawnRef(target, f, line, via, depth, args.slice(i + 1));
+    if (target) this.spawnRef(target, f, line, how, depth, args.slice(i + 1));
     for (const a of args.slice(i + 1)) this.body(a, f, depth + 1);
   }
 
   /** A function *reference* handed to a thread API: `worker`, `&Router::rxLoop`, a lambda, std::bind(...). */
-  private spawnRef(node: Node, f: FnCtx, line: number, via: string, depth: number, rest?: Node[], spawnRecv?: string): void {
+  private spawnRef(node: Node, f: FnCtx, line: number, how: Spawn, depth: number, rest?: Node[]): void {
     let n = node;
     if (n.type === 'pointer_expression') n = n.childForFieldName('argument') ?? n;
     if (n.type === 'parenthesized_expression') n = named(n)[0] ?? n;
     if (n.type === 'cast_expression') n = n.childForFieldName('value') ?? n;
     const args = rest?.length ? rest.map((a) => clip(a.text, 32)) : undefined;
+    const mark = (c: RawCall): RawCall => {
+      if (how.recv) c.spawnRecv = how.recv;
+      if (how.assumed) c.assumed = how.assumed;
+      return c;
+    };
     switch (n.type) {
       case 'identifier':
-        this.calls.push({ caller: f.key, form: 'plain', name: n.text, line, args, spawn: via, spawnRecv });
+      case 'type_identifier': {
+        // `worker`, or `ns::worker` written through `using ns::worker;`
+        const usingNames = this.names.scoped([n.text]);
+        const c = mark({ caller: f.key, form: 'plain', name: n.text, line, args, spawn: how.via });
+        if (usingNames) c.usingNames = usingNames;
+        this.calls.push(c);
         return;
+      }
       case 'qualified_identifier':
       case 'template_function': {
-        const parts = qualifiedParts(n);
-        this.calls.push({
-          caller: f.key,
-          form: parts.length > 1 ? 'qualified' : 'plain',
-          name: parts[parts.length - 1],
-          qualifier: parts.length > 1 ? parts.slice(0, -1) : undefined,
-          line,
-          args,
-          spawn: via,
-          spawnRecv,
-        });
+        const parts = this.names.expand(qualifiedParts(n));
+        this.calls.push(
+          mark({
+            caller: f.key,
+            form: parts.length > 1 ? 'qualified' : 'plain',
+            name: parts[parts.length - 1],
+            qualifier: parts.length > 1 ? parts.slice(0, -1) : undefined,
+            line,
+            args,
+            spawn: how.via,
+          }),
+        );
         return;
       }
       case 'lambda_expression': {
@@ -872,8 +1036,8 @@ class CppExtractor {
         for (let i = before; i < this.calls.length; i++) {
           const c = this.calls[i];
           if (!c.instantiate && !c.spawn) {
-            c.spawn = via + ' (lambda)';
-            c.spawnRecv = spawnRecv;
+            c.spawn = how.via + ' (lambda)';
+            mark(c);
           }
         }
         return;
@@ -881,9 +1045,10 @@ class CppExtractor {
       case 'call_expression': {
         // std::bind(&C::m, this, ...)
         const fn = n.childForFieldName('function');
-        if (fn && /(^|::)bind$/.test(fn.text)) {
+        const parts = fn ? (fn.type === 'identifier' ? [fn.text] : qualifiedParts(fn)) : [];
+        if (fn && (this.names.library(parts)?.entry.kind === 'bind' || parts[parts.length - 1] === 'bind')) {
           const inner = named(n.childForFieldName('arguments'))[0];
-          if (inner) this.spawnRef(inner, f, line, via, depth, undefined, spawnRecv);
+          if (inner) this.spawnRef(inner, f, line, how, depth);
           return;
         }
         this.body(n, f, depth + 1);
@@ -893,4 +1058,20 @@ class CppExtractor {
         this.body(n, f, depth + 1);
     }
   }
+}
+
+/** The arguments of an argument list or a braced initializer, without comments. */
+function argNodes(list: Node | null | undefined): Node[] {
+  return named(list).filter((a) => a.type !== 'comment');
+}
+
+/** Looks like a function handed over to run: `&C::run`, `&worker`, a lambda, `std::bind(…)`. */
+function isFnRef(n: Node): boolean {
+  if (n.type === 'lambda_expression') return true;
+  if (n.type === 'pointer_expression') {
+    const a = n.childForFieldName('argument');
+    return a?.type === 'qualified_identifier' || a?.type === 'identifier';
+  }
+  if (n.type === 'call_expression') return /(^|::)bind$/.test(n.childForFieldName('function')?.text ?? '');
+  return false;
 }

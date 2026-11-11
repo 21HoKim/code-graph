@@ -18,7 +18,7 @@ dependency (the same code runs in the CLI and the tests), and the **webview** th
 | file | role |
 | --- | --- |
 | `pool.ts`, `parseWorker.ts` | parse files on worker threads |
-| `extract/` | tree-sitter (WebAssembly) syntax trees → per-file facts (`cpp.ts` for C and C++, `python.ts`) |
+| `extract/` | tree-sitter (WebAssembly) syntax trees → per-file facts (`cpp.ts` for C and C++, `python.ts`); `cppnames.ts`: what a C/C++ name stands for, and the table of library names |
 | `link.ts` | facts of all files → one `CodeGraph`, plus problems found without a compiler |
 | `analyze.ts` | file walk, `compile_commands.json`, cache by modification time |
 | `verify.ts` | compile check with `gcc`/`clang -fsyntax-only` and Python `compile()` |
@@ -81,6 +81,28 @@ every Python process of a traced container), `c/cg_trace.h` + `c/cg_trace.c` (C9
   buffer_t;`), which the linker turns into aliases of the class they name (same file first, then included files,
   then files including it).
 
+**Names as the compiler sees them** (`extract/cppnames.ts`). While it walks a C/C++ file the extractor keeps, per
+scope (file, namespace, class body, function, block), the `using namespace X;`, `using X::y;`, `namespace A = B::C;`
+and `using T = X;` / `typedef X T;` it has passed, and asks `CppNames` what a written name stands for: `thread` after
+`using namespace std;` or `using std::thread;` is `std::thread`, `io::post` after `namespace io = boost::asio;` is
+`boost::asio::post`, `Worker` after `using Worker = std::thread;` is `std::thread`. Library names are recognised by
+looking those full names up in **one table**, `CPP_LIBRARY` (thread types, task functions, C thread functions with
+the argument that is the function, `make_unique` & co., `bind`, wrapper and container types); add a row there to teach
+the extractor a new one. A name the file declares itself is its own, not the library's. A bare `thread` / `async`
+the file never brings in is recorded with `assumed`: the linker keeps it when a header the file includes has
+`using namespace std;`, drops it when the workspace defines that name, and marks it a guess otherwise. For workspace
+names the extractor resolves namespace aliases and `using` type names itself; `using ns::f;` and a `using namespace`
+inside a function travel with the call as `usingNames`, which the linker tries right after the class's own methods.
+
+Forms that read like something else are read as C++ does: `std::thread t(worker);` and `Router r(cfg);` parse as
+function declarations, but inside a function they are variables built from `worker` / `cfg` (for other types only
+when every argument is a variable in reach); `T t{…}` is a construction too. Thread members started in a
+constructor's initializer list are confirmed by the member's declared type; a default member initializer
+(`std::thread tx_{&Pool::txLoop, this};`) is recorded for the class, whose constructors run it.
+
+Python does the same with its imports: an API is recognised under the name it was imported as
+(`from threading import Thread as T`, `import asyncio as aio`).
+
 Because facts are local to one file they are cached by `mtime + size`; saving a file re-extracts one file.
 Extraction runs in `worker_threads` (`pool.ts`), one tree-sitter instance per worker.
 
@@ -111,7 +133,7 @@ Resolution order for a call (C++ shown; Python is analogous with LEGB scopes, im
 
 1. methods of the enclosing class and its bases (`plain` calls),
 2. the enclosing namespace chain, inner to outer (+ anonymous namespaces of the same file),
-3. `using namespace` directives of the file,
+3. `using namespace` directives of the file and of the headers it includes (directly or not),
 4. receiver type → class → methods of the class and its bases (`member` calls; types of fields, element types
    of containers, `this->x`),
 5. qualified names relative to the namespace chain, or `Class::method`,
@@ -359,3 +381,6 @@ Every extractor keeps the same rules, so a feature works the same in every langu
 - A function's `rets` are its own: give `ownReturns` the language's return statements and the nodes that start
   another function (lambdas, nested functions, local classes). A function without a `return` gets `[]`.
 - The test *return statements (every language)* in `test/analyzer.test.ts` gets a block for the new language.
+- Library APIs (threads, tasks, object creation) are recognised by what a name stands for, not by how it is spelled:
+  through the language's imports, `use` / `using` declarations and aliases (`CppNames` for C/C++, the import names in
+  `python.ts`). The test *threads started through every spelling of the API (every language)* gets a block.

@@ -1,5 +1,6 @@
 import type { Node } from 'web-tree-sitter';
 import type { RawAccess } from '../model';
+import { libraryPattern } from './cppnames';
 
 /** Collapse whitespace and truncate for display ("data on the wire"). */
 export function clip(s: string, max = 40): string {
@@ -134,7 +135,8 @@ export const CPP_PRIMITIVES = new Set([
   'uintptr_t', 'intptr_t', 'wchar_t', 'char16_t', 'char32_t', 'char8_t',
 ]);
 
-const SMART_WRAPPERS = /^(?:std::)?(?:unique_ptr|shared_ptr|weak_ptr|reference_wrapper|optional|atomic)\s*<\s*(.+)>$/;
+/** `std::unique_ptr<T>` & co. (the `wrapper` rows of `CPP_LIBRARY`): the type inside is what is used. */
+const SMART_WRAPPERS = libraryPattern(['wrapper'], '\\s*<\\s*(.+)>$');
 
 /**
  * Normalize a C++ type spelling to a class-lookup key:
@@ -169,8 +171,8 @@ export function stripTemplateArgs(s: string): string {
   return out.replace(/\s+/g, '');
 }
 
-const SEQ_CONTAINERS = /^(?:std::)?(?:vector|deque|list|forward_list|array|set|unordered_set|multiset|span|initializer_list)$/;
-const MAP_CONTAINERS = /^(?:std::)?(?:map|unordered_map|multimap|unordered_multimap)$/;
+const SEQ_CONTAINERS = libraryPattern(['seq'], '$');
+const MAP_CONTAINERS = libraryPattern(['map'], '$');
 
 /** Element type of a container spelling: 'std::vector<std::unique_ptr<Iface>>' -> 'Iface'. */
 export function elemCppType(raw: string): string | undefined {

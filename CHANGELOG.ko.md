@@ -6,6 +6,15 @@
 
 ## Unreleased
 
+### 수정
+- C++: `std::`를 쓰지 않고 띄운 스레드도 찾아요. `using namespace std;`(파일, 함수 안, 포함한 헤더 어디든) 아래의
+  `thread(&Server::run, this).detach()`, `using std::thread;` 다음, `using Worker = std::thread;`나
+  `namespace b = boost;`를 거친 이름 모두요. `std::thread t(worker);`(C++은 함수가 아니라 변수로 읽어요),
+  `std::thread t{worker};`, 생성자 초기화 목록(`: rx_(&Router::rxLoop, this)`)이나 멤버 기본 초기화로 시작하는 스레드
+  멤버, `std::jthread` 벡터의 `emplace_back`도 찾아요. 파일이 가져오지 않은 맨이름 `thread`는 추정으로 표시해요.
+- C++: `using ns::f;`, 네임스페이스 별칭(`namespace io = lib::net;`), 함수 안의 `using namespace`, 헤더의
+  `using namespace`로 쓴 호출과 타입을 이름 추측 대신 정확히 찾고, `Router r(cfg);`를 `Router` 생성으로 셈해요.
+
 ## 0.5.11
 
 ### 추가

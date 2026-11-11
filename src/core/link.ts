@@ -151,6 +151,7 @@ class Linker {
   private fieldsOf = new Map<string, Record<string, string>>();
   private classRaw = new Map<string, { raw: RawEntity; facts: FileFacts }>();
   private includesOf = new Map<string, Set<string>>();
+  private usingCache = new Map<string, string[]>();
   private namespaces = new Set<string>();
 
   // Python indices
@@ -502,7 +503,7 @@ class Linker {
       const r = tryQ([...scope.slice(0, k), ...qualifier]);
       if (r) return r;
     }
-    for (const u of f.usingNamespaces) {
+    for (const u of this.usingOf(f)) {
       const r = tryQ([...u.split('::'), ...qualifier]);
       if (r) return r;
     }
@@ -637,6 +638,27 @@ class Linker {
     }
   }
 
+  /**
+   * The `using namespace` directives a C/C++ file sees: its own, then those of the headers it includes, directly or
+   * not (a `using namespace std;` in a header holds in every file that includes it).
+   */
+  private usingOf(f: FileFacts): string[] {
+    let out = this.usingCache.get(f.path);
+    if (out) return out;
+    out = [...f.usingNamespaces];
+    const seen = new Set([f.path]);
+    const todo = [...(this.includesOf.get(f.path) ?? [])];
+    while (todo.length) {
+      const p = todo.shift()!;
+      if (seen.has(p)) continue;
+      seen.add(p);
+      for (const u of this.factsByPath.get(p)?.usingNamespaces ?? []) if (!out.includes(u)) out.push(u);
+      todo.push(...(this.includesOf.get(p) ?? []));
+    }
+    this.usingCache.set(f.path, out);
+    return out;
+  }
+
   private resolveInclude(from: string, inc: string, system: boolean, incDirs: string[], byBase: Map<string, string[]>): string | undefined {
     if (!system) {
       const rel = joinNorm(dirOf(from), inc);
@@ -676,7 +698,7 @@ class Linker {
       const cs = this.ccClassByQname.get([...nsParts.slice(0, k), ...parts].join('::'));
       if (cs?.length) return { to: this.nearest(cs, f), conf: 'exact' };
     }
-    for (const u of f.usingNamespaces) {
+    for (const u of this.usingOf(f)) {
       const cs = this.ccClassByQname.get(u + '::' + name);
       if (cs?.length) return { to: this.nearest(cs, f), conf: 'exact' };
     }
@@ -728,17 +750,34 @@ class Linker {
     return t;
   }
 
+  /** A function (or a class, for `Widget(…)`) under one of the names `using` declarations give the call. */
+  private byUsingNames(c: RawCall, f: FileFacts): Target | undefined {
+    for (const u of c.usingNames ?? []) {
+      const fs = this.ccFnByQname.get(u);
+      if (fs?.length) return { to: this.pickOverload(fs, c.args, f), conf: 'exact' };
+      const cs = this.ccClassByQname.get(u);
+      if (cs?.length) return { to: this.nearest(cs, f), conf: 'likely' };
+    }
+    return undefined;
+  }
+
   private resolveCc(caller: Entity, c: RawCall, f: FileFacts): Target | undefined {
     const cls = this.enclosingClass(caller);
     const ns = this.nsParts(caller);
     switch (c.form) {
       case 'new':
+        for (const u of c.usingNames ?? []) {
+          const cs = this.ccClassByQname.get(u);
+          if (cs?.length) return { to: this.nearest(cs, f), conf: 'exact' };
+        }
         return this.findClassCc(c.qualifier ? [...c.qualifier, c.name] : [c.name], ns, f, cls);
       case 'plain': {
         if (cls) {
           const m = this.findMethod(cls, c.name);
           if (m) return { to: this.pickOverload(m, c.args, f), conf: 'exact' };
         }
+        const named = this.byUsingNames(c, f);
+        if (named) return named;
         for (let k = ns.length; k >= 0; k--) {
           const fs = this.ccFnByQname.get([...ns.slice(0, k), c.name].join('::'));
           if (fs?.length) return { to: this.pickOverload(fs, c.args, f), conf: 'exact' };
@@ -746,7 +785,7 @@ class Linker {
           const anon = this.ccFnByQname.get([...ns.slice(0, k), '(anonymous)', c.name].join('::'))?.filter((e) => e.def?.file === f.path);
           if (anon?.length) return { to: this.pickOverload(anon, c.args, f), conf: 'exact' };
         }
-        for (const u of f.usingNamespaces) {
+        for (const u of this.usingOf(f)) {
           const fs = this.ccFnByQname.get(u + '::' + c.name);
           if (fs?.length) return { to: this.pickOverload(fs, c.args, f), conf: 'exact' };
         }
@@ -760,11 +799,13 @@ class Linker {
       case 'qualified': {
         const q = c.qualifier ?? [];
         if (q[0] === 'std' || q[0] === 'boost') return undefined;
+        const named = this.byUsingNames(c, f);
+        if (named) return named;
         for (let k = ns.length; k >= 0; k--) {
           const fs = this.ccFnByQname.get([...ns.slice(0, k), ...q, c.name].join('::'));
           if (fs?.length) return { to: this.pickOverload(fs, c.args, f), conf: 'exact' };
         }
-        for (const u of f.usingNamespaces) {
+        for (const u of this.usingOf(f)) {
           const fs = this.ccFnByQname.get([u, ...q, c.name].join('::'));
           if (fs?.length) return { to: this.pickOverload(fs, c.args, f), conf: 'exact' };
         }
@@ -1191,6 +1232,19 @@ class Linker {
           continue;
         }
         let conf = t.conf;
+        if (c.assumed && !isPy) {
+          // `thread(f)` with no `using namespace std;` in the file: fine if a header it includes has one; else, if
+          // the workspace has its own function or class of that name, the bare name is that one, not a thread
+          const [ns, ...rest] = c.assumed.split('::');
+          const bare = rest[rest.length - 1];
+          if (!this.usingOf(f).includes(ns)) {
+            if (this.ccFnsByName.get(bare)?.length || this.ccClassesByName.get(bare)?.length) {
+              this.unresolved++;
+              continue;
+            }
+            conf = 'guess';
+          }
+        }
         if (c.spawn && c.spawnRecv) {
           // container-based spawn: confirm the container really holds threads
           const cls = this.enclosingClass(caller);

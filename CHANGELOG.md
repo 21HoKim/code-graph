@@ -7,6 +7,17 @@ into the version's section and its [release notes](https://github.com/21HoKim/co
 
 ## Unreleased
 
+### Fixed
+- C++: threads started without writing `std::` are found: `thread(&Server::run, this).detach()` under
+  `using namespace std;` (in the file, in the function, or in an included header), after `using std::thread;`, through
+  `using Worker = std::thread;` or `namespace b = boost;`. So are `std::thread t(worker);` (which C++ reads as a
+  variable, not a function), `std::thread t{worker};`, thread members started in a constructor's initializer list
+  (`: rx_(&Router::rxLoop, this)`) or by a default member initializer, and `emplace_back` into a vector of
+  `std::jthread`. A bare `thread` the file never brings in counts as a guess.
+- C++: calls and types written through `using ns::f;`, a namespace alias (`namespace io = lib::net;`), a
+  `using namespace` inside a function or a header's `using namespace` are found exactly instead of by name, and
+  `Router r(cfg);` counts as creating a `Router`.
+
 ## 0.5.11
 
 ### Added

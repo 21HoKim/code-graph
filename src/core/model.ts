@@ -217,6 +217,12 @@ export interface RawCall {
   spawnRecv?: string;
   /** Object construction (new T, T x(...), make_unique<T>, Python Class()). */
   instantiate?: boolean;
+  /** C/C++: full names the call's name may mean through `using ns::f;` or a `using namespace` inside the function,
+   *  which the file's `usingNamespaces` do not cover; tried before the name is looked up elsewhere. */
+  usingNames?: string[];
+  /** C/C++ spawn through a bare library name the file never brings in (`thread(f)` with no `using namespace std;`):
+   *  the name it is taken for (`std::thread`). The linker keeps it when an included header has that `using`. */
+  assumed?: string;
 }
 
 export interface RawInclude {

@@ -83,7 +83,7 @@ export function extractFile(parsers: Parsers, relPath: string, text: string): Fi
       base.wildcardImport = r.wildcardImport || undefined;
       base.mainGuard = r.mainGuard || undefined;
     } else {
-      const r = extractCpp(tree.rootNode);
+      const r = extractCpp(tree.rootNode, lang === 'cpp');
       base.entities = r.entities;
       base.calls = r.calls;
       base.includes = r.includes;

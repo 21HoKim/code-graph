@@ -120,6 +120,124 @@ describe('C ring buffer sample', () => {
   });
 });
 
+describe('threads started through every spelling of the API (every language)', () => {
+  const project = (files: Record<string, string[]>): string => {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'cc-spawn-'));
+    for (const [name, lines] of Object.entries(files)) {
+      fs.mkdirSync(path.dirname(path.join(dir, name)), { recursive: true });
+      fs.writeFileSync(path.join(dir, name), lines.join('\n'));
+    }
+    return dir;
+  };
+  const spawn = (g: CodeGraph, from: string, to: string) => rel(g, 'spawn', from, to);
+
+  it('C++: temporaries, `T t(f)`, `T t{f}`, `using` and aliases, member initializers', async () => {
+    const g = await analyze(
+      project({
+        'server.h': ['#pragma once', '#include <thread>', 'class Server {', 'public:', '  void init(); void acceptLoop(); void heartbeat(); void handle(int s);', '};'],
+        'server.cpp': [
+          '#include "server.h"',
+          'using namespace std;',
+          'void Server::init() {',
+          '  thread(&Server::heartbeat, this).detach();',
+          '  thread(&Server::acceptLoop, this).detach();',
+          '}',
+          'void Server::acceptLoop() { int s = 0; thread(&Server::handle, this, std::move(s)).detach(); }',
+          'void Server::heartbeat() {}',
+          'void Server::handle(int s) {}',
+        ],
+        'forms.cpp': [
+          '#include <thread>',
+          '#include <future>',
+          'void w() {}',
+          'int load(int n) { return n; }',
+          'namespace ns { void job() {} }',
+          'void g1() { std::thread t(w); t.join(); }',
+          'void g2() { std::thread t{w}; t.join(); }',
+          'void g3() { auto t = std::thread(w); t.join(); }',
+          'void g4() { using namespace std; thread t(ns::job); t.join(); }',
+          'void g5() { using std::thread; thread t{w}; t.join(); }',
+          'void g6() { using Worker = std::thread; Worker t(w); t.join(); }',
+          'void g7() { auto r = std::async(std::launch::async, load, 3); }',
+          'void g8() { using ns::job; std::jthread t(job); }',
+          'namespace b = boost;',
+          'void g9() { b::thread t(w); t.join(); }',
+        ],
+        'pool.cpp': [
+          '#include <thread>',
+          '#include <vector>',
+          'class Pool {',
+          '  std::thread rx_;',
+          '  std::thread tx_{&Pool::txLoop, this};',
+          '  std::vector<std::jthread> workers_;',
+          'public:',
+          '  Pool() : rx_(&Pool::rxLoop, this) { workers_.emplace_back(&Pool::work, this); }',
+          '  void rxLoop() {} void txLoop() {} void work() {}',
+          '};',
+        ],
+      }),
+    );
+    for (const to of ['heartbeat', 'acceptLoop']) assert.ok(spawn(g, 'cc:Server::init', 'cc:Server::' + to), `thread(&Server::${to}, this) under using namespace std`);
+    assert.ok(spawn(g, 'cc:Server::acceptLoop', 'cc:Server::handle'), 'with extra arguments');
+    for (const g_ of ['g1', 'g2', 'g3', 'g5', 'g6', 'g9']) assert.equal(spawn(g, 'cc:' + g_, 'cc:w')?.conf, 'exact', g_);
+    assert.ok(spawn(g, 'cc:g4', 'cc:ns::job'), 'using namespace std inside the function');
+    assert.ok(spawn(g, 'cc:g7', 'cc:load'), 'std::async with a launch policy');
+    assert.ok(spawn(g, 'cc:g8', 'cc:ns::job'), 'the function named through `using ns::job;`');
+    assert.equal(spawn(g, 'cc:g1', 'cc:w')?.via, 'std::thread');
+    assert.ok(spawn(g, 'cc:Pool::Pool', 'cc:Pool::rxLoop'), 'constructor initializer of a thread member');
+    assert.ok(spawn(g, 'cc:Pool', 'cc:Pool::txLoop'), 'default member initializer: runs in every constructor');
+    assert.ok(spawn(g, 'cc:Pool::Pool', 'cc:Pool::work'), 'emplace_back into a vector of jthread');
+  });
+
+  it('C++: a bare `thread` is std::thread when an included header says `using namespace std;`, a guess otherwise', async () => {
+    const files = (header: string[]) => ({
+      'common.h': ['#pragma once', '#include <thread>', ...header],
+      'run.cpp': ['#include "common.h"', 'void k() {}', 'void start() { thread t(k); t.join(); }'],
+    });
+    assert.equal(spawn(await analyze(project(files(['using namespace std;']))), 'cc:start', 'cc:k')?.conf, 'exact');
+    assert.equal(spawn(await analyze(project(files([]))), 'cc:start', 'cc:k')?.conf, 'guess');
+    const own = await analyze(project({ ...files([]), 'thread.cpp': ['struct thread { thread(void (*f)()); };'] }));
+    assert.equal(spawn(own, 'cc:start', 'cc:k'), undefined, 'the workspace has its own `thread`');
+    const c = await analyze(project({ 'a.c': ['void thread(int x) {}', 'void use(void) { thread(1); }'] }));
+    assert.ok(rel(c, 'call', 'cc:use', 'cc:thread'), 'C: a function named thread is just a function');
+  });
+
+  it('C++: workspace names through `using ns::f;`, namespace aliases, block `using namespace` and headers', async () => {
+    const g = await analyze(
+      project({
+        'util.h': [
+          '#pragma once',
+          'namespace lib { namespace net { void send(int x); class Widget { public: Widget(int); void run(); }; } }',
+          'namespace other { void send(int x); }',
+          'using namespace lib;',
+        ],
+        'util.cpp': ['#include "util.h"', 'namespace lib { namespace net { void send(int x) {} Widget::Widget(int) {} void Widget::run() {} } }', 'namespace other { void send(int x) {} }'],
+        'use.cpp': [
+          '#include "util.h"',
+          'namespace ln = lib::net;',
+          'using lib::net::Widget;',
+          'void a() { ln::send(1); }',
+          'void b() { using lib::net::send; send(2); }',
+          'void c() { using namespace lib::net; send(3); }',
+          'void d(int n) { Widget w(n); w.run(); }',
+          'void e() { net::send(5); }',
+          'void f() { auto p = new ln::Widget(6); p->run(); }',
+        ],
+      }),
+    );
+    const send = 'cc:lib::net::send';
+    assert.equal(rel(g, 'call', 'cc:a', send)?.conf, 'exact', 'namespace alias');
+    assert.equal(rel(g, 'call', 'cc:b', send)?.conf, 'exact', 'using-declaration in the function');
+    assert.equal(rel(g, 'call', 'cc:c', send)?.conf, 'exact', 'using-directive in the function');
+    assert.equal(rel(g, 'call', 'cc:e', send)?.conf, 'exact', "the header's using namespace lib");
+    assert.equal(rel(g, 'instantiate', 'cc:d', 'cc:lib::net::Widget')?.conf, 'exact', '`Widget w(n);` through `using lib::net::Widget;`');
+    assert.ok(rel(g, 'call', 'cc:d', 'cc:lib::net::Widget::run'));
+    assert.equal(rel(g, 'instantiate', 'cc:f', 'cc:lib::net::Widget')?.conf, 'exact');
+    assert.ok(rel(g, 'call', 'cc:f', 'cc:lib::net::Widget::run'));
+    assert.equal(rel(g, 'call', 'cc:b', 'cc:other::send'), undefined);
+  });
+});
+
 describe('where a class\'s objects live', () => {
   it('finds members, parameters and returns by scope, even partly qualified, and keeps same names apart', async () => {
     const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'cc-usage-'));
