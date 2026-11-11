@@ -727,7 +727,8 @@ export function collectObjects(
   labelOf?: (span: number, role: 'arg' | 'ret' | 'self', name?: string) => string | undefined,
 ): TraceObject[] {
   const m = new Map<string, TraceObject & { fnSet: Set<number>; thSet: Set<number> }>();
-  const vague = (l: string) => l === 'self' || /^(0x|\(nil\))/.test(l);
+  // an address, `self`, or an untyped pointer (`void*` in a thread's start function): a typed sighting names it better
+  const vague = (l: string) => l === 'self' || /^(0x|\(nil\))/.test(l) || /^(const\s+)?void\s*\*$/.test(l.trim());
   const see = (id: string | null | undefined, label: string, kind: ValKind, span: number, role: 'arg' | 'ret' | 'self' = 'arg', name?: string) => {
     if (!id || id === '0x0' || id === '(nil)') return;
     let o = m.get(id);

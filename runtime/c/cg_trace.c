@@ -286,6 +286,42 @@ __attribute__((weak)) int pthread_create(pthread_t *th, const pthread_attr_t *at
   if (rc != 0) free(s);
   return rc;
 }
+#ifdef __GLIBC__
+/* C11 thrd_create: glibc starts the thread without going through pthread_create, so it gets its own trampoline.
+   Declared here with glibc's types (thrd_t is an unsigned long; thrd_success is 0, thrd_nomem 3). */
+typedef int (*cgt_thrd_fn)(void *);
+typedef int (*cgt_thrd_create_fn)(unsigned long *, cgt_thrd_fn, void *);
+typedef struct {
+  cgt_thrd_fn fn;
+  void *arg;
+  int parent;
+  unsigned by;
+} cgt_thrd_start;
+
+static int cgt_thrd_trampoline(void *p) {
+  cgt_thrd_start s = *(cgt_thrd_start *)p;
+  free(p);
+  t_parent = s.parent;
+  t_by = s.by;
+  return s.fn(s.arg);
+}
+
+__attribute__((weak)) int thrd_create(unsigned long *th, cgt_thrd_fn fn, void *arg) {
+  static cgt_thrd_create_fn real;
+  if (!real) real = (cgt_thrd_create_fn)dlsym(RTLD_NEXT, "thrd_create");
+  if (!real) return 3;
+  cgt_ts *ts = t_busy ? t_ts : cgt_thread();
+  cgt_thrd_start *s = ts && g_on ? (cgt_thrd_start *)malloc(sizeof *s) : 0;
+  if (!s) return real(th, fn, arg);
+  s->fn = fn;
+  s->arg = arg;
+  s->parent = ts->id;
+  s->by = ts->depth > 0 && ts->depth <= CGT_DEPTH ? ts->stack[ts->depth - 1] : 0xFFFFFFFFu;
+  int rc = real(th, cgt_thrd_trampoline, s);
+  if (rc != 0) free(s);
+  return rc;
+}
+#endif
 #define cgt_create_thread(th, fn) (cgt_real_create() ? cgt_real_create()((th), 0, (fn), 0) : EAGAIN)
 #else
 #define cgt_create_thread(th, fn) pthread_create((th), 0, (fn), 0)

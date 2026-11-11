@@ -277,7 +277,8 @@ per thread, appends whole lines to the trace under one mutex (a full buffer keep
 `SIGSEGV`/`SIGABRT`/… writes every thread's stack before re-raising; `cg_trace_cxx.cpp` records the type and `what()`
 of an uncaught exception. The runtime defines `pthread_create` (weak, exported with `--dynamic-list`, the real one
 found with `dlsym(RTLD_NEXT)`, so the link gets `-ldl` on Linux): the program's own calls and those of the libraries
-it loads — `std::thread` and `std::async` in libstdc++ — start the thread through a trampoline that notes the
+it loads — `std::thread` and `std::async` in libstdc++ — start the thread through a trampoline (glibc's C11
+`thrd_create`, which does not go through `pthread_create`, gets one of its own) that notes the
 starting thread and the function on top of its shadow stack, which go into the new thread's record. Without
 `CODE_GRAPH_TRACE` it passes straight through. Static programs cannot look up the real function, so their runtime
 is built with `-DCGT_NO_INTERPOSE` and keeps the inferred parents below.

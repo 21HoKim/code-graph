@@ -224,7 +224,7 @@ export function writeCodegraphDir(dir: string, runtimeDir: string, nfn: number, 
   fs.mkdirSync(path.join(rt, 'py'), { recursive: true });
   fs.copyFileSync(path.join(runtimeDir, 'python', 'sitecustomize.py'), path.join(rt, 'py', 'sitecustomize.py'));
   // pthread_create too: libraries the program loads start their threads through the runtime's
-  fs.writeFileSync(path.join(rt, 'cgt.dynlist'), '{ cgt_*; pthread_create; };\n');
+  fs.writeFileSync(path.join(rt, 'cgt.dynlist'), '{ cgt_*; pthread_create; thrd_create; };\n');
   const hash = crypto.createHash('sha1');
   for (const f of ['cg_trace.h', 'cg_trace.c', 'cg_trace_cxx.cpp']) hash.update(fs.readFileSync(path.join(rt, f)));
   const scripts: [string, string][] = [

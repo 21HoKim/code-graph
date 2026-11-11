@@ -38,9 +38,10 @@
 - Python: 다른 이름으로 가져온 스레드·태스크 API도 찾아요(`from threading import Thread as T`,
   `from asyncio import create_task as spawn`).
 - 실행 추적(C/C++): 스레드마다 부모 스레드와 그 스레드를 띄운 함수를 추측하지 않고 실행에서 직접 기록해요
-  (`pthread_create`, `std::thread`, `std::async`). 그래서 스레드 레인이 맞는 스레드에서 갈라져 나오고, 분석이 어떤 함수가
+  (`pthread_create`, C11 `thrd_create`, `std::thread`, `std::async`). 그래서 스레드 레인이 맞는 스레드에서 갈라져 나오고, 분석이 어떤 함수가
   도는지 모르는 경우(함수 포인터)에도 ⚡ 전선이 나타나요. Python 스레드도 띄운 함수를 기록해요. 정적 링크한 프로그램은
   지금처럼 추정해요.
+- 실행 추적(C/C++): 스레드가 `void*`로 받은 객체는 다른 함수가 붙인 타입(`struct counter*`)으로 이름이 붙어요.
 - 실행 추적(C/C++): 바쁜 스레드의 버퍼가 호출 중간에 가득 차도 추적 줄을 잃지 않아요.
 - 타임라인: 배속 목록이 어느 테마에서나 읽혀요. 펼친 목록이 시스템 배경에 테마 글자색으로 그려져서 고른 배속만 보였어요.
 
