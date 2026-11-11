@@ -107,7 +107,8 @@ Compose v2 for containers.
 - **Replay**: thread swimlanes with play, scrub and step. Blocks on each thread's call stack glow in the thread's
   colour, pulses run along the wires, values ride into the blocks. Blocks that never ran fade out; calls only the
   run revealed (virtual dispatch, callbacks) get wires of their own. In the swimlanes, drag the playhead (or the
-  time axis) to scrub and drag anywhere else to move the view; Shift + wheel moves it too (down: later, up:
+  time axis) to scrub and drag anywhere else to move the view (or the scrollbar under the lanes once zoomed in);
+  Shift + wheel moves it too (down: later, up:
   earlier), as does a sideways trackpad scroll. The wheel scrolls the lanes, Ctrl (⌘) + wheel or a pinch zooms
   around the pointer, a click jumps there and a double-click shows the whole run. On the circuit, Shift + wheel
   moves sideways the same way. The legend in the bottom left gives each thread's colour (eight of them, then how

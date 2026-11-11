@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
-import { panView } from '../src/webview/timeline';
+import { panView, scrollThumb, thumbToView } from '../src/webview/timeline';
 import { shiftPan, timelineWheel } from '../src/webview/wheel';
 
 const wheel = (deltaY: number, o: { deltaX?: number; shiftKey?: boolean; ctrlKey?: boolean; metaKey?: boolean; deltaMode?: number } = {}) => ({
@@ -56,5 +56,22 @@ describe('timeline: moving the view', () => {
     assert.deepEqual(panView(950, 100, 1000), [900, 1000]);
     assert.deepEqual(panView(300, 100, 1000), [300, 400]);
     assert.deepEqual(panView(10, 2000, 1000), [0, 1000], 'never wider than the run');
+  });
+});
+
+describe('timeline: the scrollbar', () => {
+  it('hides when the whole run is in view; otherwise the thumb is the part in view', () => {
+    assert.equal(scrollThumb(0, 1000, 1000, 400), null);
+    assert.deepEqual(scrollThumb(0, 250, 1000, 400), { x: 0, w: 100 });
+    assert.deepEqual(scrollThumb(750, 1000, 1000, 400), { x: 300, w: 100 }, 'at the end of the run');
+    assert.deepEqual(scrollThumb(375, 625, 1000, 400), { x: 150, w: 100 });
+  });
+
+  it('keeps a thumb that can be grabbed when zoomed far in, and maps it back to the view', () => {
+    const th = scrollThumb(500, 501, 1000, 400)!;
+    assert.equal(th.w, 24);
+    assert.ok(Math.abs(thumbToView(th.x, 400, th.w, 1, 1000) - 500) < 1e-9, 'round trip');
+    assert.equal(thumbToView(-50, 400, th.w, 1, 1000), 0, 'stops at the start');
+    assert.equal(thumbToView(1e6, 400, th.w, 1, 1000), 999, 'and at the end');
   });
 });

@@ -495,6 +495,15 @@ body.vscode-high-contrast-light .tl-head select { color-scheme: light; }
 .tl-threads { display: flex; gap: 4px; flex-wrap: wrap; overflow: hidden; max-height: 22px; }
 .tl-body { position: relative; overflow-y: auto; overflow-x: hidden; max-height: 34vh; min-height: 48px; }
 .tl-body canvas { position: absolute; left: 0; top: 0; }
+/* horizontal scrollbar under the lanes, in the editor's scrollbar colours; keeps its height when hidden */
+.tl-hbar { position: relative; height: 10px; margin: 0 8px 2px 0; cursor: default; }
+.tl-hbar.off { visibility: hidden; }
+.tl-thumb {
+  position: absolute; top: 2px; height: 6px; border-radius: 3px;
+  background: var(--vscode-scrollbarSlider-background, rgba(121, 121, 121, 0.4));
+}
+.tl-thumb:hover { background: var(--vscode-scrollbarSlider-hoverBackground, rgba(100, 100, 100, 0.7)); }
+.tl-thumb.active { background: var(--vscode-scrollbarSlider-activeBackground, rgba(191, 191, 191, 0.4)); }
 .tl-over { cursor: crosshair; touch-action: none; }
 .tl-over.scrub { cursor: ew-resize; }
 .tl-over.panning { cursor: grabbing; }

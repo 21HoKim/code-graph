@@ -33,6 +33,10 @@ export class Timeline {
   private base: HTMLCanvasElement;
   private over: HTMLCanvasElement;
   private tip: HTMLElement;
+  /** Horizontal scrollbar under the lanes: the thumb is the part of the run in view. */
+  private bar: HTMLElement;
+  private thumb: HTMLElement;
+  private barKey = '';
   private v0 = 0;
   private v1: number;
   private now = 0;
@@ -65,11 +69,18 @@ export class Timeline {
     this.tip.className = 'tooltip';
     this.tip.hidden = true;
     this.body.append(this.base, this.over);
-    this.el.append(this.head, this.body, this.tip);
+    this.bar = document.createElement('div');
+    this.bar.className = 'tl-hbar';
+    this.bar.style.marginLeft = `${NAME_W}px`;
+    this.thumb = document.createElement('div');
+    this.thumb.className = 'tl-thumb';
+    this.bar.append(this.thumb);
+    this.el.append(this.head, this.body, this.bar, this.tip);
     this.buildHead();
     this.body.style.height = `${Math.min(6, this.threads.length) * LANE + 18}px`;
     new ResizeObserver(() => this.resize()).observe(this.body);
     this.bind();
+    this.bindBar();
   }
 
   private buildHead(): void {
@@ -190,6 +201,7 @@ export class Timeline {
   draw(): void {
     const dpr = Math.min(2, window.devicePixelRatio || 1);
     const W = this.base.width / dpr;
+    this.syncBar();
     if (this.dirty) {
       this.dirty = false;
       this.drawBase(W, dpr);
@@ -414,6 +426,55 @@ export class Timeline {
     });
   }
 
+  /** Thumb position and length from the view; the bar keeps its place (hidden) when the whole run is in view. */
+  private syncBar(): void {
+    const track = this.bar.clientWidth;
+    const th = scrollThumb(this.v0, this.v1, this.m.duration, track);
+    const key = th ? `${th.x.toFixed(1)}|${th.w.toFixed(1)}` : '-';
+    if (key === this.barKey) return;
+    this.barKey = key;
+    this.bar.classList.toggle('off', !th);
+    if (th) {
+      this.thumb.style.left = `${th.x}px`;
+      this.thumb.style.width = `${th.w}px`;
+    }
+  }
+
+  private bindBar(): void {
+    let drag: { id: number; x0: number; left: number } | null = null;
+    this.thumb.addEventListener('pointerdown', (e) => {
+      const th = scrollThumb(this.v0, this.v1, this.m.duration, this.bar.clientWidth);
+      if (!th) return;
+      e.preventDefault();
+      e.stopPropagation();
+      drag = { id: e.pointerId, x0: e.clientX, left: th.x };
+      this.thumb.setPointerCapture(e.pointerId);
+      this.thumb.classList.add('active');
+    });
+    this.thumb.addEventListener('pointermove', (e) => {
+      if (!drag || drag.id !== e.pointerId) return;
+      const track = this.bar.clientWidth;
+      const th = scrollThumb(this.v0, this.v1, this.m.duration, track)!;
+      this.setView(thumbToView(drag.left + e.clientX - drag.x0, track, th.w, this.v1 - this.v0, this.m.duration));
+    });
+    const end = (e: PointerEvent) => {
+      if (!drag || drag.id !== e.pointerId) return;
+      drag = null;
+      this.thumb.classList.remove('active');
+    };
+    this.thumb.addEventListener('pointerup', end);
+    this.thumb.addEventListener('pointercancel', end);
+    // a click beside the thumb moves one view's width that way
+    this.bar.addEventListener('pointerdown', (e) => {
+      if (e.target !== this.bar) return;
+      const th = scrollThumb(this.v0, this.v1, this.m.duration, this.bar.clientWidth);
+      if (!th) return;
+      const x = e.clientX - this.bar.getBoundingClientRect().left;
+      const w = this.v1 - this.v0;
+      this.setView(this.v0 + (x < th.x ? -w : w));
+    });
+  }
+
   /** Show the same span of time from `v0` on, kept inside the run. */
   private setView(v0: number): void {
     this.follow = false;
@@ -441,6 +502,23 @@ export class Timeline {
     const stack = this.m.stackOf(act);
     return stack[depth] ?? -1;
   }
+}
+
+/**
+ * The scrollbar thumb for a view `v0` … `v1` of a run of `duration`, on a track `track` pixels wide: its left edge
+ * and width (at least `min`), or null when the whole run is in view.
+ */
+export function scrollThumb(v0: number, v1: number, duration: number, track: number, min = 24): { x: number; w: number } | null {
+  if (duration <= 0 || track <= 0 || v1 - v0 >= duration * 0.999) return null;
+  const w = Math.min(track, Math.max(min, ((v1 - v0) / duration) * track));
+  const room = duration - (v1 - v0);
+  return { x: room > 0 ? (v0 / room) * (track - w) : 0, w };
+}
+
+/** The inverse: where the view starts when the thumb's left edge is at `x`. */
+export function thumbToView(x: number, track: number, thumbW: number, viewW: number, duration: number): number {
+  const free = track - thumbW;
+  return free > 0 ? (Math.max(0, Math.min(free, x)) / free) * (duration - viewW) : 0;
 }
 
 /** A view of `width` starting at `v0`, moved back inside 0 … `duration`. */

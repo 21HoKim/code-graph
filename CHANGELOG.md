@@ -8,6 +8,8 @@ into the version's section and its [release notes](https://github.com/21HoKim/co
 ## Unreleased
 
 ### Added
+- Timeline: a horizontal scrollbar under the swimlanes once you zoom in; its thumb is the part of the run in view.
+  Drag it, or click beside it to move one view's width.
 - The legend folds to its title (click *Legend*); it stays folded. With more than eight threads it says how many
   more there are.
 
