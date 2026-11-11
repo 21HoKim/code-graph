@@ -28,6 +28,8 @@ into the version's section and its [release notes](https://github.com/21HoKim/co
   and its ⚡ wire shows up even when the analysis cannot tell which function a thread runs (a function pointer). Python
   threads say which function started them too. Statically linked programs keep the guess.
 - Run & Trace (C/C++): busy threads no longer lose trace lines when their buffer filled up in the middle of a call.
+- Timeline: the speed list can be read in every theme; its open list drew the theme's text colour on the system's
+  background, so only the chosen speed was visible.
 
 ## 0.5.11
 

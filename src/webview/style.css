@@ -462,7 +462,22 @@ pre.sig.out { max-height: 220px; overflow: auto; font-size: 10.5px; }
 .timeline { border-top: 1px solid var(--cc-border); background: var(--cc-panel); position: relative; flex: none; }
 .tl-head { display: flex; align-items: center; gap: 6px; padding: 4px 8px; flex-wrap: wrap; font-size: 11.5px; }
 .tl-head .btn { padding: 1px 7px; }
-.tl-head select { background: transparent; color: var(--cc-fg); border: 1px solid var(--cc-border); border-radius: 6px; padding: 1px 4px; font: inherit; }
+/* the open list is drawn by the system: give it the theme's dropdown colours, and the light or dark system look */
+.tl-head select {
+  background: var(--vscode-dropdown-background, var(--cc-panel));
+  color: var(--vscode-dropdown-foreground, var(--cc-fg));
+  border: 1px solid var(--vscode-dropdown-border, var(--cc-border));
+  border-radius: 6px;
+  padding: 1px 4px;
+  font: inherit;
+  color-scheme: dark;
+}
+.tl-head select option {
+  background: var(--vscode-dropdown-listBackground, var(--vscode-dropdown-background, var(--cc-panel)));
+  color: var(--vscode-dropdown-foreground, var(--cc-fg));
+}
+body.vscode-light .tl-head select,
+body.vscode-high-contrast-light .tl-head select { color-scheme: light; }
 .tl-time { color: var(--cc-muted); min-width: 120px; }
 .tl-threads { display: flex; gap: 4px; flex-wrap: wrap; overflow: hidden; max-height: 22px; }
 .tl-body { position: relative; overflow-y: auto; overflow-x: hidden; max-height: 34vh; min-height: 48px; }
