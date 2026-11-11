@@ -32,7 +32,7 @@ folder per feature with a checklist of what to look for, and the projects pictur
 Click **▶ Run**. CodeGraph builds the program the way your makefile or CMake does (defines, include and library
 flags, the folder it runs from). If one `main.cpp` goes into several programs, it asks which one to run.
 
-![Run & Trace of a C++ router: the rx and tx threads light up their blocks while the swimlanes below play](docs/images/run.gif)
+![Run & Trace of a C++ router: the rx and tx threads light up their blocks while the swimlanes below play; Ctrl + wheel zooms in and the scrollbar moves along the run](docs/images/run.gif)
 
 ### Python
 
@@ -64,7 +64,7 @@ Click **Run & Trace with Docker Compose**: the circuit follows both containers l
 replay shows one node's request leave and the other node's handler pick it up. You don't need to attach VS Code to
 the containers; one run covers all of them, for as long as you let it run.
 
-![Both containers followed live, then Stop and the replay of what they did](docs/images/live.gif)
+![Both containers followed live: a card per container, only node-b shown, the live lanes dragged back and one thread followed; then Stop and the replay](docs/images/live.gif)
 
 On the right, a card per container shows whether it runs, its calls per second and its activity; click one to see
 only that container's code and threads, live or in the replay. Below the circuit, swimlanes of every thread's stack
@@ -73,7 +73,7 @@ scroll along with the run (drag back to look at an earlier moment), and a click 
 **⧉ A view per container** lets you pick containers and opens a circuit for each, side by side. They play together,
 and each shows only what ran in its own container.
 
-![node-b and node-a side by side: node-b's Server and node-a's Client light up at the same moment](docs/images/per-container.png)
+![The whole run with its container cards, and node-b and node-a in views of their own, replaying together](docs/images/per-container.png)
 
 ### What is broken
 
