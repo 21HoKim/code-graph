@@ -234,6 +234,104 @@ describe('where a class\'s objects live', () => {
   });
 });
 
+describe('where members are read and written', () => {
+  const sites = async (g: CodeGraph) => {
+    const { MemberIndex } = await import('../src/webview/members');
+    const mi = new MemberIndex(g);
+    const q = (id: string) => g.entities.find((e) => e.id === id)!.qname;
+    // "Class.member" → ["R fn", "W fn"]
+    return (cls: string, member: string) => {
+      const c = g.entities.find((e) => e.kind === 'class' && e.qname === cls)!;
+      return (mi.of(c.id).get(member) ?? []).map((s) => `${s.write ? 'W' : 'R'} ${q(s.fn)}`).sort();
+    };
+  };
+
+  it('C++: chains through member types, this->, bare members, base classes; reads and writes', async () => {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'cc-members-'));
+    fs.writeFileSync(
+      path.join(dir, 'cfg.hpp'),
+      [
+        'namespace app {',
+        'struct Peer { int port; };',
+        'struct Link { Peer peer; int retries; };',
+        'struct Settings { Link link; };',
+        'struct Base { int id; };',
+        'class Client : public Base {',
+        ' public:',
+        '  explicit Client(const Settings& s) : cfg_(s), sent_(0) {}',
+        '  void connect();',
+        '  int count() const { return sent_; }',
+        ' private:',
+        '  Settings cfg_;',
+        '  int sent_;',
+        '};',
+        '}',
+      ].join('\n'),
+    );
+    fs.writeFileSync(
+      path.join(dir, 'client.cpp'),
+      [
+        '#include "cfg.hpp"',
+        'namespace app {',
+        'void Client::connect() {',
+        '  int port = cfg_.link.peer.port;',
+        '  this->cfg_.link.retries = 3;',
+        '  sent_++;',
+        '  id = port;',
+        '}',
+        'void tune(Settings& s, Link* l) {',
+        '  s.link.peer.port = 8080;',
+        '  int* r = &l->retries;',
+        '  (void)r;',
+        '}',
+        'int shadow() { int sent_ = 1; return sent_; }',
+        '}',
+      ].join('\n'),
+    );
+    const at = await sites(await analyze(dir));
+    assert.deepEqual(at('app::Peer', 'port'), ['R app::Client::connect', 'W app::tune'], 'cfg_.link.peer.port, s.link.peer.port = …');
+    assert.deepEqual(at('app::Link', 'retries'), ['W app::Client::connect', 'W app::tune'], 'this->…retries = 3, &l->retries');
+    assert.deepEqual(at('app::Settings', 'link'), ['R app::Client::connect', 'R app::tune'], 'on the way to the member');
+    assert.deepEqual(at('app::Client', 'sent_'), ['R app::Client::count', 'W app::Client::Client', 'W app::Client::connect'], 'bare name in a method, ++, the constructor\'s initializer list; not the local in shadow()');
+    assert.deepEqual(at('app::Base', 'id'), ['W app::Client::connect'], 'a member of the base class');
+  });
+
+  it('C: struct members through typed parameters', async () => {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'cc-members-c-'));
+    fs.writeFileSync(path.join(dir, 'buf.c'), ['struct buffer { int len; char* data; };', 'void reset(struct buffer* b) { b->len = 0; }', 'int size(const struct buffer* b) { return b->len; }'].join('\n'));
+    const at = await sites(await analyze(dir));
+    assert.deepEqual(at('buffer', 'len'), ['R size', 'W reset']);
+  });
+
+  it('Python: self and typed parameters, through attribute types (also taken from a typed parameter)', async () => {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'cc-members-py-'));
+    fs.writeFileSync(
+      path.join(dir, 'svc.py'),
+      [
+        'class Peer:',
+        '    def __init__(self, port: int):',
+        '        self.port = port',
+        'class Settings:',
+        '    def __init__(self):',
+        '        self.peer = Peer(1)',
+        'class Client:',
+        '    def __init__(self, cfg: Settings):',
+        '        self.cfg = cfg',
+        '        self.sent = 0',
+        '    def connect(self):',
+        '        self.sent += 1',
+        '        return self.cfg.peer.port',
+        'def tune(s: Settings):',
+        '    s.peer.port = 8080',
+      ].join('\n'),
+    );
+    const at = await sites(await analyze(dir));
+    assert.deepEqual(at('svc.Peer', 'port'), ['R svc.Client.connect', 'W svc.Peer.__init__', 'W svc.tune']);
+    assert.deepEqual(at('svc.Client', 'sent'), ['W svc.Client.__init__', 'W svc.Client.connect']);
+    assert.deepEqual(at('svc.Client', 'cfg'), ['R svc.Client.connect', 'W svc.Client.__init__']);
+  });
+});
+
 describe('return statements (every language)', () => {
   // One rule for every extractor: a call inside a `return` is a call of the function, and a function's returns
   // are its own — those of a lambda, nested function or local class inside it are not.

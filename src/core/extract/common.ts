@@ -1,4 +1,5 @@
 import type { Node } from 'web-tree-sitter';
+import type { RawAccess } from '../model';
 
 /** Collapse whitespace and truncate for display ("data on the wire"). */
 export function clip(s: string, max = 40): string {
@@ -56,6 +57,33 @@ export function ownReturns(body: Node | null | undefined, rules: ReturnRules): n
   };
   if (body) walk(body, 0);
   return out;
+}
+
+/** Collects member uses per function, one entry per base + path + read/write, with its first few lines. */
+export class AccessLog {
+  readonly list: RawAccess[] = [];
+  private byKey = new Map<string, RawAccess>();
+  private perFn = new Map<string, number>();
+
+  add(fn: string, use: Omit<RawAccess, 'fn' | 'lines'>, line: number): void {
+    if (!fn || !use.path.length) return;
+    const key = `${fn}|${use.self ? '@' : use.type ?? ''}|${use.implicit ? '~' : ''}${use.path.join('.')}|${use.write ? 'w' : 'r'}`;
+    const hit = this.byKey.get(key);
+    if (hit) {
+      if (hit.lines.length < 6 && !hit.lines.includes(line)) hit.lines.push(line);
+      return;
+    }
+    const n = this.perFn.get(fn) ?? 0;
+    if (n >= 400) return; // a generated function; enough
+    this.perFn.set(fn, n + 1);
+    const a: RawAccess = { fn, path: use.path, lines: [line] };
+    if (use.self) a.self = true;
+    if (use.type) a.type = use.type;
+    if (use.write) a.write = true;
+    if (use.implicit) a.implicit = true;
+    this.byKey.set(key, a);
+    this.list.push(a);
+  }
 }
 
 /** FNV-1a 32-bit hash, enough to detect content changes for caching. */

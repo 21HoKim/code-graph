@@ -78,6 +78,7 @@ export function extractFile(parsers: Parsers, relPath: string, text: string): Fi
       base.entities = r.entities;
       base.calls = r.calls;
       base.imports = r.imports;
+      if (r.accesses.length) base.accesses = r.accesses;
       base.boundNames = r.boundNames;
       base.wildcardImport = r.wildcardImport || undefined;
       base.mainGuard = r.mainGuard || undefined;
@@ -88,6 +89,7 @@ export function extractFile(parsers: Parsers, relPath: string, text: string): Fi
       base.includes = r.includes;
       base.usingNamespaces = r.usingNamespaces;
       if (r.typedefs.length) base.typedefs = r.typedefs;
+      if (r.accesses.length) base.accesses = r.accesses;
     }
   } catch (e) {
     base.error = String((e as Error)?.stack ?? e);

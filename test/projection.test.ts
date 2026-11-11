@@ -115,7 +115,7 @@ describe('view tree', () => {
     const runner = py.entities.find((e) => e.qname === 'pipeline.runner.Runner')!;
     const names = runner.fields?.map((f) => f.name);
     assert.deepEqual(names?.slice(0, 3), ['sources', 'inbox', 'aggregator']);
-    assert.equal(runner.fields?.find((f) => f.name === 'sources')?.type, undefined);
+    assert.equal(runner.fields?.find((f) => f.name === 'sources')?.type, 'list[Source]', 'self.sources = sources: the parameter\'s type');
     assert.equal(runner.fields?.find((f) => f.name === 'aggregator')?.type, 'Aggregator');
   });
 

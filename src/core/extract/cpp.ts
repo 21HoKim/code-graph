@@ -5,8 +5,9 @@
  * local variable types) and leaves cross-file resolution to the linker.
  */
 import type { Node } from 'web-tree-sitter';
-import type { Param, RawCall, RawEntity, RawInclude, RawTypedef, ScopeKind } from '../model';
+import type { Param, RawAccess, RawCall, RawEntity, RawInclude, RawTypedef, ScopeKind } from '../model';
 import {
+  AccessLog,
   CPP_PRIMITIVES,
   KeyRegistry,
   argTexts,
@@ -41,6 +42,10 @@ interface FnCtx {
   locals: Map<string, string>;
   /** variable -> type as written (to spot std::vector<std::thread> & co.) */
   rawLocals: Map<string, string>;
+  /** A method (inline or `Class::f`): a bare name may be one of the class's members. */
+  member?: boolean;
+  /** Every parameter and local declared so far, typed or not (they hide members of the same name). */
+  names?: Set<string>;
 }
 
 export interface CppFacts {
@@ -49,6 +54,7 @@ export interface CppFacts {
   includes: RawInclude[];
   usingNamespaces: string[];
   typedefs: RawTypedef[];
+  accesses: RawAccess[];
 }
 
 const CLASS_NODES = new Set(['class_specifier', 'struct_specifier', 'union_specifier']);
@@ -58,7 +64,7 @@ const MAX_DEPTH = 600;
 export function extractCpp(root: Node): CppFacts {
   const x = new CppExtractor();
   x.decls(named(root), { names: [], kinds: [] });
-  return { entities: x.entities, calls: x.calls, includes: x.includes, usingNamespaces: x.usingNs, typedefs: x.typedefs };
+  return { entities: x.entities, calls: x.calls, includes: x.includes, usingNamespaces: x.usingNs, typedefs: x.typedefs, accesses: x.access.list };
 }
 
 // ---------------------------------------------------------------------------
@@ -112,6 +118,17 @@ export function findFnDeclarator(d: Node | null): Node | null {
 }
 
 /** Name declared by a (possibly wrapped) declarator. */
+/** The expression is assigned to, incremented / decremented, or has its address taken. */
+function writes(n: Node): boolean {
+  const p = n.parent;
+  if (!p) return false;
+  const same = (x: Node | null) => !!x && x.startIndex === n.startIndex && x.endIndex === n.endIndex;
+  if (p.type === 'assignment_expression') return same(p.childForFieldName('left'));
+  if (p.type === 'update_expression') return true;
+  if (p.type === 'pointer_expression') return p.text.trimStart().startsWith('&');
+  return false;
+}
+
 function declName(d: Node | null): string | undefined {
   let cur = d;
   for (let guard = 0; cur && guard < 10; guard++) {
@@ -208,6 +225,7 @@ class CppExtractor {
   entities: RawEntity[] = [];
   calls: RawCall[] = [];
   typedefs: RawTypedef[] = [];
+  access = new AccessLog();
   includes: RawInclude[] = [];
   usingNs: string[] = [];
   private keys = new KeyRegistry();
@@ -515,8 +533,9 @@ class CppExtractor {
       rets: ownReturns(n.childForFieldName('body'), CPP_RETURNS),
       flags: fl.size ? [...fl] : undefined,
     });
-    const ctx: FnCtx = { key, locals: new Map(), rawLocals: new Map() };
+    const ctx: FnCtx = { key, locals: new Map(), rawLocals: new Map(), member: !!scope.className || qualifier.length > 0, names: new Set() };
     for (const p of params) {
+      if (p.name) ctx.names!.add(p.name);
       if (p.name && p.type) {
         ctx.locals.set(p.name, normCppType(p.type));
         ctx.rawLocals.set(p.name, p.type);
@@ -565,6 +584,7 @@ class CppExtractor {
         const name = declName(n.childForFieldName('declarator'));
         const right = n.childForFieldName('right');
         const declared = normCppType(n.childForFieldName('type')?.text ?? '');
+        if (name) f.names?.add(name);
         if (name) {
           if (declared && declared !== 'auto') f.locals.set(name, declared);
           else if (right?.type === 'identifier') {
@@ -580,6 +600,24 @@ class CppExtractor {
         if (b) this.body(b, f, depth + 1);
         return;
       }
+      case 'field_expression': {
+        const base = this.memberChain(n, f);
+        if (base) this.body(base, f, depth + 1);
+        return;
+      }
+      case 'field_initializer': {
+        // Router(int p) : port_(p) {} — the constructor sets the member
+        const id = named(n).find((c) => c.type === 'field_identifier');
+        if (id && f.member) this.access.add(f.key, { self: true, path: [id.text], write: true }, lineOf(id));
+        for (const c of named(n)) if (c !== id) this.body(c, f, depth + 1);
+        return;
+      }
+      case 'identifier':
+        // a bare name in a method may be a member of its class (the linker / view checks the class has it)
+        if (f.member && !f.names?.has(n.text) && !f.locals.has(n.text)) {
+          this.access.add(f.key, { self: true, implicit: true, path: [n.text], write: writes(n) }, lineOf(n));
+        }
+        return;
       case 'function_definition':
       case 'class_specifier':
       case 'struct_specifier':
@@ -587,6 +625,32 @@ class CppExtractor {
         return; // local classes are ignored
     }
     for (const c of named(n)) this.body(c, f, depth + 1);
+  }
+
+  /**
+   * `a.b.c`, `p->len`, `this->cfg.port`: records which members the chain reads (or writes, for the last one) and
+   * returns the expression the chain starts from when it is not a plain name, so calls in it are still seen.
+   */
+  private memberChain(n: Node, f: FnCtx): Node | null {
+    const path: string[] = [];
+    let cur: Node | null = n;
+    while (cur?.type === 'field_expression') {
+      const field = cur.childForFieldName('field');
+      if (!field) return null;
+      path.unshift(field.type === 'field_identifier' ? field.text : qualifiedParts(field).at(-1) ?? field.text);
+      cur = cur.childForFieldName('argument');
+    }
+    if (!cur) return null;
+    const line = lineOf(n);
+    const write = writes(n);
+    if (cur.type === 'this') this.access.add(f.key, { self: true, path, write }, line);
+    else if (cur.type === 'identifier') {
+      const type = f.locals.get(cur.text);
+      if (type) this.access.add(f.key, { type, path, write }, line);
+      else if (f.member && !f.names?.has(cur.text)) this.access.add(f.key, { self: true, implicit: true, path: [cur.text, ...path], write }, line);
+      return null;
+    }
+    return cur.type === 'this' ? null : cur;
   }
 
   private localDecl(n: Node, f: FnCtx, depth: number): void {
@@ -602,6 +666,7 @@ class CppExtractor {
         value = d.childForFieldName('value');
       }
       const name = declName(declNode);
+      if (name) f.names?.add(name);
       let t = tnorm;
       if ((t === 'auto' || !t) && value) t = this.inferExprType(value) ?? t;
       if (name && t && t !== 'auto') {

@@ -36,6 +36,7 @@ import { RuntimeMap, TraceModel, argsText, augmentGraph, fmtNs, retText, threadC
 import type { LiveUpdate } from '../core/live';
 import type { Peek } from '../core/peek';
 import type { RunTrace } from '../core/trace';
+import { MemberIndex } from './members';
 import { TypeIndex, typeUsages } from './usage';
 import { Viewport } from './viewport';
 
@@ -292,6 +293,8 @@ class App {
   private showInternal = false;
   /** Class names as code may write them, for "where its objects live"; rebuilt with each graph. */
   private typeIndex?: TypeIndex;
+  /** Where each member of each class is read and written; rebuilt with each graph. */
+  private memberIndex?: MemberIndex;
   private codeAsked = new Map<number, { node: string; slots: { slot: string; file: string }[] }>();
   private lastHover?: PointerEvent;
   /** What the tooltip shows and where it was put: it stays there while the pointer stays on that element. */
@@ -441,6 +444,7 @@ class App {
     this.staticGraph = g;
     this.graph = this.trace ? augmentGraph(g, this.trace.tr) : g;
     this.typeIndex = undefined;
+    this.memberIndex = undefined;
     this.settings = settings;
     setLang(settings.lang);
     this.flow.maxParticles = settings.maxParticles;
@@ -1370,6 +1374,7 @@ class App {
     d.innerHTML = html;
     d.hidden = false;
     this.wireDetails(n.id, tn);
+    if (e?.kind === 'class') this.wireMemberUses(n.id, e);
     if (asks.length) this.askCode(n.id, asks);
     if (this.showInternal) d.querySelector('.internal-calls')?.scrollIntoView({ block: 'start' });
     this.showInternal = false;
@@ -1417,6 +1422,7 @@ class App {
       const text = e.fields.map((f) => (e.lang === 'python' ? `${f.name}${f.type ? ': ' + f.type : ''}` : `${f.type ?? ''} ${f.name ?? ''};`.trim())).join('\n');
       html += `<h3>${esc(t('members'))} (${e.fields.length})</h3><div class="sig code-slot" data-slot="mem">${esc(text)}</div>`;
       asks?.push({ slot: 'mem', ask: { file: '', line: 0, what: 'text', text, lang: e.lang } });
+      html += this.memberUsesSection(e);
     }
     const link = (id: string, extra = '') =>
       `<li><span class="dot" style="background:var(--cc-inherit)"></span><a data-entity="${esc(id)}">${esc(this.nameOf(id))}</a>${extra ? `<span class="args">${extra}</span>` : ''}</li>`;
@@ -1449,10 +1455,81 @@ class App {
     return html;
   }
 
+  /** Each member with how many functions read and write it; opening one lists them (filled by `wireMemberUses`). */
+  private memberUsesSection(e: Entity): string {
+    this.typeIndex ??= new TypeIndex(this.graph!);
+    this.memberIndex ??= new MemberIndex(this.graph!, this.typeIndex);
+    const used = this.memberIndex.of(e.id);
+    const rows = (e.fields ?? [])
+      .filter((f) => f.name && used.has(f.name))
+      .map((f) => {
+        const sites = used.get(f.name!)!;
+        const r = sites.filter((x) => !x.write).length;
+        const w = sites.filter((x) => x.write).length;
+        return `<li class="mu" data-mem="${esc(f.name!)}"><button class="mu-h"><code>${esc(f.name!)}</code><span class="args">${esc(t('readsWrites', { r, w }))}</span></button><div class="mu-list" hidden></div></li>`;
+      });
+    if (!rows.length) return '';
+    return `<h3>${esc(t('memberUses'))}</h3><div class="row q">${esc(t('memberUsesHint'))}</div><ul class="lst mu-lst">${rows.join('')}</ul>`;
+  }
+
+  /** Opening a member lists the functions using it, with the line of code, and lights them up on the circuit. */
+  private wireMemberUses(node: string, cls: Entity): void {
+    const used = this.memberIndex?.of(cls.id);
+    if (!used) return;
+    const items = [...this.details.querySelectorAll<HTMLElement>('.mu')];
+    for (const li of items) {
+      li.querySelector<HTMLElement>('.mu-h')!.onclick = () => {
+        const open = !li.classList.contains('open');
+        for (const o of items) {
+          o.classList.remove('open');
+          o.querySelector<HTMLElement>('.mu-list')!.hidden = true;
+        }
+        if (!open) {
+          this.select(node, false);
+          return;
+        }
+        li.classList.add('open');
+        const list = li.querySelector<HTMLElement>('.mu-list')!;
+        list.hidden = false;
+        const sites = [...(used.get(li.dataset.mem!) ?? [])].sort((a, b) => Number(b.write) - Number(a.write));
+        const asks: CodeSlot[] = [];
+        let html = '';
+        for (const [k, site] of sites.slice(0, 16).entries()) {
+          const fn = this.entities.get(site.fn);
+          const file = fn?.def?.file ?? fn?.decl?.file;
+          html += `<div class="mu-site"><span class="flag ${site.write ? 'mu-w' : 'mu-r'}">${esc(t(site.write ? 'writes' : 'reads'))}</span> <a data-entity="${esc(site.fn)}">${esc(this.nameOf(site.fn))}</a>`;
+          if (file && this.settings?.host !== false) {
+            html += `<div class="code-slot" data-slot="mu${k}"><span class="q">…</span></div>`;
+            asks.push({ slot: `mu${k}`, ask: { file, line: site.lines[0], what: 'stmt' } });
+          } else if (file) html += ` ${this.locLink(file, site.lines[0])}`;
+          if (site.lines.length > 1) html += `<div class="row q">${site.lines.slice(1).map((l) => (file ? this.locLink(file, l) : String(l))).join(' · ')}</div>`;
+          html += '</div>';
+        }
+        if (sites.length > 16) html += `<div class="row q">${esc(t('moreSites', { n: sites.length - 16 }))}</div>`;
+        list.innerHTML = html;
+        for (const a of list.querySelectorAll<HTMLElement>('[data-entity]')) a.onclick = () => this.revealEntity(a.dataset.entity!);
+        for (const a of list.querySelectorAll<HTMLElement>('[data-open]')) a.onclick = () => this.openLoc(a.dataset.open!, Number(a.dataset.line));
+        if (asks.length) this.askCode(node, asks, false);
+        // light the blocks that read (blue) and write (orange) it
+        const reads = new Set<string>();
+        const writes = new Set<string>();
+        for (const site of sites) {
+          const b = this.proj?.repOf(site.fn);
+          if (b && b !== node) (site.write ? writes : reads).add(b);
+        }
+        for (const b of writes) reads.delete(b);
+        const nodes = new Set<string>([node, ...this.ancestorsVisible(node)]);
+        for (const b of [...reads, ...writes]) for (const a of this.ancestorsVisible(b)) nodes.add(a);
+        this.renderer.highlight({ node, nodes, edges: new Set(), reads, writes });
+        this.flow.setFocus(new Set());
+      };
+    }
+  }
+
   /** Ask the host for the code of these slots; the answer fills them if the panel still shows `node`. */
-  private askCode(node: string, asks: CodeSlot[]): void {
+  private askCode(node: string, asks: CodeSlot[], fresh = true): void {
     const req = ++this.codeReq;
-    this.codeAsked.clear();
+    if (fresh) this.codeAsked.clear(); // a new panel: earlier answers have nowhere to go
     this.codeAsked.set(req, { node, slots: asks.map((a) => ({ slot: a.slot, file: a.ask.file })) });
     api.postMessage({ type: 'code', req, items: asks.map((a) => a.ask) });
   }
@@ -1629,6 +1706,7 @@ class App {
     }
     if (this.staticGraph) this.graph = tr ? augmentGraph(this.staticGraph, tr) : this.staticGraph;
     this.typeIndex = undefined;
+    this.memberIndex = undefined;
     this.buildToolbar();
     this.buildLegend();
     // the dock takes room from the stage: fit the circuit again

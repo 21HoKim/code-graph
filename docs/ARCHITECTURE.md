@@ -49,6 +49,8 @@ every Python process of a traced container), `c/cg_trace.h` + `c/cg_trace.c` (C9
 | `render.ts` | SVG zones, blocks, wires, labels and live glows |
 | `flow.ts` | canvas layer: moving charges, replay pulses |
 | `viewport.ts` | pan, zoom, pinch, tap |
+| `usage.ts` | type names → classes (scopes, imports, includes): where a class's objects live |
+| `members.ts` | where each member of a class is read and written, from the functions' member chains |
 | `main.ts` | state, toolbar, details / problems / run panels, replay loop |
 
 **What happens when the view opens**
@@ -71,6 +73,9 @@ every Python process of a traced container), `c/cg_trace.h` + `c/cg_trace.c` (C9
   be inferred locally, the receiver type (parameters, `auto x = new T`, `T x(…)`, `make_unique<T>`,
   `x = Foo()`, `with Foo() as x`, `for (auto& x : container)`), argument texts, and whether it is a
   *spawn* (a function reference handed to a thread/task API) or an *instantiation*.
+- `MemberUse` per function (`uses`): member chains the body reads or writes (`cfg.link.peer.port`, `p->len = 0`,
+  `this->x`, a bare member name in a method, `self.x`), with the base's type when it is a typed parameter or local.
+  Each step's class is worked out in the view (`members.ts`) from the member types, so nothing is resolved here.
 - `#include` / `import` statements, and C/C++ `typedef` / `using` names for a class (`typedef struct buffer
   buffer_t;`), which the linker turns into aliases of the class they name (same file first, then included files,
   then files including it).

@@ -60,6 +60,8 @@ export interface Entity {
   def?: Loc;
   params?: Param[];
   returns?: string;
+  /** Functions with a body: the members it reads and writes (see `MemberUse`). */
+  uses?: MemberUse[];
   /** Functions with a body: the lines of its own `return` statements (`yield` in Python), not those of lambdas,
    *  nested functions or local classes inside it. Empty when it runs to the end. */
   rets?: number[];
@@ -235,6 +237,30 @@ export interface RawImport {
   line: number;
 }
 
+/**
+ * A function reading or writing a member: `cfg.link.peer`, `p->len = 0`, `self.port`, or a bare `port_` inside a
+ * method. Which class each step belongs to is worked out later, from the types of the base and of each member.
+ */
+export interface MemberUse {
+  /** The base is the object the method runs on (`this`, `self`, or a bare member name inside a method). */
+  self?: boolean;
+  /** Type of the base variable as known in the function (a parameter or local), when it is not `self`. */
+  type?: string;
+  /** Member names from the base on: `cfg.link.peer` → ['link', 'peer']; a bare `port_` → ['port_']. */
+  path: string[];
+  /** The last member is assigned, incremented or has its address taken. */
+  write?: boolean;
+  /** A bare name inside a method: only a member if the class has one by that name. */
+  implicit?: boolean;
+  /** Lines it is written on (the first few). */
+  lines: number[];
+}
+
+export interface RawAccess extends MemberUse {
+  /** RawEntity.key of the function. */
+  fn: string;
+}
+
 export interface RawTypedef {
   /** The new name. */
   name: string;
@@ -259,6 +285,8 @@ export interface FileFacts {
   error?: string;
   /** Regions tree-sitter could not parse (imprecise: error recovery can swallow neighbouring code). */
   syntaxErrors?: { line: number; endLine: number; message: string }[];
+  /** Members read and written in function bodies. */
+  accesses?: RawAccess[];
   /** C/C++: `typedef struct buffer buffer_t;`, `typedef Foo Bar;`, `using Bar = Foo;` — other names of a class
    *  that may be defined in another file. */
   typedefs?: RawTypedef[];

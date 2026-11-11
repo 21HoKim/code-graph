@@ -2,8 +2,8 @@
  * Python fact extractor (tree-sitter-python).
  */
 import type { Node } from 'web-tree-sitter';
-import type { Param, RawCall, RawEntity, RawImport, ScopeKind } from '../model';
-import { KeyRegistry, argTexts, clip, endLineOf, lineOf, named, ownReturns, type ReturnRules } from './common';
+import type { Param, RawAccess, RawCall, RawEntity, RawImport, ScopeKind } from '../model';
+import { AccessLog, KeyRegistry, argTexts, clip, endLineOf, lineOf, named, ownReturns, type ReturnRules } from './common';
 
 /** A function's own returns and yields: nested functions, lambdas and classes inside it return for themselves. */
 const PY_RETURNS: ReturnRules = {
@@ -30,6 +30,7 @@ export interface PyFacts {
   entities: RawEntity[];
   calls: RawCall[];
   imports: RawImport[];
+  accesses: RawAccess[];
   boundNames: string[];
   wildcardImport: boolean;
   mainGuard: boolean;
@@ -44,7 +45,7 @@ export function extractPython(root: Node): PyFacts {
   const moduleCtx: FnCtx = { key: '', locals: new Map() };
   x.block(named(root), { names: [], kinds: [] }, moduleCtx, 0);
   const b = collectBindings(root);
-  return { entities: x.entities, calls: x.calls, imports: x.imports, boundNames: [...b.names], wildcardImport: b.wildcard, mainGuard: b.mainGuard };
+  return { entities: x.entities, calls: x.calls, imports: x.imports, accesses: x.access.list, boundNames: [...b.names], wildcardImport: b.wildcard, mainGuard: b.mainGuard };
 }
 
 /**
@@ -178,6 +179,7 @@ class PyExtractor {
   entities: RawEntity[] = [];
   calls: RawCall[] = [];
   imports: RawImport[] = [];
+  access = new AccessLog();
   private keys = new KeyRegistry();
 
   block(nodes: Node[], scope: Scope, f: FnCtx, depth: number): void {
@@ -256,8 +258,40 @@ class PyExtractor {
         if (b) this.visit(b, scope, f, depth + 1);
         return;
       }
+      case 'attribute': {
+        const base = this.attrChain(n, f);
+        if (base) this.visit(base, scope, f, depth + 1);
+        return;
+      }
     }
     for (const c of named(n)) this.visit(c, scope, f, depth + 1);
+  }
+
+  /**
+   * `self.cfg.port`, `conn.peer.host = …`: records which attributes the chain reads (or writes, for the last one)
+   * and returns the expression it starts from when that is not a plain name (`make().x`), to visit it.
+   */
+  private attrChain(n: Node, f: FnCtx): Node | null {
+    const path: string[] = [];
+    let cur: Node | null = n;
+    while (cur?.type === 'attribute') {
+      const a = cur.childForFieldName('attribute');
+      if (!a) return null;
+      path.unshift(a.text);
+      cur = cur.childForFieldName('object');
+    }
+    if (!cur) return null;
+    if (cur.type !== 'identifier') return cur;
+    const p = n.parent;
+    const same = (x: Node | null) => !!x && x.startIndex === n.startIndex && x.endIndex === n.endIndex;
+    const write = !!p && (p.type === 'assignment' || p.type === 'augmented_assignment') && same(p.childForFieldName('left'));
+    const line = lineOf(n);
+    if ((cur.text === 'self' || cur.text === 'cls') && f.selfClass) this.access.add(f.key, { self: true, path, write }, line);
+    else {
+      const type = f.locals.get(cur.text);
+      if (type) this.access.add(f.key, { type, path, write }, line);
+    }
+    return null;
   }
 
   private klass(n: Node, scope: Scope, outer: FnCtx, depth: number, decorators?: string[]): void {
@@ -352,7 +386,8 @@ class PyExtractor {
     const left = n.childForFieldName('left');
     const right = n.childForFieldName('right');
     const annot = n.childForFieldName('type');
-    const t = annot ? annot.text.replace(/^["']|["']$/g, '') : constructedType(right);
+    // `self.cfg = cfg` takes the type of the parameter or local it is given
+    const t = annot ? annot.text.replace(/^["']|["']$/g, '') : constructedType(right) ?? (right?.type === 'identifier' ? f.locals.get(right.text) : undefined);
     if (!left) return;
     // every `self.x = …` is a member, typed when the value tells
     if (left.type === 'attribute' && f.selfClass) {

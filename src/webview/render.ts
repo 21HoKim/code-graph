@@ -32,6 +32,9 @@ export interface Highlight {
   node?: string;
   nodes: Set<string>;
   edges: Set<string>;
+  /** Blocks that read / write a chosen member (class panel): outlined in their own colours. */
+  reads?: Set<string>;
+  writes?: Set<string>;
 }
 
 export function edgePath(pts: Pt[], style: LayoutStyle): string {
@@ -262,11 +265,13 @@ export class Renderer {
 
   highlight(h: Highlight | null): void {
     this.svg.classList.toggle('has-sel', !!h);
-    for (const el of this.svg.querySelectorAll('.hl, .sel')) el.classList.remove('hl', 'sel');
+    for (const el of this.svg.querySelectorAll('.hl, .sel')) el.classList.remove('hl', 'sel', 'hl-r', 'hl-w');
     this.gLabels.innerHTML = '';
     if (!h) return;
     for (const id of h.nodes) for (const el of this.els.get(id) ?? []) el.classList.add('hl');
     for (const id of h.edges) for (const el of this.els.get(id) ?? []) el.classList.add('hl');
+    for (const id of h.reads ?? []) for (const el of this.els.get(id) ?? []) el.classList.add('hl', 'hl-r');
+    for (const id of h.writes ?? []) for (const el of this.els.get(id) ?? []) el.classList.add('hl', 'hl-w');
     if (h.node) for (const el of this.els.get(h.node) ?? []) el.classList.add('sel', 'hl');
   }
 

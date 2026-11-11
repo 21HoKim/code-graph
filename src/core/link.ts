@@ -199,6 +199,7 @@ class Linker {
     this.pyNameTables();
     this.inheritance();
     this.calls();
+    this.memberUses();
     this.markEntries();
     this.incomplete();
 
@@ -971,6 +972,29 @@ class Linker {
       }
       this.pyImports.set(f.path, binds);
       if (wild.length) this.pyWildcards.set(f.path, wild);
+    }
+  }
+
+  /** Members each function reads and writes, as the extractor saw them; which class they belong to is worked out
+   *  by the view (webview/members.ts), with the same type lookup as the class panel. */
+  private memberUses(): void {
+    const bases = new Map<string, string[]>();
+    for (const r of this.relations.values()) if (r.kind === 'inherit') push(bases, r.from, r.to);
+    const hasField = (cls: string, name: string, depth = 0): boolean =>
+      !!this.fieldsOf.get(cls)?.[name] || (depth < 6 && (bases.get(cls) ?? []).some((b) => hasField(b, name, depth + 1)));
+    for (const f of [...this.cc, ...this.py]) {
+      for (const a of f.accesses ?? []) {
+        const e = this.rawToEntity.get(this.rawKey(f, a.fn));
+        if (e?.kind !== 'function') continue;
+        const { fn: _fn, ...use } = a;
+        if (use.implicit) {
+          // a bare name: keep it only when the method's class (or a base) has a member by that name
+          const cls = this.enclosingClass(e);
+          if (!cls || !hasField(cls.id, use.path[0])) continue;
+          delete use.implicit;
+        }
+        (e.uses ??= []).push(use);
+      }
     }
   }
 

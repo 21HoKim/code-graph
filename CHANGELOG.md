@@ -8,6 +8,10 @@ into the version's section and its [release notes](https://github.com/21HoKim/co
 ## Unreleased
 
 ### Added
+- Class details: *Where members are read and written* — each member says how many functions read and write it,
+  following chains through member types and base classes (`cfg.link.peer.port`, `p->len = 0`, `self.port`, a bare
+  `port_` in a method). Open one to see those lines and light the functions up: blue reads, orange writes.
+- Python: `self.cfg = cfg` gives the member the type of the parameter (or local) it is set from.
 - Timeline: drag the swimlanes sideways to move the view, and Shift + wheel moves it too (down: earlier,
   up: later). Dragging the playhead or the time axis still scrubs, and a click still jumps to that moment.
 

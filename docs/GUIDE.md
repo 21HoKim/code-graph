@@ -53,7 +53,9 @@ Compose v2 for containers.
 - **Details panel**: a function shows every parameter and its return type in full, each `return` statement, and the
   whole statement of each call in and out (in your colour theme; click to open). A class shows its members, base
   and derived classes, where its objects are created, and where they live: members of other classes, parameters,
-  return values.
+  return values. Under *Where members are read and written*, each member says how many functions read and write it
+  (`cfg.link.peer.port`, `p->len = 0`, `self.port`, a bare `port_` in a method, through member types and base
+  classes); open one to see those lines and light the functions up on the circuit, blue for reads, orange for writes.
 - **Current**: charges travel from caller to callee (arguments) and back in amber (return values). Click a block
   and its wires show what travels on them, e.g. `(pkt, 100) ⟲ bool`.
 - **Threads, statically**: `std::thread`, `std::async`, `std::jthread`, `pthread_create`,

@@ -202,6 +202,8 @@ button, input { font: inherit; color: inherit; }
 .n.thread .na { fill: var(--cc-spawn); }
 .n.fragment .nb { stroke-dasharray: 5 4; }
 .n.sel .nb { stroke: var(--cc-accent); stroke-width: 2.2; filter: drop-shadow(0 0 6px color-mix(in srgb, var(--cc-accent) 60%, transparent)); }
+.n.hl-r .nb { stroke: var(--cc-call); stroke-width: 2; }
+.n.hl-w .nb { stroke: var(--cc-ret); stroke-width: 2.4; }
 .n.cursor .nb { animation: cc-cursor 1.2s ease-in-out 2; stroke: var(--cc-ret); stroke-width: 2.2; }
 @keyframes cc-cursor { 50% { stroke-width: 4; } }
 .bd rect { fill: var(--cc-panel); stroke: var(--cc-border); }
@@ -490,3 +492,14 @@ pre.sig.out { max-height: 220px; overflow: auto; font-size: 10.5px; }
   .tl-body { max-height: 22vh; }
   .toolbar { gap: 5px; }
 }
+
+/* class panel: where each member is read and written */
+.mu-lst li { display: block; }
+.mu-h { all: unset; cursor: pointer; display: flex; gap: 8px; align-items: baseline; width: 100%; }
+.mu-h code { font-family: var(--cc-mono); }
+.mu-h::before { content: '▸'; color: var(--cc-muted); font-size: 10px; }
+.mu.open > .mu-h::before { content: '▾'; }
+.mu-list { margin: 4px 0 8px 14px; }
+.mu-site { margin: 4px 0; }
+.flag.mu-r { color: var(--cc-call); border-color: var(--cc-call); }
+.flag.mu-w { color: var(--cc-ret); border-color: var(--cc-ret); }
