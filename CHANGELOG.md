@@ -7,6 +7,12 @@ into the version's section and its [release notes](https://github.com/21HoKim/co
 
 ## Unreleased
 
+### Fixed
+- *Where it returns* lists only the function's own `return` statements: those of a lambda or a local class
+  written inside it no longer show up (a `void` function holding `[] { return g(); }` says it has no return).
+- A `return` spread over several lines, or written in a one-line block (`if (ok) { return g(a, b); }`), is shown
+  whole, from `return` to its own `;`.
+
 ## 0.5.10
 
 ### Added

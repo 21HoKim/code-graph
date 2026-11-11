@@ -27,7 +27,7 @@ describe('code snippets', () => {
   });
 
   it('finds every return of a C++ function as a whole statement', () => {
-    const r = returnStatements(cpp, 1, 12, 'cpp');
+    const r = returnStatements(cpp, [3, 8, 11], 'cpp');
     assert.deepEqual(
       r.map((s) => [s.first, s.last]),
       [[3, 3], [8, 9], [11, 11]],
@@ -48,10 +48,15 @@ describe('code snippets', () => {
   });
 
   it('returns of a one-line C function', () => {
-    assert.deepEqual(returnStatements('static int one(void) { return 1; }', 1, 1, 'c').map((s) => s.first), [1]);
+    assert.deepEqual(returnStatements('static int one(void) { return 1; }', [1], 'c').map((s) => s.first), [1]);
   });
 
-  it('Python: returns and yields, not those of nested functions; whole logical lines', () => {
+  it('a return statement starts at its keyword and ends at its own `;`', () => {
+    const src = ['int f(bool ok) {', '  if (ok) { return g(a,', '                    b); }', '  return P{h(),', '           k()};', '}'].join('\n');
+    assert.deepEqual(returnStatements(src, [2, 4], 'cpp').map((s) => [s.first, s.last]), [[2, 3], [4, 5]]);
+  });
+
+  it('Python: whole logical lines', () => {
     const py = [
       'def load(path):', // 1
       '    """return the rows"""', // 2
@@ -64,7 +69,7 @@ describe('code snippets', () => {
       '    return [helper(r)', // 9
       '            for r in rows]', // 10
     ].join('\n');
-    const r = returnStatements(py, 1, 10, 'python');
+    const r = returnStatements(py, [6, 9], 'python');
     assert.deepEqual(r.map((s) => [s.first, s.last]), [[6, 6], [9, 10]]);
     assert.deepEqual(statementAt(py, 8, 'python'), { first: 7, last: 8, lines: ['    rows = read(path,', '                strict=True)'] });
   });

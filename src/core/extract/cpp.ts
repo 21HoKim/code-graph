@@ -16,8 +16,16 @@ import {
   lineOf,
   named,
   normCppType,
+  ownReturns,
   stripTemplateArgs,
+  type ReturnRules,
 } from './common';
+
+/** A function's own returns: lambdas, local functions and local classes inside it return for themselves. */
+const CPP_RETURNS: ReturnRules = {
+  returns: new Set(['return_statement', 'co_return_statement', 'co_yield_statement']),
+  stops: new Set(['lambda_expression', 'function_definition', 'class_specifier', 'struct_specifier', 'union_specifier']),
+};
 
 interface Scope {
   names: string[];
@@ -467,6 +475,7 @@ class CppExtractor {
       isDefinition: true,
       params,
       returns: returnType(n, declarator),
+      rets: ownReturns(n.childForFieldName('body'), CPP_RETURNS),
       flags: fl.size ? [...fl] : undefined,
     });
     const ctx: FnCtx = { key, locals: new Map(), rawLocals: new Map() };

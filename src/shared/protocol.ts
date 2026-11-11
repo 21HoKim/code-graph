@@ -30,8 +30,10 @@ export interface CodeAsk {
   file: string;
   line: number;
   endLine?: number;
-  /** stmt: the statement at `line` · returns: every return of the function · text: colour `text` as `lang` */
+  /** stmt: the statement at `line` · returns: the return statements at `lines` · text: colour `text` as `lang` */
   what: 'stmt' | 'returns' | 'text';
+  /** returns: the lines of the function's own return statements (`Entity.rets`). */
+  lines?: number[];
   text?: string;
   lang?: 'c' | 'cpp' | 'python';
 }

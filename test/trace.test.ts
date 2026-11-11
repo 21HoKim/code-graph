@@ -272,6 +272,27 @@ describe('Run & Trace (C producer/consumer)', { skip: !native }, () => {
   });
 });
 
+describe('Run & Trace (calls in a return)', { skip: !native }, () => {
+  // `return g(x);` can be compiled as a jump (sibling call) at -O2; the probe's exit event keeps f's frame
+  // open, so g still runs inside f.
+  for (const [file, src] of [
+    ['main.c', '#include <stdio.h>\nint g(int x) { return x + 1; }\nint f(int x) { return g(x); }\nint main(void) { printf("%d\\n", f(1)); return 0; }\n'],
+    ['main.cpp', '#include <cstdio>\nint g(int x) { return x + 1; }\nint f(int x) { return g(x); }\nint main() { std::printf("%d\\n", f(1)); return 0; }\n'],
+  ]) {
+    it(`${file}: g runs inside f at -O2`, async () => {
+      const dir = tmp('ret');
+      fs.writeFileSync(path.join(dir, file), src);
+      const { r } = await trace(dir, undefined, [], { buildFlags: ['-O2'] });
+      const tr = r.trace!;
+      assert.equal(tr.exit.code, 0);
+      const name = (i: number) => tr.fns[tr.spans.fn[i]]?.name;
+      const gi = tr.spans.fn.findIndex((_, i) => name(i) === 'g');
+      assert.ok(gi >= 0, 'g ran');
+      assert.equal(name(tr.spans.parent[gi]), 'f');
+    });
+  }
+});
+
 describe('Run & Trace (build system)', { skip: !native }, () => {
   const PAIR = path.join(ROOT, 'samples', 'net-pair');
 

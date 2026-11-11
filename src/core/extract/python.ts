@@ -3,7 +3,13 @@
  */
 import type { Node } from 'web-tree-sitter';
 import type { Param, RawCall, RawEntity, RawImport, ScopeKind } from '../model';
-import { KeyRegistry, argTexts, clip, endLineOf, lineOf, named } from './common';
+import { KeyRegistry, argTexts, clip, endLineOf, lineOf, named, ownReturns, type ReturnRules } from './common';
+
+/** A function's own returns and yields: nested functions, lambdas and classes inside it return for themselves. */
+const PY_RETURNS: ReturnRules = {
+  returns: new Set(['return_statement', 'yield']),
+  stops: new Set(['function_definition', 'class_definition', 'lambda', 'decorated_definition']),
+};
 
 interface Scope {
   names: string[];
@@ -331,6 +337,7 @@ class PyExtractor {
       isDefinition: true,
       params,
       returns: clip(n.childForFieldName('return_type')?.text ?? '', 160) || undefined,
+      rets: ownReturns(n.childForFieldName('body'), PY_RETURNS),
       flags: flags.size ? [...flags] : undefined,
     };
     this.entities.push(ent);

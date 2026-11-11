@@ -179,38 +179,36 @@ export function statementAt(text: string, line: number, lang: Lang): Snippet | n
 }
 
 /**
- * Every `return` in the function spanning lines `line`..`endLine` (1-based), each as its whole statement.
- * Python: `yield` too, and nothing from functions nested inside.
+ * The `return` statements of a function at `lines` (1-based, from the syntax tree: the function's own returns,
+ * not those of lambdas, nested functions or local classes inside it), each as its whole statement.
  */
-export function returnStatements(text: string, line: number, endLine: number, lang: Lang, max = 20): Snippet[] {
+export function returnStatements(text: string, lines: readonly number[], lang: Lang, max = 20): Snippet[] {
   const all = text.split(/\r?\n/);
-  const lo = Math.max(0, line - 1);
-  const hi = Math.min(all.length - 1, endLine - 1);
   const code = codeOnly(all, lang);
+  const kw = lang === 'python' ? /\b(return|yield)\b/ : /\b(co_return|co_yield|return)\b/;
   const out: Snippet[] = [];
-  const kw = lang === 'python' ? /^\s*(return|yield)\b/ : /\breturn\b/;
-  // Python: skip bodies of nested defs (deeper indentation than a nested `def` line)
-  let nestedIndent = -1;
-  const indent = (s: string) => s.length - s.trimStart().length;
-  // Python: the `def` line holds no return; C/C++: a one-line function does
-  for (let i = lang === 'python' ? lo + 1 : lo; i <= hi && out.length < max; i++) {
-    const c = code[i];
-    if (lang === 'python') {
-      if (!c.trim()) continue;
-      if (nestedIndent >= 0 && indent(c) > nestedIndent) continue;
-      nestedIndent = /^\s*(async\s+)?def\b|^\s*class\b/.test(c) ? indent(c) : -1;
-      if (nestedIndent >= 0) continue;
-    }
-    if (!kw.test(c)) continue;
-    if (lang === 'python') {
-      const end = pyEnd(code, i, hi);
-      out.push(cut(all, i, end));
-      i = end;
-    } else {
-      const end = cEnd(code, i, hi);
-      out.push(cut(all, i, end));
-      i = end;
-    }
+  for (const line of lines) {
+    const i = line - 1;
+    if (i < 0 || i >= all.length || out.length >= max) continue;
+    if (out.length && out[out.length - 1].last > i) continue; // already part of the previous statement
+    const at = Math.max(0, code[i].search(kw));
+    const end = lang === 'python' ? pyEnd(code, i, all.length - 1) : cEndFrom(code, i, at, all.length - 1);
+    out.push(cut(all, i, end));
   }
   return out;
+}
+
+/** C/C++: where the statement starting at column `col` of line `start` ends (its `;` at depth 0). */
+function cEndFrom(code: string[], start: number, col: number, ceil: number): number {
+  let d = 0;
+  for (let i = start; i <= ceil && i < start + MAX_LINES; i++) {
+    const s = i === start ? code[i].slice(col) : code[i];
+    for (const ch of s) {
+      if (ch === '(' || ch === '[' || ch === '{') d++;
+      else if (ch === ')' || ch === ']' || ch === '}') {
+        if (--d < 0) return i; // the block around a one-line `{ return x }` closes
+      } else if (d <= 0 && ch === ';') return i;
+    }
+  }
+  return Math.min(ceil, start + MAX_LINES - 1);
 }

@@ -155,6 +155,88 @@ describe('where a class\'s objects live', () => {
   });
 });
 
+describe('return statements (every language)', () => {
+  // One rule for every extractor: a call inside a `return` is a call of the function, and a function's returns
+  // are its own — those of a lambda, nested function or local class inside it are not.
+  let g: CodeGraph;
+  before(async () => {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'cc-returns-'));
+    fs.writeFileSync(
+      path.join(dir, 'a.cpp'),
+      [
+        'int g() { return 1; }', // 1
+        'int h() { return 2; }', // 2
+        'struct B { int b() { return 3; } };', // 3
+        'B make() { return B(); }', // 4
+        'int f() { return g(); }', // 5
+        'int pick(bool ok) { return ok ? g() : h(); }', // 6
+        'int chain() { return make().b(); }', // 7
+        'void run() {', // 8
+        '  auto k = [] { return g(); };', // 9
+        '  struct Local { int m() { return h(); } };', // 10
+        '  k();', // 11
+        '}', // 12
+        'int twice(int x) {', // 13
+        '  if (x < 0) return -1;', // 14
+        '  return', // 15
+        '    g();', // 16
+        '}', // 17
+      ].join('\n'),
+    );
+    fs.writeFileSync(path.join(dir, 'b.c'), ['static int cg(void) { return 1; }', 'int cf(void) { return cg(); }', 'int ct(int ok) { return ok ? cg() : cf(); }'].join('\n'));
+    fs.writeFileSync(
+      path.join(dir, 'p.py'),
+      [
+        'def pg(): return 1', // 1
+        'def ph(): return 2', // 2
+        'def pf(): return pg()', // 3
+        'def pt(ok): return pg() if ok else ph()', // 4
+        'async def pa(): return 1', // 5
+        'async def pw(): return await pa()', // 6
+        'def gen(): yield 1', // 7
+        'def pgen(): yield from gen()', // 8
+        'def outer():', // 9
+        '    def inner():', // 10
+        '        return pg()', // 11
+        '    k = lambda: ph()', // 12
+        '    inner()', // 13
+      ].join('\n'),
+    );
+    g = await analyze(dir);
+  });
+  const fn = (q: string) => g.entities.find((e) => e.kind === 'function' && (e.qname === q || e.qname.endsWith('.' + q)))!;
+
+  it('C++: a call in a return is a call of the function', () => {
+    assert.ok(rel(g, 'call', 'cc:f', 'cc:g'), 'return g();');
+    assert.ok(rel(g, 'call', 'cc:pick', 'cc:g') && rel(g, 'call', 'cc:pick', 'cc:h'), 'return ok ? g() : h();');
+    assert.ok(rel(g, 'call', 'cc:chain', 'cc:make') && rel(g, 'call', 'cc:chain', 'cc:B::b'), 'return make().b();');
+    assert.ok(rel(g, 'call', 'cc:twice', 'cc:g'), 'a return spread over two lines');
+  });
+
+  it('C++: returns of lambdas and local classes stay theirs', () => {
+    assert.deepEqual(fn('run').rets, [], 'a void function with a lambda and a local class returns nothing itself');
+    assert.deepEqual(fn('twice').rets, [14, 15]);
+    assert.deepEqual(fn('f').rets, [5]);
+  });
+
+  it('C: a call in a return is a call of the function', () => {
+    assert.ok(g.relations.some((r) => r.kind === 'call' && r.from === 'cc:cf' && r.to.startsWith('cc:cg')));
+    assert.ok(g.relations.some((r) => r.kind === 'call' && r.from === 'cc:ct' && r.to === 'cc:cf'));
+    assert.deepEqual(fn('ct').rets, [3]);
+  });
+
+  it('Python: calls in return, await and yield from; nested functions and lambdas return for themselves', () => {
+    const id = (n: string) => `py:p.py:${n}`;
+    assert.ok(rel(g, 'call', id('pf'), id('pg')));
+    assert.ok(rel(g, 'call', id('pt'), id('pg')) && rel(g, 'call', id('pt'), id('ph')));
+    assert.ok(rel(g, 'call', id('pw'), id('pa')), 'return await pa()');
+    assert.ok(rel(g, 'call', id('pgen'), id('gen')), 'yield from gen()');
+    assert.deepEqual(fn('outer').rets, [], 'the return in inner() and the lambda are not outer()\'s');
+    assert.deepEqual(fn('inner').rets, [11]);
+    assert.deepEqual(fn('pgen').rets, [8]);
+  });
+});
+
 describe('robustness & incremental updates', () => {
   it('survives syntax errors and only re-parses changed files', async () => {
     const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'cc-test-'));

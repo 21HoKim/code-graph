@@ -1331,7 +1331,7 @@ class App {
       if (!e.def) html += `<div class="row q">${esc(t('noBody'))}</div>`;
       else if (host) {
         html += `<div class="code-slot" data-slot="ret"><span class="q">…</span></div>`;
-        asks.push({ slot: 'ret', ask: { file: e.def.file, line: e.def.line, endLine: e.def.endLine, what: 'returns' } });
+        asks.push({ slot: 'ret', ask: { file: e.def.file, line: e.def.line, endLine: e.def.endLine, what: 'returns', lines: e.rets ?? [] } });
       }
     }
     if (e?.kind === 'class') html += this.classSection(e, host ? asks : undefined);

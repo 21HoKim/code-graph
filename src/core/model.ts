@@ -58,6 +58,9 @@ export interface Entity {
   def?: Loc;
   params?: Param[];
   returns?: string;
+  /** Functions with a body: the lines of its own `return` statements (`yield` in Python), not those of lambdas,
+   *  nested functions or local classes inside it. Empty when it runs to the end. */
+  rets?: number[];
   /** Classes: data members, typed as written (Python attributes may have no type). */
   fields?: Param[];
   /** Classes: other names of the same type (C typedef names). */
@@ -177,6 +180,8 @@ export interface RawEntity {
   isDefinition: boolean;
   params?: Param[];
   returns?: string;
+  /** Definitions: lines of the function's own `return` / `co_return` / `yield` statements (see `ownReturns`). */
+  rets?: number[];
   flags?: string[];
   /** Base classes as written ('util::Logger', 'Base'). */
   bases?: string[];

@@ -65,7 +65,8 @@ every Python process of a traced container), `c/cg_trace.h` + `c/cg_trace.c` (C9
 `extract/*` walks a tree-sitter syntax tree and records **what is written**, without resolving anything:
 
 - `RawEntity`: namespaces are implicit in `scope`; classes (with bases and field types); functions
-  (params, return type, flags, `qualifier` for out-of-line definitions such as `void Router::start()`).
+  (params, return type, flags, `qualifier` for out-of-line definitions such as `void Router::start()`, and `rets`:
+  the lines of the function's own `return` statements, found with `ownReturns` in `extract/common.ts`).
 - `RawCall`: the call *form* (`plain`, `qualified`, `member`, `super`, `new`), the receiver path and, when it can
   be inferred locally, the receiver type (parameters, `auto x = new T`, `T x(…)`, `make_unique<T>`,
   `x = Foo()`, `with Foo() as x`, `for (auto& x : container)`), argument texts, and whether it is a
@@ -331,3 +332,12 @@ projected wire of each call.
 2. Write `extract/<lang>.ts` producing `RawEntity` / `RawCall` / imports.
 3. Teach `link.ts` the language's scoping and import rules (or reuse the C++ or Python path).
 4. Add a sample under `samples/` and assertions in `test/analyzer.test.ts`.
+
+Every extractor keeps the same rules, so a feature works the same in every language:
+
+- A call anywhere in a function body is a call of that function, in a `return` too: `return g();`,
+  `return ok ? g() : h();`, `return a().b();`, and the language's own forms (`return await g()`, `yield from g()`,
+  `co_return g();`). Calls inside a lambda count for the function that writes the lambda.
+- A function's `rets` are its own: give `ownReturns` the language's return statements and the nodes that start
+  another function (lambdas, nested functions, local classes). A function without a `return` gets `[]`.
+- The test *return statements (every language)* in `test/analyzer.test.ts` gets a block for the new language.

@@ -562,6 +562,7 @@ class Linker {
         decl: c.decls[0] ? this.loc(c.decls[0].facts, c.decls[0].raw) : undefined,
         params: (withNames ?? primary).raw.params,
         returns: c.def?.raw.returns ?? c.decls[0]?.raw.returns,
+        rets: c.def?.raw.rets,
         flags: flags.size ? [...flags] : undefined,
       });
       for (const r of [c.def, ...c.decls]) if (r) this.rawToEntity.set(this.rawKey(r.facts, r.raw.key), e);
@@ -820,6 +821,7 @@ class Linker {
           def: this.loc(f, r),
           params: r.params,
           returns: r.returns,
+          rets: r.rets,
           flags: r.flags,
         });
         this.rawToEntity.set(this.rawKey(f, r.key), e);

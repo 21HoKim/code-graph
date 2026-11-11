@@ -28,6 +28,36 @@ export function argTexts(argList: Node | null | undefined, max = 6): string[] | 
   return out.length ? out : undefined;
 }
 
+/**
+ * Node types that end a function's own body for {@link ownReturns}: what is written inside them belongs to another
+ * function (a lambda, a nested or local function, a local class's methods).
+ */
+export interface ReturnRules {
+  /** Statements that give a value back or hand one out: `return`, `co_return`, `yield`. */
+  returns: ReadonlySet<string>;
+  /** Nodes whose `return`s are their own, not the enclosing function's. */
+  stops: ReadonlySet<string>;
+}
+
+/**
+ * The 1-based lines of the `return` statements of one function body, in order, without those of the lambdas,
+ * nested functions and local classes written inside it. Every language extractor uses this with its own node
+ * types, so the rule is the same everywhere.
+ */
+export function ownReturns(body: Node | null | undefined, rules: ReturnRules): number[] {
+  const out: number[] = [];
+  const walk = (n: Node, depth: number): void => {
+    if (depth > 400) return;
+    for (const c of named(n)) {
+      if (rules.stops.has(c.type)) continue;
+      if (rules.returns.has(c.type) && out[out.length - 1] !== lineOf(c)) out.push(lineOf(c));
+      walk(c, depth + 1);
+    }
+  };
+  if (body) walk(body, 0);
+  return out;
+}
+
 /** FNV-1a 32-bit hash, enough to detect content changes for caching. */
 export function hashText(s: string): string {
   let h = 0x811c9dc5;

@@ -128,7 +128,7 @@ export class CircuitPanel implements vscode.Disposable {
       }
       const snips =
         a.what === 'returns'
-          ? returnStatements(text, a.line, a.endLine ?? a.line, lang)
+          ? returnStatements(text, a.lines ?? [], lang)
           : [statementAt(text, a.line, lang)].filter((s): s is NonNullable<typeof s> => !!s);
       const shown: CodeSnip[] = [];
       for (const s of snips) {
