@@ -71,3 +71,4 @@ reach the Marketplace page with the next release.
 | 0.4.0 | any Docker setup traced; `.codegraph.json` for unusual setups; README with usage, examples and GIFs |
 | 0.4.1 | a view per container; libraries that load libraries are found |
 | 0.5.0 | the live view; no time limit, Stop keeps the trace |
+| 0.6.0 | container cards (live and replay), live swimlanes, following one thread; threads found however C++ spells them, and who started each one recorded at run time |
