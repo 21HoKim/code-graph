@@ -1,6 +1,7 @@
 # Contributing
 
-Thanks for helping! The project is small on purpose — please keep it light.
+- Thanks for helping
+- Small on purpose — changes kept light
 
 ## Setup
 
@@ -10,16 +11,15 @@ npm run build      # or `npm run watch`
 npm test
 ```
 
-Run the extension from source without installing it (rebuild with `npm run build`, then reload that window):
+- Extension from source without installing (rebuild with `npm run build`, then reload that window):
 
 ```bash
 code --extensionDevelopmentPath="$PWD" examples/cpp/router
 ```
 
-Open the command palette there and run **CodeGraph: Open Circuit View**. Editor settings and debug
-configurations (`.vscode/`) are personal and are not part of the repository.
-
-Without VS Code:
+- Then: **CodeGraph: Open Circuit View** from the command palette
+- Editor settings and debug configurations (`.vscode/`): personal, not part of the repository
+- Without VS Code:
 
 ```bash
 node dist/cli.js examples/python/pipeline -o out/graph.json        # analyzer only
@@ -49,33 +49,29 @@ ELK_CDN=https://cdn.jsdelivr.net/npm/elkjs@0.12.1/lib/ node scripts/build-demo.m
 | `docs/` | [GUIDE](docs/GUIDE.md), [ARCHITECTURE](docs/ARCHITECTURE.md), [VERSIONING](docs/VERSIONING.md), [ROADMAP](docs/ROADMAP.md) (English and Korean where users read them), `images/` for the README | |
 | `.github/workflows/` | `ci.yml` (type check and tests on pull requests), `publish.yml` (release on every push to `main`) | |
 
-The Docker Compose tests run real containers and are skipped unless `CODE_GRAPH_DOCKER_TEST=1` and Docker is
-running (CI sets it): `CODE_GRAPH_DOCKER_TEST=1 npm test`. The GIFs in the README are recorded from code-server with
-Playwright (a drawn cursor, segments cut with ffmpeg, compressed with gifsicle).
+- Docker Compose tests: real containers, skipped unless `CODE_GRAPH_DOCKER_TEST=1` and Docker running (set in CI) — `CODE_GRAPH_DOCKER_TEST=1 npm test`
+- README GIFs: recorded from code-server with Playwright (drawn cursor, segments cut with ffmpeg, compressed with gifsicle)
 
 ## Releases
 
-Every push to `main` that changes the extension (`src/`, `runtime/`, `media/`, `package.json`, …) runs
-`.github/workflows/publish.yml`: tests, then publish to the VS Code Marketplace and a GitHub release with the
-`.vsix`. Docs-only pushes don't publish; their README changes go out with the next release, or run the workflow by
-hand (*Actions* → *Publish* → *Run workflow*).
-
-- **Write what changed** with the change: a line under `## Unreleased` in [CHANGELOG.md](CHANGELOG.md) and
-  [CHANGELOG.ko.md](CHANGELOG.ko.md), under `### Added` / `### Changed` / `### Fixed` (추가 / 변경 / 수정), in words a
-  user understands. The release makes that its notes and renames the section to its version
-  (`scripts/release-notes.mjs`); without entries, the notes list the commit titles.
-- The version is picked by `scripts/release-version.mjs`: the next patch after the newest release. To release a
-  new minor or major version, set it in `package.json` (`npm version minor --no-git-tag-version`) and push.
-  [docs/VERSIONING.md](docs/VERSIONING.md) says what each number means and when it goes up.
-- Publishing uses Marketplace Trusted Publishing (GitHub OIDC), so the repository holds no token. The publisher
-  `21HoKim` has a policy for owner `21HoKim`, repository `code-graph`, workflow `publish.yml`.
+- Trigger: every push to `main` changing the extension (`src/`, `runtime/`, `media/`, `package.json`, …) → `.github/workflows/publish.yml`
+  - Tests, then the VS Code Marketplace and a GitHub release with the `.vsix`
+- Docs-only pushes: no release; README changes with the next release, or a manual run (*Actions* → *Publish* → *Run workflow*)
+- **What changed, written with the change**: a line under `## Unreleased` in [CHANGELOG.md](CHANGELOG.md) and [CHANGELOG.ko.md](CHANGELOG.ko.md)
+  - Under `### Added` / `### Changed` / `### Fixed` (추가 / 변경 / 수정), in words a user understands
+  - Style: nested bullets, each ending in a noun phrase (Korean: a noun, no `~해요`/`~함`); no italics in Korean — UI names in bold followed by a noun
+  - At release: the section becomes the notes and is renamed to the version (`scripts/release-notes.mjs`); without entries, the commit titles
+- Version: `scripts/release-version.mjs` — the next patch after the newest release
+  - New minor or major: set in `package.json` (`npm version minor --no-git-tag-version`), then a push
+  - Meaning of each number: [docs/VERSIONING.md](docs/VERSIONING.md)
+- Sign-in: Marketplace Trusted Publishing (GitHub OIDC), no token in the repository
+  - Publisher `21HoKim` policy: owner `21HoKim`, repository `code-graph`, workflow `publish.yml`
 
 ## Pull requests
 
-- `npm run typecheck && npm test` must pass.
-- New resolution rules come with an example (a line in the matching `examples/<language>/features/` folder and its
-  README checklist, or a snippet in a test) and a test assertion.
-- Prefer marking a link `guess` over inventing one; never draw a link the analyzer cannot justify.
-- Changes to the instrumenter must keep line numbers stable (probes go on the line of the `{`) and come with a
-  test in `test/trace.test.ts`.
-- UI strings go through `src/webview/i18n.ts` (English + Korean).
+- Required: `npm run typecheck && npm test` passing
+- New resolution rules: an example (a line in the matching `examples/<language>/features/` folder and its README checklist, or a snippet in a test) plus a test assertion
+- Uncertain links: marked `guess` rather than invented; no link the analyzer cannot justify
+- Instrumenter changes: stable line numbers (probes on the line of the `{`) plus a test in `test/trace.test.ts`
+- UI strings: through `src/webview/i18n.ts` (English + Korean)
+- Docs other than READMEs: bullet points ending in noun phrases, as in the changelog
