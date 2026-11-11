@@ -63,8 +63,8 @@ the containers; one run covers all of them, for as long as you let it run.
 
 ![Both containers followed live, then Stop and the replay of what they did](docs/images/live.gif)
 
-**⧉ A view per container** opens one circuit per container side by side. They play together, and each shows only
-what ran in its own container.
+**⧉ A view per container** lets you pick containers and opens a circuit for each, side by side. They play together,
+and each shows only what ran in its own container.
 
 ![node-b and node-a side by side: node-b's Server and node-a's Client light up at the same moment](docs/images/per-container.png)
 

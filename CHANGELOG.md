@@ -7,6 +7,10 @@ into the version's section and its [release notes](https://github.com/21HoKim/co
 
 ## Unreleased
 
+### Changed
+- *A view per container* no longer opens every container at once: it lists them (threads, calls, how each ended)
+  and opens the ones you tick, each in its own column beside the circuit.
+
 ### Fixed
 - C++: threads started without writing `std::` are found: `thread(&Server::run, this).detach()` under
   `using namespace std;` (in the file, in the function, or in an included header), after `using std::thread;`, through

@@ -34,5 +34,11 @@
   "Run & Trace with Docker Compose": "Docker Compose로 실행 & 추적",
   "{0} ran on this machine. If it needs its peers or its container, run the Compose project traced: every container on one timeline.": "{0}을(를) 이 컴퓨터에서 실행했어요. 상대 노드나 자기 컨테이너가 있어야 하는 프로그램이라면 Compose 프로젝트를 추적하며 실행하세요. 모든 컨테이너가 한 타임라인에 나와요.",
   "The current trace has one process. Run & Trace with Docker Compose, or load several trace files at once, to get one per container.": "지금 추적에는 프로세스가 하나뿐이에요. Docker Compose로 실행 & 추적하거나 추적 파일 여러 개를 한 번에 불러오면 컨테이너마다 볼 수 있어요.",
-  "Open CodeGraph traces (several: one timeline, one process each)": "CodeGraph 추적 열기 (여러 개를 고르면 한 타임라인에 하나씩)"
+  "Open CodeGraph traces (several: one timeline, one process each)": "CodeGraph 추적 열기 (여러 개를 고르면 한 타임라인에 하나씩)",
+  "Open a view per container": "컨테이너별로 회로도 열기",
+  "Pick the containers to open: each gets its own circuit, replaying on the same clock": "열 컨테이너를 고르세요. 컨테이너마다 회로도가 하나씩 열리고 같은 시계로 재생돼요",
+  "{0} threads · {1} calls": "스레드 {0} · 호출 {1}",
+  "exit code {0}": "종료 코드 {0}",
+  "stopped": "멈춤",
+  "ended normally": "정상 종료"
 }

@@ -180,8 +180,11 @@ function offerCompose(svc: AnalysisService, label: string, tr: RunTrace): void {
     });
 }
 
-/** One circuit view per process (container) of the current trace, side by side — or only `only`. */
-export function splitTraceCommand(ctx: vscode.ExtensionContext, svc: AnalysisService, only?: string): void {
+/**
+ * A circuit view per process (container) of the current trace, on the same clock: the user picks which from a
+ * list (several at once), or `only` opens that one. Never all at once — a project can have many containers.
+ */
+export async function splitTraceCommand(ctx: vscode.ExtensionContext, svc: AnalysisService, only?: string): Promise<void> {
   const tr = svc.lastTrace?.trace;
   if (!tr?.procs || tr.procs.length < 2) {
     void vscode.window.showInformationMessage(
@@ -189,10 +192,45 @@ export function splitTraceCommand(ctx: vscode.ExtensionContext, svc: AnalysisSer
     );
     return;
   }
-  const names = only ? [only] : tr.procs.map((p) => p.name);
-  // the first one where the circuit is (as a tab), the others in the columns to its right
+  let names = only ? [only] : undefined;
+  if (!names) {
+    const items = processItems(tr);
+    const picked = await vscode.window.showQuickPick(items, {
+      title: vscode.l10n.t('Open a view per container'),
+      placeHolder: vscode.l10n.t('Pick the containers to open: each gets its own circuit, replaying on the same clock'),
+      canPickMany: true,
+      matchOnDescription: true,
+    });
+    if (!picked?.length) return;
+    names = picked.map((p) => p.name);
+  }
+  // next to the circuit view, one column each
   const base = CircuitPanel.current?.panel.viewColumn ?? vscode.ViewColumn.One;
-  names.forEach((name, i) => CircuitPanel.showScoped(ctx, svc, name, Math.min(vscode.ViewColumn.Nine, base + (only ? 1 : i))));
+  names.forEach((name, i) => CircuitPanel.showScoped(ctx, svc, name, Math.min(vscode.ViewColumn.Nine, base + 1 + i)));
+}
+
+/** One line per process of a trace: threads, calls and how it ended; the ones already open come ticked. */
+function processItems(tr: RunTrace): (vscode.QuickPickItem & { name: string })[] {
+  const callsOf = new Map<number, number>();
+  for (const th of tr.spans.th) callsOf.set(th, (callsOf.get(th) ?? 0) + 1);
+  return tr.procs!.map((p) => {
+    const calls = p.threads.reduce((n, th) => n + (callsOf.get(th) ?? 0), 0);
+    const e = p.exit;
+    const end = e.crash && e.crash !== 'SIGTERM' && e.crash !== 'SIGINT'
+      ? `$(error) ${e.crash}`
+      : e.code
+        ? `$(warning) ${vscode.l10n.t('exit code {0}', e.code)}`
+        : e.stopped || e.timedOut || e.signal
+          ? `$(debug-stop) ${vscode.l10n.t('stopped')}`
+          : `$(check) ${vscode.l10n.t('ended normally')}`;
+    return {
+      name: p.name,
+      label: p.name,
+      description: vscode.l10n.t('{0} threads · {1} calls', p.threads.length, calls),
+      detail: end,
+      picked: CircuitPanel.isScopedOpen(p.name),
+    };
+  });
 }
 
 export async function runTraceCommand(ctx: vscode.ExtensionContext, svc: AnalysisService): Promise<void> {

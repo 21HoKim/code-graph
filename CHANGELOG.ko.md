@@ -6,6 +6,10 @@
 
 ## Unreleased
 
+### 변경
+- *컨테이너별로 보기*가 더 이상 모든 컨테이너를 한꺼번에 열지 않아요. 컨테이너 목록(스레드·호출 수, 끝난 상태)에서 체크한
+  것만 회로도 옆에 하나씩 열어요.
+
 ### 수정
 - C++: `std::`를 쓰지 않고 띄운 스레드도 찾아요. `using namespace std;`(파일, 함수 안, 포함한 헤더 어디든) 아래의
   `thread(&Server::run, this).detach()`, `using std::thread;` 다음, `using Worker = std::thread;`나

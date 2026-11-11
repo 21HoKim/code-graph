@@ -158,6 +158,10 @@ export class CircuitPanel implements vscode.Disposable {
     return p;
   }
 
+  static isScopedOpen(name: string): boolean {
+    return CircuitPanel.scoped.has(name);
+  }
+
   /** A view of one process (container) of the current trace, in `column`. */
   static showScoped(ctx: vscode.ExtensionContext, service: AnalysisService, name: string, column: vscode.ViewColumn): CircuitPanel {
     const open = CircuitPanel.scoped.get(name);

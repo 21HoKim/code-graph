@@ -124,8 +124,9 @@ with each container's threads as lanes. Your workspace is never touched: everyth
 and the project is taken down at the end.
 
 **One circuit per container**: **⧉ A view per container** (toolbar, run summary, or *CodeGraph: Open a View per
-Container*) opens one view per container side by side, each with only that container's threads, calls and data.
-They share one clock and play together; click a container in the run summary to open just that one. No need to
+Container*) lists the containers with their threads, calls and how they ended; tick the ones you want and each opens
+in a view of its own beside the circuit, with only that container's threads, calls and data. They share one clock and
+play together; click a container in the run summary to open just that one. No need to
 attach VS Code to each container: one Compose run traces them all. Trace files written elsewhere (one per machine
 or container) can be loaded together with **Load Trace File…**; they are merged onto one timeline the same way.
 
@@ -207,7 +208,7 @@ completes and explains every key.
 | `CodeGraph: Verify (compile check)` | check again now (toolbar **✓ Verify**) |
 | `CodeGraph: Run & Trace` | build, run and replay (toolbar **▶ Run**) |
 | `CodeGraph: Run & Trace with Docker Compose` | the compose project with its services traced in their containers |
-| `CodeGraph: Open a View per Container` | one circuit per container of the current trace, side by side, playing together |
+| `CodeGraph: Open a View per Container` | pick containers of the current trace; one circuit each, side by side, playing together |
 | `CodeGraph: Stop Run and Show the Trace` | end the run in progress (the live bar's **■ Stop**) and replay what it recorded |
 | `CodeGraph: Create / Open .codegraph.json` | project settings for unusual setups |
 | `CodeGraph: Load Trace File…` | open a trace written by the CLI or the tracers; several at once share one timeline |
