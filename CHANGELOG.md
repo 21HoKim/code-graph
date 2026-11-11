@@ -8,6 +8,10 @@ into the version's section and its [release notes](https://github.com/21HoKim/co
 ## Unreleased
 
 ### Changed
+- Timeline: the wheel scrolls the swimlanes up and down, Ctrl (⌘) + wheel or a trackpad pinch zooms around the
+  pointer, and Shift + wheel now moves the other way round: down = later (right), up = earlier (left).
+- Circuit: Shift + wheel moves the view sideways (down = right), with any mouse; before, it only did when the browser
+  turned it into a sideways scroll, and zoomed otherwise.
 - *A view per container* no longer opens every container at once: it lists them (threads, calls, how each ended)
   and opens the ones you tick, each in its own column beside the circuit.
 

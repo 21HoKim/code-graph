@@ -50,6 +50,7 @@ every Python process of a traced container), `c/cg_trace.h` + `c/cg_trace.c` (C9
 | `transition.ts` | opening / closing / changing level without a jump: blocks slide and resize from their old boxes (FLIP) |
 | `flow.ts` | canvas layer: moving charges, replay pulses |
 | `viewport.ts` | pan, zoom, pinch, tap |
+| `wheel.ts` | wheel and trackpad rules shared by the circuit and the timeline (Shift + wheel, Ctrl + wheel, sideways scrolls) |
 | `usage.ts` | type names → classes (scopes, imports, includes): where a class's objects live |
 | `members.ts` | where each member of a class is read and written, from the functions' member chains |
 | `main.ts` | state, toolbar, details / problems / run panels, replay loop |

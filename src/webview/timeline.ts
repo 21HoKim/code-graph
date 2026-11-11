@@ -3,6 +3,7 @@
  * small flame chart, a playhead to scrub, exceptions marked in red. Drives the
  * replay on the circuit (the app listens to seek / play / select).
  */
+import { timelineWheel } from './wheel';
 import type { TraceModel } from './traceview';
 import { fmtNs, threadColor } from './traceview';
 
@@ -384,15 +385,16 @@ export class Timeline {
     this.over.addEventListener(
       'wheel',
       (e) => {
+        const act = timelineWheel(e);
+        if (act === 'scroll') return; // the lanes scroll
         e.preventDefault();
         const p = at(e);
-        const pan = wheelPan(e);
-        if (pan !== null) {
-          this.setView(this.v0 + (pan / Math.max(1, p.w - NAME_W - 8)) * (this.v1 - this.v0));
+        if ('pan' in act) {
+          this.setView(this.v0 + (act.pan / Math.max(1, p.w - NAME_W - 8)) * (this.v1 - this.v0));
           return;
         }
         const tc = this.tAt(Math.max(NAME_W, p.x), p.w);
-        const f = Math.exp(e.deltaY * 0.0015);
+        const f = act.zoom;
         const w = Math.max(this.m.duration / 5e5, Math.min(this.m.duration, (this.v1 - this.v0) * f));
         const u = (tc - this.v0) / (this.v1 - this.v0);
         this.v0 = Math.max(0, tc - u * w);
@@ -439,19 +441,6 @@ export class Timeline {
     const stack = this.m.stackOf(act);
     return stack[depth] ?? -1;
   }
-}
-
-/**
- * How far a wheel event moves the timeline, in pixels (positive = later), or null when it zooms.
- * Shift + wheel moves it: down = earlier (left), up = later (right). A sideways scroll (trackpad, tilt wheel)
- * moves it the way it scrolls. A plain vertical wheel zooms.
- */
-export function wheelPan(e: Pick<WheelEvent, 'deltaX' | 'deltaY' | 'deltaMode' | 'shiftKey'>): number | null {
-  const unit = e.deltaMode === 1 ? 16 : e.deltaMode === 2 ? 400 : 1; // lines, pages
-  // browsers may turn Shift + wheel into a sideways scroll themselves (deltaX instead of deltaY)
-  if (e.shiftKey) return -(e.deltaY || e.deltaX) * unit;
-  if (Math.abs(e.deltaX) > Math.abs(e.deltaY)) return e.deltaX * unit;
-  return null;
 }
 
 /** A view of `width` starting at `v0`, moved back inside 0 … `duration`. */

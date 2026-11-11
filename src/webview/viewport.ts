@@ -1,3 +1,4 @@
+import { shiftPan } from './wheel';
 /** Pan / zoom / pinch for the stage. World -> screen: s = w * k + (x, y). */
 export interface ViewportEvents {
   onChange(): void;
@@ -86,6 +87,12 @@ export class Viewport {
 
   private onWheel = (e: WheelEvent): void => {
     e.preventDefault();
+    // Shift + wheel: sideways, down = right, like the timeline
+    const shift = shiftPan(e);
+    if (shift !== null) {
+      this.set(this.x - shift, this.y, this.k);
+      return;
+    }
     const p = this.local(e);
     // trackpad pan (pixel deltas, no ctrl) vs. zoom (mouse wheel, ctrl/pinch)
     if (!e.ctrlKey && e.deltaMode === 0 && Math.abs(e.deltaX) > 0.5) {
