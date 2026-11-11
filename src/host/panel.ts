@@ -4,6 +4,7 @@ import * as vscode from 'vscode';
 import { peekLines, type Peek } from '../core/peek';
 import { returnStatements, statementAt } from '../core/snippets';
 import { processTrace } from '../core/trace';
+import { liveForProc, type LiveUpdate } from '../core/live';
 import type { CodeAsk, CodeSnip, HostMessage, LevelSetting, ViewSettings, WebviewMessage } from '../shared/protocol';
 import type { AnalysisService } from './service';
 import { currentTheme } from './theme';
@@ -158,6 +159,21 @@ export class CircuitPanel implements vscode.Disposable {
     return p;
   }
 
+  /** The latest update of the run followed live right now. */
+  static liveNow?: LiveUpdate;
+
+  /** A live update: the circuit view gets all of it, each container's view its part. */
+  static publishLive(u: LiveUpdate): void {
+    CircuitPanel.liveNow = u;
+    CircuitPanel.current?.post({ type: 'live', state: 'tick', update: u });
+    for (const p of CircuitPanel.scoped.values()) p.post({ type: 'live', state: 'tick', update: liveForProc(u, p.scope!) });
+  }
+
+  static endLive(): void {
+    CircuitPanel.liveNow = undefined;
+    for (const p of [CircuitPanel.current, ...CircuitPanel.scoped.values()]) p?.post({ type: 'live', state: 'end' });
+  }
+
   static isScopedOpen(name: string): boolean {
     return CircuitPanel.scoped.has(name);
   }
@@ -185,6 +201,8 @@ export class CircuitPanel implements vscode.Disposable {
   private postScopedTrace(): void {
     const last = this.service.lastTrace;
     const part = last && this.service.graph ? processTrace(last.trace, this.scope!, this.service.graph) : undefined;
+    // opened while the run is followed live: its trace comes when the run ends
+    if (!part && CircuitPanel.liveNow) return;
     if (!part) {
       this.panel.dispose();
       return;

@@ -40,5 +40,7 @@
   "{0} threads · {1} calls": "스레드 {0} · 호출 {1}",
   "exit code {0}": "종료 코드 {0}",
   "stopped": "멈춤",
-  "ended normally": "정상 종료"
+  "ended normally": "정상 종료",
+  "ended": "끝남",
+  "running": "실행 중"
 }

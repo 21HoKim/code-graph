@@ -32,6 +32,8 @@ import {
 import { buildOverlay, type Overlay } from './overlay';
 import { Renderer, esc } from './render';
 import { Timeline } from './timeline';
+import { LiveLanes } from './livelanes';
+import { ProcBar, type ProcCard } from './procbar';
 import { RuntimeMap, TraceModel, argsText, augmentGraph, fmtNs, retText, threadColor, valText } from './traceview';
 import type { LiveUpdate } from '../core/live';
 import type { Peek } from '../core/peek';
@@ -284,6 +286,19 @@ class App {
   private live: { node: string; text: string; color: string; born: number; up?: boolean }[] = [];
   private follow: string | null = null;
   private soloThread: number | null = null;
+  /** Containers chosen in the container cards (empty: all), kept from the live view into its replay. */
+  private procSel = new Set<string>();
+  /** Threads of the chosen containers in what is shown now (null: every thread). */
+  private procThreads: Set<number> | null = null;
+  private procBar?: ProcBar;
+  /** Live: swimlanes, the thread followed in the circuit, and what it went through since. */
+  private liveLanes?: LiveLanes;
+  private liveSolo: number | null = null;
+  private liveSoloPath = new Set<string>();
+  private lastLive?: LiveUpdate;
+  private liveSpark = new Map<string, number[]>();
+  /** Live, with a container or thread chosen: what it lit so far, kept lit while the rest is dimmed. */
+  private liveLit = { nodes: new Set<string>(), edges: new Set<string>() };
   /** Hover previews of source lines from the host, by `file:line:count`; the one the tooltip waits for. */
   private peeks = new Map<string, Peek | null>();
   private peekAsked = new Map<number, string>();
@@ -640,7 +655,9 @@ class App {
         })
         .filter((p): p is NonNullable<typeof p> => !!p),
     );
-    if (this.trace) this.applyReplay();
+    // a soloed thread or chosen containers stay lit on the new picture
+    if (this.trace && (this.soloThread !== null || this.procThreads)) this.setSolo(this.soloThread, false);
+    else if (this.trace) this.applyReplay();
   }
 
   /** Extra classes for a wire (hooks for runtime-observed wires). */
@@ -1701,6 +1718,7 @@ class App {
     this.rtmap = undefined;
     this.follow = null;
     this.soloThread = null;
+    this.procThreads = null;
     this.live = [];
     this.replay.t = 0;
   }
@@ -1732,6 +1750,12 @@ class App {
       this.root.insertBefore(this.timeline.el, this.status);
       this.timeline.setTime(0);
     }
+    if (tr?.procs && tr.procs.length > 1) {
+      this.ensureProcBar().update(traceCards(tr, this.trace!));
+      this.procBar!.select(this.procSel);
+      this.procThreads = this.procSel.size ? new Set(tr.procs.filter((p) => this.procSel.has(p.name)).flatMap((p) => p.threads)) : null;
+      this.timeline?.setLanes(this.procThreads);
+    } else if (!this.liveBar) this.dropProcBar();
     if (this.staticGraph) this.graph = tr ? augmentGraph(this.staticGraph, tr) : this.staticGraph;
     this.typeIndex = undefined;
     this.memberIndex = undefined;
@@ -1799,26 +1823,55 @@ class App {
         (this.settings?.host !== false ? `<button class="btn stop" title="${esc(t('stopHint'))}">■ ${esc(t('stopRun'))}</button>` : '') +
         `<span class="tl-time mono"></span><span class="flag live-calls"></span><span class="tl-threads"></span></div>`;
       this.liveBar.querySelector<HTMLElement>('.stop')?.addEventListener('click', () => api.postMessage({ type: 'stopRun' }));
+      // a thread chip follows that thread in the circuit (again: all)
+      this.liveBar.querySelector<HTMLElement>('.tl-threads')!.addEventListener('click', (e) => {
+        const chip = (e.target as Element).closest<HTMLElement>('[data-th]');
+        if (chip) this.setLiveSolo(Number(chip.dataset.th) === this.liveSolo ? null : Number(chip.dataset.th));
+      });
+      this.liveLanes = new LiveLanes({
+        nameOf: (id) => this.graph?.entities.find((e) => e.id === id)?.qname ?? id,
+        soloThread: (th) => this.setLiveSolo(th),
+        t: (k, v) => t(k as never, v),
+      });
+      this.liveBar.querySelector('.tl-head')!.append(this.liveLanes.nowButton);
+      this.liveBar.append(this.liveLanes.el);
       this.liveThreads = '';
       this.root.insertBefore(this.liveBar, this.status);
     }
-    const procs = new Set(u.threads.map((x) => x.proc).filter(Boolean));
-    const name = (x: LiveUpdate['threads'][number]) => (procs.size > 1 && x.proc ? `${x.proc} · ${x.name}` : x.name);
+    const prev = this.lastLive;
+    this.lastLive = u;
+    if (u.procs && u.procs.length > 1) {
+      this.ensureProcBar().update(this.liveCards(u, prev));
+      this.procBar!.select(this.procSel);
+    }
+    this.procThreads = this.procSel.size ? new Set(u.threads.filter((x) => x.proc && this.procSel.has(x.proc)).map((x) => x.id)) : null;
+    this.liveLanes?.setFilter(this.procThreads);
+    this.liveLanes?.push(u);
     this.liveBar.querySelector<HTMLElement>('.tl-time')!.textContent = `${(u.elapsedMs / 1000).toFixed(1)} s`;
     this.liveBar.querySelector<HTMLElement>('.live-calls')!.textContent = t('liveCalls', { n: u.calls.toLocaleString() });
-    const chips = u.threads
-      .map((x) => `<span class="chip th" title="${esc(name(x))}"><i style="background:${threadColor(x.id)}"></i>${esc(name(x))}</span>`)
-      .join('');
-    if (chips !== this.liveThreads) {
-      this.liveThreads = chips;
-      this.liveBar.querySelector<HTMLElement>('.tl-threads')!.innerHTML = chips;
-    }
+    this.applyLiveHead(u);
+    this.paintLive(u, true);
+  }
+
+  /**
+   * What a live update shows on the circuit: where the shown threads are, and (`fresh`) the calls since the last
+   * update along their wires and on the busiest blocks. With a container or a thread chosen, only theirs; what they
+   * lit stays lit and the rest is dimmed.
+   */
+  private paintLive(u: LiveUpdate, fresh: boolean): void {
     const proj = this.proj;
     if (!proj) return;
+    const shows = (th: number) => (this.liveSolo === null || th === this.liveSolo) && (!this.procThreads || this.procThreads.has(th));
+    const procOk = (p?: string) => !this.procSel.size || !p || this.procSel.has(p);
+    const solo = this.liveSolo;
+    if (solo !== null) for (const st of u.stacks) if (st.th === solo) for (const f of st.fns) this.liveSoloPath.add(f);
+    const onPath = (a: string, b: string) => solo === null || this.liveSoloPath.has(a) || this.liveSoloPath.has(b);
+    const focused = solo !== null || this.procSel.size > 0;
     // where every thread is: its stack, innermost first
     const active = new Map<string, { color: string; top: boolean }>();
     const owner = new Map<string, number>();
     for (const st of u.stacks) {
+      if (!shows(st.th)) continue;
       const color = threadColor(st.th);
       let top = true;
       for (let i = st.fns.length - 1; i >= 0; i--) {
@@ -1830,6 +1883,11 @@ class App {
       }
     }
     this.renderer.setActive(active);
+    if (focused) for (const n of active.keys()) this.liveLit.nodes.add(n);
+    if (!fresh) {
+      this.paintLiveFocus(focused);
+      return;
+    }
     // calls since the last update, along their wires
     if (this.liveEnds?.proj !== proj) {
       const map = new Map<string, string>();
@@ -1838,12 +1896,13 @@ class App {
     }
     const pal = readPalette();
     let fired = 0;
-    for (const [a, b] of u.edges) {
-      if (fired >= 40 || !a) continue;
+    for (const [a, b, , p] of u.edges) {
+      if (fired >= 40 || !a || !procOk(p) || !onPath(a, b)) continue;
       const na = proj.repOf(a);
       const nb = proj.repOf(b);
       const edge = na && nb && na !== nb ? this.liveEnds.map.get(na + '\u0001' + nb) : undefined;
       if (!edge) continue;
+      if (focused) this.liveLit.edges.add(edge);
       const th = owner.get(b) ?? owner.get(a);
       this.flow.pulse(edge, th !== undefined ? threadColor(th) : pal.call, false, 600);
       fired++;
@@ -1851,7 +1910,7 @@ class App {
     // the busiest functions of the last moment
     const now = performance.now();
     const labelled = new Set(this.live.filter((x) => now - x.born < 900).map((x) => x.node));
-    for (const [e, n] of u.hot.slice(0, 5)) {
+    for (const [e, n] of u.hot.filter(([e, , p]) => procOk(p) && (solo === null || this.liveSoloPath.has(e))).slice(0, 5)) {
       const node = proj.repOf(e);
       if (!node || labelled.has(node)) continue;
       labelled.add(node);
@@ -1864,14 +1923,124 @@ class App {
       this.live.map((x) => ({ node: x.node, text: x.text, color: x.color, age: (now - x.born) / life, up: x.up })),
       this.measure,
     );
+    this.paintLiveFocus(focused);
+  }
+
+  private paintLiveFocus(focused: boolean): void {
+    if (!focused) {
+      this.renderer.highlight(null);
+      return;
+    }
+    const nodes = new Set(this.liveLit.nodes);
+    for (const n of [...nodes]) for (const a of this.ancestorsVisible(n)) nodes.add(a);
+    this.renderer.highlight({ nodes, edges: this.liveLit.edges });
+  }
+
+  /** Live: follow one thread in the circuit (null: all of them). */
+  private setLiveSolo(th: number | null): void {
+    this.liveSolo = th;
+    this.liveSoloPath = new Set();
+    this.liveLit = { nodes: new Set(), edges: new Set() };
+    this.liveLanes?.setSolo(th);
+    if (!this.lastLive) return;
+    this.applyLiveHead(this.lastLive); // chips show the new choice
+    this.paintLive(this.lastLive, false);
+  }
+
+  /** The container cards, on the right of the circuit (made once, kept between live and replay). */
+  private ensureProcBar(): ProcBar {
+    if (!this.procBar) {
+      this.procBar = new ProcBar({
+        onSelect: (sel) => this.onProcSelect(sel),
+        onOpen: this.settings?.host !== false ? (name) => api.postMessage({ type: 'splitTrace', proc: name }) : undefined,
+        t: (k, v) => t(k as never, v),
+      });
+      this.stage.append(this.procBar.el);
+    }
+    return this.procBar;
+  }
+
+  private dropProcBar(): void {
+    this.procBar?.el.remove();
+    this.procBar = undefined;
+  }
+
+  /** Containers chosen: the circuit, the swimlanes and the replay show only theirs. */
+  private onProcSelect(sel: ReadonlySet<string>): void {
+    this.procSel = new Set(sel);
+    this.liveLit = { nodes: new Set(), edges: new Set() };
+    if (this.liveBar && this.lastLive) {
+      const u = this.lastLive;
+      this.procThreads = sel.size ? new Set(u.threads.filter((x) => x.proc && sel.has(x.proc)).map((x) => x.id)) : null;
+      if (this.liveSolo !== null && this.procThreads && !this.procThreads.has(this.liveSolo)) this.setLiveSolo(null);
+      this.liveLanes?.setFilter(this.procThreads);
+      this.liveThreads = '';
+      this.applyLiveHead(u);
+      this.paintLive(u, false);
+      return;
+    }
+    const tr = this.trace?.tr;
+    if (!tr?.procs) return;
+    this.procThreads = sel.size ? new Set(tr.procs.filter((p) => sel.has(p.name)).flatMap((p) => p.threads)) : null;
+    if (this.soloThread !== null && this.procThreads && !this.procThreads.has(this.soloThread)) this.soloThread = null;
+    this.timeline?.setLanes(this.procThreads);
+    this.setSolo(this.soloThread, false);
+  }
+
+  /** The live bar's thread chips for the current choice. */
+  private applyLiveHead(u: LiveUpdate): void {
+    const procs = new Set(u.threads.map((x) => x.proc).filter(Boolean));
+    const name = (x: LiveUpdate['threads'][number]) => (procs.size > 1 && x.proc ? `${x.proc} · ${x.name}` : x.name);
+    const chips = u.threads
+      .filter((x) => !this.procThreads || this.procThreads.has(x.id))
+      .map(
+        (x) =>
+          `<button class="chip th${this.liveSolo === x.id ? ' on' : ''}" data-th="${x.id}" title="${esc(name(x))} — ${esc(t('liveThreadHint'))}"><i style="background:${threadColor(x.id)}"></i>${esc(name(x))}</button>`,
+      )
+      .join('');
+    if (this.liveBar && chips !== this.liveThreads) {
+      this.liveThreads = chips;
+      this.liveBar.querySelector<HTMLElement>('.tl-threads')!.innerHTML = chips;
+    }
+  }
+
+  /** Live container cards: calls per second from the calls since the previous update, and their recent history. */
+  private liveCards(u: LiveUpdate, prev: LiveUpdate | undefined): ProcCard[] {
+    const dt = prev ? Math.max(0.05, (u.elapsedMs - prev.elapsedMs) / 1000) : 0.25;
+    return (u.procs ?? []).map((p) => {
+      const spark = this.liveSpark.get(p.name) ?? [];
+      spark.push(p.recent);
+      if (spark.length > 40) spark.shift();
+      this.liveSpark.set(p.name, spark);
+      return {
+        name: p.name,
+        state: p.ended ? 'ok' : 'run',
+        status: t(p.ended ? 'procEnded' : 'procRunning'),
+        pid: p.pid,
+        threads: p.threads,
+        calls: p.calls,
+        rate: p.ended ? 0 : p.recent / dt,
+        spark,
+        colors: u.threads.filter((x) => x.proc === p.name).map((x) => threadColor(x.id)),
+      };
+    });
   }
 
   private endLive(): void {
     if (!this.liveBar) return;
     this.liveBar.remove();
     this.liveBar = undefined;
+    this.liveLanes = undefined;
+    this.liveSolo = null;
+    this.liveSoloPath = new Set();
+    this.liveLit = { nodes: new Set(), edges: new Set() };
+    this.lastLive = undefined;
+    this.liveSpark.clear();
+    this.procThreads = null;
+    this.dropProcBar();
     this.live = [];
     this.renderer.setActive(new Map());
+    this.renderer.highlight(null);
     this.renderer.liveLabels([], this.measure);
     this.flow.setMode(this.state.flow);
   }
@@ -1927,9 +2096,8 @@ class App {
     if (!m || !rt) return;
     const tr = m.tr;
     const s = tr.spans;
-    const solo = this.soloThread;
     const now = performance.now();
-    const starts = m.startedIn(t0, t1, 600).filter((i) => solo === null || s.th[i] === solo);
+    const starts = m.startedIn(t0, t1, 600).filter((i) => this.showsThread(s.th[i]));
     const readable = starts.length <= 6;
     const seen = new Set<string>();
     for (const i of starts) {
@@ -1952,7 +2120,7 @@ class App {
         if (node && txt) this.live.push({ node, text: txt, color, born: now });
       }
     }
-    const ends = m.endedIn(t0, t1, 600).filter((i) => solo === null || s.th[i] === solo);
+    const ends = m.endedIn(t0, t1, 600).filter((i) => this.showsThread(s.th[i]));
     if (ends.length <= 6) {
       const ret = readPalette().ret;
       for (const i of ends) {
@@ -1982,7 +2150,7 @@ class App {
     const showStacks = this.replay.playing || this.replay.t > 0;
     if (showStacks) {
       for (const [th, span] of m.activeAt(this.replay.t)) {
-        if (this.soloThread !== null && th !== this.soloThread) continue;
+        if (!this.showsThread(th)) continue;
         const color = threadColor(th);
         let top = true;
         for (let i = span; i >= 0; i = s.parent[i]) {
@@ -2017,7 +2185,7 @@ class App {
     if (!m) return;
     this.stopPlay();
     const s = m.tr.spans;
-    const ok = (i: number) => this.soloThread === null || s.th[i] === this.soloThread;
+    const ok = (i: number) => this.showsThread(s.th[i]);
     let target = -1;
     if (dir > 0) target = m.startedIn(this.replay.t, Infinity, 5000).find(ok) ?? -1;
     else {
@@ -2048,18 +2216,24 @@ class App {
     if (id) this.revealEntity(id);
   }
 
-  /** Show only one thread's work: its blocks and wires lit, the others dimmed. */
+  /** The replay shows this thread: the soloed one, or one of the chosen containers'. */
+  private showsThread(th: number): boolean {
+    return (this.soloThread === null || th === this.soloThread) && (this.procThreads === null || this.procThreads.has(th));
+  }
+
+  /** Show only one thread's work (or the chosen containers'): its blocks and wires lit, the others dimmed. */
   private setSolo(th: number | null, fromPanel = true): void {
     this.soloThread = th;
     const rt = this.rtmap;
-    if (th === null || !rt) {
+    const ths = th !== null ? new Set([th]) : this.procThreads;
+    if (!ths || !rt) {
       this.renderer.highlight(null);
       this.flow.setFocus(null);
     } else {
       const nodes = new Set<string>();
       const edges = new Set<string>();
-      for (const [id, b] of rt.overlay.blocks) if (b.threads.includes(th)) nodes.add(id);
-      for (const [id, w] of rt.overlay.wires) if (w.threads.includes(th)) edges.add(id);
+      for (const [id, b] of rt.overlay.blocks) if (b.threads.some((x) => ths.has(x))) nodes.add(id);
+      for (const [id, w] of rt.overlay.wires) if (w.threads.some((x) => ths.has(x))) edges.add(id);
       for (const n of [...nodes]) for (const a of this.ancestorsVisible(n)) nodes.add(a);
       this.renderer.highlight({ nodes, edges });
       this.flow.setFocus(edges);
@@ -2480,4 +2654,35 @@ const app = new App();
 if (window.__CODE_GRAPH_DEMO__) {
   const d = window.__CODE_GRAPH_DEMO__;
   setTimeout(() => app.loadDemo(d.graph, d.settings, d.trace), 0);
+}
+
+/** The container cards of a replay: how each process ended, its threads and calls, and its calls over the run. */
+function traceCards(tr: RunTrace, m: TraceModel): ProcCard[] {
+  const BUCKETS = 40;
+  const procOf = new Map<number, number>();
+  tr.procs!.forEach((p, i) => p.threads.forEach((th) => procOf.set(th, i)));
+  const calls = tr.procs!.map(() => 0);
+  const spark = tr.procs!.map(() => new Array<number>(BUCKETS).fill(0));
+  const dur = Math.max(1, m.duration);
+  const s = tr.spans;
+  for (let i = 0; i < s.t.length; i++) {
+    const p = procOf.get(s.th[i]);
+    if (p === undefined) continue;
+    calls[p]++;
+    spark[p][Math.min(BUCKETS - 1, Math.floor((s.t[i] / dur) * BUCKETS))]++;
+  }
+  return tr.procs!.map((p, i) => {
+    const e = p.exit;
+    const crash = e.crash && e.crash !== 'SIGTERM' && e.crash !== 'SIGINT' ? e.crash : undefined;
+    const [state, status]: [ProcCard['state'], string] = crash
+      ? ['bad', `✕ ${crash}`]
+      : e.code
+        ? ['bad', t('exitCode', { n: e.code })]
+        : e.stopped
+          ? ['stop', t('stoppedByYou')]
+          : e.timedOut || e.signal
+            ? ['stop', t('stopped')]
+            : ['ok', t('exitOk')];
+    return { name: p.name, state, status, pid: p.pid, threads: p.threads.length, calls: calls[i], spark: spark[i], colors: p.threads.map((th) => threadColor(th)) };
+  });
 }

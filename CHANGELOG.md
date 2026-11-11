@@ -8,6 +8,12 @@ into the version's section and its [release notes](https://github.com/21HoKim/co
 ## Unreleased
 
 ### Added
+- Container cards: with several containers, the right side of the circuit has a card for each, live and in the
+  replay (running or how it ended, threads, calls, calls per second, activity). Click one to show only that
+  container's code and threads, Ctrl (⌘) + click to add or remove one; ⧉ opens it in its own view, also while the
+  run is live (that view follows its container live). The choice carries over from the live view into the replay.
+- Live view: swimlanes of every thread's stack that scroll with the run; drag back or Shift + wheel to look at an
+  earlier moment, *Now* to follow again. Click a thread to follow only it in the circuit.
 - Timeline: a horizontal scrollbar under the swimlanes once you zoom in; its thumb is the part of the run in view.
   Drag it, or click beside it to move one view's width.
 - The legend folds to its title (click *Legend*); it stays folded. With more than eight threads it says how many

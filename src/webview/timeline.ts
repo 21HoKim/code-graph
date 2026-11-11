@@ -475,6 +475,18 @@ export class Timeline {
     });
   }
 
+  /** Show only these threads' lanes (a container's), or every thread. */
+  setLanes(only: ReadonlySet<number> | null): void {
+    this.threads = this.m.tr.threads.map((t) => t.id).filter((id) => !only || only.has(id));
+    for (const b of this.head.querySelectorAll<HTMLElement>('[data-th]')) b.hidden = !!only && !only.has(Number(b.dataset.th));
+    if (this.solo !== null && only && !only.has(this.solo)) {
+      this.solo = null;
+      for (const o of this.head.querySelectorAll<HTMLElement>('[data-th]')) o.classList.remove('on');
+    }
+    this.body.style.height = `${Math.max(1, Math.min(6, this.threads.length)) * LANE + 18}px`;
+    this.resize();
+  }
+
   /** Show the same span of time from `v0` on, kept inside the run. */
   private setView(v0: number): void {
     this.follow = false;

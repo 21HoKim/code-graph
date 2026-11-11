@@ -46,6 +46,8 @@ every Python process of a traced container), `c/cg_trace.h` + `c/cg_trace.c` (C9
 | `overlay.ts` | problems → red / orange / grey blocks and cut wires |
 | `traceview.ts` | trace → what ran in the current view, time queries, data trails |
 | `timeline.ts` | thread swimlanes: scrub, play, step |
+| `livelanes.ts` | swimlanes of a live run from the sampled stacks; follows now until moved |
+| `procbar.ts` | container cards (live and replay) and which containers are shown |
 | `render.ts` | SVG zones, blocks, wires, labels and live glows |
 | `transition.ts` | opening / closing / changing level without a jump: blocks slide and resize from their old boxes (FLIP) |
 | `flow.ts` | canvas layer: moving charges, replay pulses |
@@ -351,7 +353,9 @@ now: each thread's call stack (the C runtime's flusher thread reads the shadow s
 cumulative call counts and caller → callee counts (C keeps those in a lock-free table in live mode). `LiveTail`
 follows the trace files (for C/C++ only the tail of what they gained: the latest record is enough; Python files are
 read in full for their function records), maps functions to entities, and reports threads, stacks and the calls
-since the previous update every 250 ms; the webview lights the stacks, pulses those calls and labels busy functions.
+since the previous update every 250 ms (with several processes: calls tagged with their process, and per process its
+calls, the calls since the previous update, its threads and whether it ended — `liveForProc` cuts one out for a view
+per container, which the host feeds while the run goes on); the webview lights the stacks, pulses those calls and labels busy functions.
 A run has no time limit by default: Stop ends it (`finish`, unlike `signal`, keeps the trace) and the replay follows.
 
 **Several processes** (`mergeTraces`): every trace header carries the monotonic and wall clock at its time 0

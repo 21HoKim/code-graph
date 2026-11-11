@@ -101,7 +101,10 @@ Compose v2 for containers.
   returns, exceptions, values and object identities per thread, for workspace code only.
 - **Live**: while the program runs, each thread's current call stack lights up in its colour, calls of the last
   moment pulse along their wires, and busy functions show how many calls they just took (`+120`). The bar at the
-  bottom has the threads, the time and **■ Stop**. A run lasts until the program ends or you press Stop
+  bottom has the threads, the time and **■ Stop**, and swimlanes of every thread's stack scroll along with the run:
+  drag them back (or Shift + wheel) to look at an earlier moment, **⏭ Now** or a double-click follows again. Click a
+  thread (its chip or its name in the lanes) to follow only that thread in the circuit: the path it takes stays lit
+  as new calls come in; click it again for all threads. A run lasts until the program ends or you press Stop
   (`run.timeoutSeconds` sets a limit; 0, the default, is none); Stop keeps everything recorded and the replay
   follows. A long run is replayed with its first `run.maxEvents` calls in detail; the live view covers all of it.
 - **Replay**: thread swimlanes with play, scrub and step. Blocks on each thread's call stack glow in the thread's
@@ -126,6 +129,12 @@ Compose v2 for containers.
 addresses and healthchecks. Every traced process writes its own trace, and all of them are merged on one clock
 with each container's threads as lanes. Your workspace is never touched: everything is built from a traced copy,
 and the project is taken down at the end.
+
+**Container cards**: with several containers, the right side of the circuit has a card for each, live and in the
+replay: running or how it ended, threads, calls (and calls per second live), and a line of its activity. Click a card
+to show only that container — the circuit dims the others' code, the swimlanes keep its threads —, Ctrl (⌘) + click
+to add or remove one, click the only one shown to see all again. ⧉ on a card opens that container in a view of its
+own, also while the run is live. The choice made live carries over into the replay.
 
 **One circuit per container**: **⧉ A view per container** (toolbar, run summary, or *CodeGraph: Open a View per
 Container*) lists the containers with their threads, calls and how they ended; tick the ones you want and each opens

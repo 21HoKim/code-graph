@@ -5,7 +5,7 @@ import * as path from 'node:path';
 import { describe, it } from 'node:test';
 import { AnalysisSession, walk } from '../src/core/analyze';
 import { loadParsers } from '../src/core/extract';
-import { LiveTail, type LiveUpdate } from '../src/core/live';
+import { LiveTail, liveForProc, type LiveUpdate } from '../src/core/live';
 import type { CodeGraph } from '../src/core/model';
 import { ParsePool } from '../src/core/pool';
 import { findEntries, runAndTrace, type RunInput } from '../src/core/runner';
@@ -88,10 +88,11 @@ describe('live view', () => {
       { th: 2, fns: ['cc:serve'] },
     ]);
     assert.deepEqual(u.edges, [
-      ['cc:main', 'cc:serve', 4],
-      ['', 'cc:main', 1],
+      ['cc:main', 'cc:serve', 4, 'node-a'],
+      ['', 'cc:main', 1, 'node-a'],
     ]);
     assert.equal(u.calls, 5);
+    assert.deepEqual(u.procs, [{ name: 'node-a', pid: 7, calls: 5, recent: 5, threads: 2 }], 'worker has no live record yet');
     fs.appendFileSync(py, '\n');
     fs.appendFileSync(c, '{"k":"live","t":9,"th":[[1,"main",[0]]],"calls":[[0,1],[1,6]],"edges":[[-1,0,1],[0,1,6]]}\n');
     tail.tick();
@@ -105,13 +106,27 @@ describe('live view', () => {
     );
     assert.deepEqual(v.stacks[1], { th: 3, fns: ['py:app.py:loop'] }, 'Python functions found through the file map');
     assert.deepEqual(v.hot, [
-      ['py:app.py:loop', 3],
-      ['cc:serve', 2],
+      ['py:app.py:loop', 3, 'worker'],
+      ['cc:serve', 2, 'node-a'],
     ]);
     assert.deepEqual(v.edges, [
-      ['', 'py:app.py:loop', 3],
-      ['cc:main', 'cc:serve', 2],
+      ['', 'py:app.py:loop', 3, 'worker'],
+      ['cc:main', 'cc:serve', 2, 'node-a'],
     ]);
+    assert.deepEqual(
+      v.procs?.map((p) => [p.name, p.calls, p.recent, p.threads]),
+      [
+        ['node-a', 7, 2, 1],
+        ['worker', 3, 3, 1],
+      ],
+    );
+    // a view of one container gets only its part
+    const a = liveForProc(v, 'node-a');
+    assert.deepEqual(a.threads, [{ id: 1, name: 'main' }]);
+    assert.deepEqual(a.stacks, [{ th: 1, fns: ['cc:main'] }]);
+    assert.deepEqual(a.edges, [['cc:main', 'cc:serve', 2]]);
+    assert.deepEqual(a.hot, [['cc:serve', 2]]);
+    assert.equal(a.calls, 7);
   });
 
   it('follows a C program while it runs, and Stop ends it with its trace kept', { skip: !tc.cc }, async () => {

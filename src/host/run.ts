@@ -9,6 +9,7 @@ import { targetsFor, type BuildTarget } from '../core/buildinfo';
 import { runComposeTrace } from '../core/compose';
 import { CONFIG_FILE } from '../core/config';
 import { loadParsers } from '../core/extract';
+import type { LiveProc } from '../core/live';
 import type { Diagnostic } from '../core/model';
 import { findEntries, runAndTrace, type EntryPoint } from '../core/runner';
 import { mergeTraces, parseTrace, traceDiagnostics, type RunTrace } from '../core/trace';
@@ -32,7 +33,7 @@ function begin(): { ctl: AbortController; fin: AbortController } {
 }
 
 function done(ctl: AbortController, panel: CircuitPanel): void {
-  panel.post({ type: 'live', state: 'end' });
+  CircuitPanel.endLive();
   if (running !== ctl) return;
   running = undefined;
   finishing = undefined;
@@ -185,8 +186,10 @@ function offerCompose(svc: AnalysisService, label: string, tr: RunTrace): void {
  * list (several at once), or `only` opens that one. Never all at once — a project can have many containers.
  */
 export async function splitTraceCommand(ctx: vscode.ExtensionContext, svc: AnalysisService, only?: string): Promise<void> {
+  // while a run is followed live, its containers; otherwise those of the current trace
+  const live = CircuitPanel.liveNow?.procs;
   const tr = svc.lastTrace?.trace;
-  if (!tr?.procs || tr.procs.length < 2) {
+  if ((!live || live.length < 2) && (!tr?.procs || tr.procs.length < 2)) {
     void vscode.window.showInformationMessage(
       vscode.l10n.t('The current trace has one process. Run & Trace with Docker Compose, or load several trace files at once, to get one per container.'),
     );
@@ -194,7 +197,7 @@ export async function splitTraceCommand(ctx: vscode.ExtensionContext, svc: Analy
   }
   let names = only ? [only] : undefined;
   if (!names) {
-    const items = processItems(tr);
+    const items = live && live.length >= 2 ? liveItems(live) : processItems(tr!);
     const picked = await vscode.window.showQuickPick(items, {
       title: vscode.l10n.t('Open a view per container'),
       placeHolder: vscode.l10n.t('Pick the containers to open: each gets its own circuit, replaying on the same clock'),
@@ -207,6 +210,17 @@ export async function splitTraceCommand(ctx: vscode.ExtensionContext, svc: Analy
   // next to the circuit view, one column each
   const base = CircuitPanel.current?.panel.viewColumn ?? vscode.ViewColumn.One;
   names.forEach((name, i) => CircuitPanel.showScoped(ctx, svc, name, Math.min(vscode.ViewColumn.Nine, base + 1 + i)));
+}
+
+/** The containers of a run followed live: threads and calls so far, running or ended. */
+function liveItems(procs: LiveProc[]): (vscode.QuickPickItem & { name: string })[] {
+  return procs.map((p) => ({
+    name: p.name,
+    label: p.name,
+    description: vscode.l10n.t('{0} threads · {1} calls', p.threads, p.calls),
+    detail: p.ended ? `$(check) ${vscode.l10n.t('ended')}` : `$(pulse) ${vscode.l10n.t('running')}`,
+    picked: CircuitPanel.isScopedOpen(p.name),
+  }));
 }
 
 /** One line per process of a trace: threads, calls and how it ended; the ones already open come ticked. */
@@ -304,7 +318,7 @@ export async function runTraceCommand(ctx: vscode.ExtensionContext, svc: Analysi
           values: o.values,
           signal: ctl.signal,
           finish: fin.signal,
-          live: (u) => panel.post({ type: 'live', state: 'tick', update: u }),
+          live: (u) => CircuitPanel.publishLive(u),
           log: (l) => out.appendLine(l),
           onStage: (stage, message, done, total) => {
             progress.report({ message: `${stage}${message ? ': ' + message : ''}${total ? ` ${done}/${total}` : ''}` });
@@ -315,7 +329,7 @@ export async function runTraceCommand(ctx: vscode.ExtensionContext, svc: Analysi
     if (ctl.signal.aborted) return;
     // a networked program may only work next to its peers: the Compose run is one click away
     const compose = o.compose.files.length ? { label: vscode.l10n.t('Run & Trace with Docker Compose'), command: 'codeGraph.runCompose' } : undefined;
-    panel.post({ type: 'live', state: 'end' });
+    CircuitPanel.endLive();
     showRun(svc, panel, label, r, task, true, compose);
     if (r.trace && !r.trace.exit.stopped) offerCompose(svc, label, r.trace);
   } catch (e) {
@@ -376,7 +390,7 @@ export async function runComposeCommand(ctx: vscode.ExtensionContext, svc: Analy
           values: o.values,
           signal: ctl.signal,
           finish: fin.signal,
-          live: (u) => panel.post({ type: 'live', state: 'tick', update: u }),
+          live: (u) => CircuitPanel.publishLive(u),
           confirmRecreate: async (up) => {
             const go = vscode.l10n.t('Restart with tracing');
             const pick = await vscode.window.showWarningMessage(
@@ -398,7 +412,7 @@ export async function runComposeCommand(ctx: vscode.ExtensionContext, svc: Analy
       task('error', vscode.l10n.t('Cancelled.'));
       return;
     }
-    panel.post({ type: 'live', state: 'end' });
+    CircuitPanel.endLive();
     showRun(svc, panel, label, r, task, false);
     if (r.trace && r.needsConfig) void offerConfig(svc.root, vscode.l10n.t('Some services were not traced ({0}). Tell CodeGraph about them in {1}.', r.notes[0] ?? '', CONFIG_FILE));
   } catch (e) {

@@ -24,12 +24,41 @@ export interface LiveUpdate {
   threads: LiveThread[];
   /** Each thread's call stack, outermost first, as graph entity ids. */
   stacks: { th: number; fns: string[] }[];
-  /** Calls since the previous update: caller entity ('' = a thread's first call), callee entity, count. */
-  edges: [string, string, number][];
-  /** Calls since the previous update, per entity. */
-  hot: [string, number][];
+  /** Calls since the previous update: caller entity ('' = a thread's first call), callee entity, count, and the
+   *  process when the run has several. */
+  edges: [string, string, number, string?][];
+  /** Calls since the previous update, per entity (and process, when the run has several). */
+  hot: [string, number, string?][];
   /** Calls so far, all processes. */
   calls: number;
+  /** One entry per process (container) when the run has several, in the order they showed up. */
+  procs?: LiveProc[];
+}
+
+export interface LiveProc {
+  name: string;
+  pid?: number;
+  /** Calls so far, and since the previous update. */
+  calls: number;
+  recent: number;
+  /** Threads running now. */
+  threads: number;
+  /** Its trace has ended (the program exited). */
+  ended?: boolean;
+}
+
+/** One process's part of an update, for a view of that container. */
+export function liveForProc(u: LiveUpdate, proc: string): LiveUpdate {
+  const mine = new Set(u.threads.filter((t) => t.proc === proc).map((t) => t.id));
+  const p = u.procs?.find((x) => x.name === proc);
+  return {
+    elapsedMs: u.elapsedMs,
+    threads: u.threads.filter((t) => mine.has(t.id)).map((t) => ({ id: t.id, name: t.name })),
+    stacks: u.stacks.filter((s) => mine.has(s.th)),
+    edges: u.edges.filter((e) => e[3] === proc).map(([a, b, n]) => [a, b, n] as [string, string, number]),
+    hot: u.hot.filter((h) => h[2] === proc).map(([e, n]) => [e, n] as [string, number]),
+    calls: p?.calls ?? 0,
+  };
 }
 
 export interface LiveSource {
@@ -188,6 +217,7 @@ export class LiveTail {
     const stacks: LiveUpdate['stacks'] = [];
     const hot = new Map<string, number>();
     const edges = new Map<string, number>();
+    const procs = new Map<string, LiveProc>();
     let calls = 0;
     const perProc = new Map<string, number>();
     for (const st of this.files.values()) if (st.src.proc !== undefined) perProc.set(st.src.proc, (perProc.get(st.src.proc) ?? 0) + 1);
@@ -200,6 +230,13 @@ export class LiveTail {
         st.src.proc !== undefined && (perProc.get(st.src.proc) ?? 0) > 1 ? `${st.src.proc}/${String(st.header?.pid ?? '?')}` : st.src.proc;
       const gone = st.ended === 'shown';
       if (st.ended === 'now') st.ended = 'shown';
+      const pr = proc === undefined ? undefined : (procs.get(proc) ?? procs.set(proc, { name: proc, calls: 0, recent: 0, threads: 0 }).get(proc)!);
+      if (pr) {
+        if (typeof st.header?.pid === 'number') pr.pid = st.header.pid;
+        if (st.ended) pr.ended = true;
+        if (!gone) pr.threads += live.th.length;
+      }
+      const tag = proc === undefined ? '' : '\u0001' + proc;
       for (const [id, name, stack] of gone ? [] : live.th) {
         const key = `${st.src.file}#${id}`;
         let g = this.ids.get(key);
@@ -214,8 +251,12 @@ export class LiveTail {
         calls += n;
         const d = n - (st.prevCalls.get(f) ?? 0);
         st.prevCalls.set(f, n);
+        if (pr) {
+          pr.calls += n;
+          if (d > 0) pr.recent += d;
+        }
         const e = d > 0 ? ent(f) : '';
-        if (e) hot.set(e, (hot.get(e) ?? 0) + d);
+        if (e) hot.set(e + tag, (hot.get(e + tag) ?? 0) + d);
       }
       for (const [a, b, n] of live.edges) {
         const k = `${a},${b}`;
@@ -223,19 +264,27 @@ export class LiveTail {
         st.prevEdges.set(k, n);
         const eb = d > 0 ? ent(b) : '';
         if (!eb) continue;
-        const key = `${a >= 0 ? ent(a) : ''}\u0001${eb}`;
+        const key = `${a >= 0 ? ent(a) : ''}\u0001${eb}${tag}`;
         edges.set(key, (edges.get(key) ?? 0) + d);
       }
     }
     const top = <T>(m: Map<string, number>, n: number, f: (k: string, v: number) => T) =>
       [...m].sort((x, y) => y[1] - x[1]).slice(0, n).map(([k, v]) => f(k, v));
-    return {
+    const out: LiveUpdate = {
       elapsedMs: Date.now() - this.start,
       threads,
       stacks,
-      edges: top(edges, 80, (k, v) => [...(k.split('\u0001') as [string, string]), v] as [string, string, number]),
-      hot: top(hot, 60, (k, v) => [k, v] as [string, number]),
+      edges: top(edges, 80, (k, v) => {
+        const [a, b, p] = k.split('\u0001');
+        return (p === undefined ? [a, b, v] : [a, b, v, p]) as LiveUpdate['edges'][number];
+      }),
+      hot: top(hot, 60, (k, v) => {
+        const [e, p] = k.split('\u0001');
+        return (p === undefined ? [e, v] : [e, v, p]) as LiveUpdate['hot'][number];
+      }),
       calls,
     };
+    if (procs.size) out.procs = [...procs.values()];
+    return out;
   }
 }

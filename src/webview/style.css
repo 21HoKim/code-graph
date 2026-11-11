@@ -495,6 +495,51 @@ body.vscode-high-contrast-light .tl-head select { color-scheme: light; }
 .tl-threads { display: flex; gap: 4px; flex-wrap: wrap; overflow: hidden; max-height: 22px; }
 .tl-body { position: relative; overflow-y: auto; overflow-x: hidden; max-height: 34vh; min-height: 48px; }
 .tl-body canvas { position: absolute; left: 0; top: 0; }
+/* live swimlanes under the live bar's head */
+.live-lanes { position: relative; }
+.live-lanes .tl-body canvas { cursor: grab; }
+.live-bar .ll-now { padding: 1px 7px; }
+.live-bar .chip.th { cursor: pointer; font: inherit; }
+
+/* container cards on the right of the circuit (live and replay) */
+.procbar {
+  position: absolute; top: 10px; right: 10px; z-index: 3; width: 196px; max-height: calc(100% - 20px);
+  display: flex; flex-direction: column; font-size: 11px;
+  background: color-mix(in srgb, var(--cc-panel) 92%, transparent); border: 1px solid var(--cc-border); border-radius: 8px;
+}
+.procbar .pb-head {
+  display: flex; align-items: center; gap: 4px; padding: 5px 10px; border: 0; background: none; cursor: pointer;
+  color: var(--cc-muted); font: inherit; font-weight: 600; text-align: left;
+}
+.procbar .pb-head:hover { color: var(--cc-fg); }
+.procbar.folded .lg-caret { transform: rotate(-90deg); }
+.procbar.folded .pb-list { display: none; }
+.procbar .pb-list { overflow-y: auto; padding: 0 6px 6px; display: flex; flex-direction: column; gap: 5px; }
+.pb-card {
+  border: 1px solid var(--cc-border); border-radius: 6px; padding: 5px 7px; cursor: pointer; outline: none;
+  background: var(--cc-bg); transition: opacity 160ms ease, border-color 160ms ease;
+}
+.pb-card:hover, .pb-card:focus-visible { border-color: var(--vscode-focusBorder, var(--cc-call)); }
+.pb-card.on { border-color: var(--vscode-focusBorder, var(--cc-call)); box-shadow: inset 0 0 0 1px var(--vscode-focusBorder, var(--cc-call)); }
+.pb-card.dim { opacity: 0.45; }
+.pb-top { display: flex; align-items: center; gap: 6px; }
+.pb-name { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.pb-dot { width: 8px; height: 8px; border-radius: 50%; background: var(--cc-muted); flex: none; }
+.pb-card[data-state='run'] .pb-dot { background: #3fb950; box-shadow: 0 0 6px #3fb950; }
+.pb-card[data-state='ok'] .pb-dot { background: #3fb950; }
+.pb-card[data-state='bad'] .pb-dot { background: var(--cc-broken); }
+.pb-card[data-state='stop'] .pb-dot { background: var(--cc-affected); }
+.pb-open { border: 0; background: none; color: var(--cc-muted); cursor: pointer; padding: 0 2px; font: inherit; }
+.pb-open:hover { color: var(--cc-fg); }
+.pb-status { color: var(--cc-muted); }
+.pb-card[data-state='bad'] .pb-status { color: var(--cc-broken); }
+.pb-nums, .pb-pid { color: var(--cc-muted); font-size: 10.5px; }
+.pb-spark { display: block; width: 100%; height: 16px; margin: 3px 0 2px; }
+.pb-spark .area { fill: color-mix(in srgb, var(--cc-call) 22%, transparent); }
+.pb-spark .line { fill: none; stroke: var(--cc-call); stroke-width: 1.2; vector-effect: non-scaling-stroke; }
+.pb-threads { display: flex; flex-wrap: wrap; gap: 3px; align-items: center; }
+.pb-threads i { width: 7px; height: 7px; border-radius: 2px; display: inline-block; }
+@media (prefers-reduced-motion: reduce) { .pb-card { transition: none; } }
 /* horizontal scrollbar under the lanes, in the editor's scrollbar colours; keeps its height when hidden */
 .tl-hbar { position: relative; height: 10px; margin: 0 8px 2px 0; cursor: default; }
 .tl-hbar.off { visibility: hidden; }
@@ -523,6 +568,7 @@ body.vscode-high-contrast-light .tl-head select { color-scheme: light; }
   .toolbar { position: relative; }
   .search input { width: 130px; }
   .results { left: 8px; right: 8px; width: auto; top: 100%; }
+  .procbar { width: 150px; }
   .legend { display: none; }
   .status .hint { display: none; }
   .tl-threads { display: none; }
@@ -540,3 +586,6 @@ body.vscode-high-contrast-light .tl-head select { color-scheme: light; }
 .mu-site { margin: 4px 0; }
 .flag.mu-r { color: var(--cc-call); border-color: var(--cc-call); }
 .flag.mu-w { color: var(--cc-ret); border-color: var(--cc-ret); }
+.procbar .lg-caret { display: inline-block; transition: transform 160ms ease; }
+/* the demo page has its sample picker in that corner */
+body:has(.demo-pick) .procbar { top: 48px; max-height: calc(100% - 58px); }
