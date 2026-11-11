@@ -105,6 +105,8 @@ interface UIState {
   selected: string | null;
   /** Show the problems overlay (red / orange / grey). */
   health: boolean;
+  /** The legend is folded to its title. */
+  legendFolded?: boolean;
 }
 
 const DEFAULT_STATE: UIState = {
@@ -121,6 +123,9 @@ const DEFAULT_STATE: UIState = {
   selected: null,
   health: true,
 };
+
+/** Threads listed in the legend; the rest are counted ("+3 more"). */
+const LEGEND_THREADS = 8;
 
 const KIND_ICON: Record<RelationKind, string> = { call: '→', spawn: '⚡', instantiate: '✚', inherit: '△', include: '#', import: '⇣' };
 
@@ -924,7 +929,10 @@ class App {
   private buildLegend(): void {
     const item = (k: string, label: string, dashed = false) =>
       `<div><span class="sw" style="background:${dashed ? `repeating-linear-gradient(90deg,var(--cc-${k}) 0 5px,transparent 5px 8px)` : `var(--cc-${k})`}"></span>${esc(label)}</div>`;
-    this.legend.innerHTML =
+    const threads = this.trace?.tr.threads ?? [];
+    const more = threads.length - LEGEND_THREADS;
+    const folded = !!this.state.legendFolded;
+    const body =
       item('call', `${KIND_ICON.call} ${t('call')}`) +
       item('ret', t('returnFlow')) +
       item('spawn', `${KIND_ICON.spawn} ${t('spawn')}`, true) +
@@ -932,16 +940,27 @@ class App {
       item('inherit', `${KIND_ICON.inherit} ${t('inherit')}`) +
       item('include', `${t('include')} / ${t('import')}`, true) +
       (this.trace
-        ? this.trace.tr.threads
-            .slice(0, 8)
+        ? threads
+            .slice(0, LEGEND_THREADS)
             .map((th) => `<div class="lg-x"><span class="sw" style="background:${threadColor(th.id)}"></span>${esc(th.name)}</div>`)
-            .join('') + `<div class="lg-x"><span class="sw" style="background:var(--cc-muted);opacity:.35"></span>${esc(t('coldCode'))}</div>`
+            .join('') +
+          (more > 0 ? `<div class="lg-x lg-more" title="${esc(threads.slice(LEGEND_THREADS).map((th) => th.name).join(', '))}">${esc(t('legendMore', { n: more }))}</div>` : '') +
+          `<div class="lg-x"><span class="sw" style="background:var(--cc-muted);opacity:.35"></span>${esc(t('coldCode'))}</div>`
         : '') +
       (this.overlay
         ? `<div class="lg-x"><span class="sw-b bad"></span>✕ ${esc(t('legendBroken'))}</div>` +
           `<div class="lg-x"><span class="sw-b warn"></span>⚠ ${esc(t('legendAffected'))}</div>` +
           `<div class="lg-x"><span class="sw-b off"></span>○ ${esc(t('legendUnpowered'))}</div>`
         : '');
+    this.legend.classList.toggle('folded', folded);
+    this.legend.innerHTML =
+      `<button class="lg-head" aria-expanded="${!folded}" title="${esc(t(folded ? 'legendUnfold' : 'legendFold'))}"><span class="lg-caret">▾</span>${esc(t('legend'))}</button>` +
+      `<div class="lg-body"><div class="lg-grid">${body}</div></div>`;
+    this.legend.querySelector<HTMLElement>('.lg-head')!.onclick = () => {
+      this.state.legendFolded = !this.state.legendFolded;
+      this.save();
+      this.buildLegend();
+    };
   }
 
   // -------------------------------------------------------------------------

@@ -7,6 +7,10 @@ into the version's section and its [release notes](https://github.com/21HoKim/co
 
 ## Unreleased
 
+### Added
+- The legend folds to its title (click *Legend*); it stays folded. With more than eight threads it says how many
+  more there are.
+
 ### Changed
 - Timeline: the wheel scrolls the swimlanes up and down, Ctrl (⌘) + wheel or a trackpad pinch zooms around the
   pointer, and Shift + wheel now moves the other way round: down = later (right), up = earlier (left).

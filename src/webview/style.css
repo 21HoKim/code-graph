@@ -354,14 +354,27 @@ h3 a.bad, h3 .nocase { text-transform: none; letter-spacing: 0; font-size: 12px;
   background: color-mix(in srgb, var(--cc-panel) 92%, transparent);
   border: 1px solid var(--cc-border);
   border-radius: 8px;
-  padding: 6px 10px;
+  padding: 4px 10px 6px;
   font-size: 11px;
-  display: grid;
-  grid-template-columns: auto auto;
-  gap: 3px 14px;
   z-index: 3;
 }
-.legend div { display: flex; align-items: center; gap: 6px; white-space: nowrap; }
+.legend .lg-head {
+  display: flex; align-items: center; gap: 4px; width: 100%; padding: 1px 0; border: 0; background: none;
+  color: var(--cc-muted); font: inherit; font-weight: 600; cursor: pointer; text-align: left;
+}
+.legend .lg-head:hover { color: var(--cc-fg); }
+.legend .lg-caret { display: inline-block; transition: transform 160ms ease; }
+.legend.folded { padding-bottom: 4px; }
+.legend.folded .lg-caret { transform: rotate(-90deg); }
+/* folding animates the height: a one-row grid going from 1fr to 0fr */
+.legend .lg-body { display: grid; grid-template-rows: 1fr; overflow: hidden; transition: grid-template-rows 180ms ease; }
+.legend.folded .lg-body { grid-template-rows: 0fr; }
+.legend .lg-grid { overflow: hidden; min-height: 0; display: grid; grid-template-columns: auto auto; gap: 3px 14px; padding-top: 3px; }
+.legend .lg-grid div { display: flex; align-items: center; gap: 6px; white-space: nowrap; }
+.legend .lg-more { color: var(--cc-muted); cursor: default; }
+@media (prefers-reduced-motion: reduce) {
+  .legend .lg-body, .legend .lg-caret { transition: none; }
+}
 .legend .sw-b { width: 14px; height: 9px; border-radius: 3px; border: 1.6px solid; box-sizing: border-box; }
 .legend .sw-b.bad { border-color: var(--cc-broken); background: color-mix(in srgb, var(--cc-broken) 25%, transparent); }
 .legend .sw-b.warn { border-color: var(--cc-affected); border-style: dashed; }
