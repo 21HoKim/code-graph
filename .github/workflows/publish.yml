@@ -1,10 +1,12 @@
 name: Publish
 
-# Every push to main that changes the extension is published to the VS Code Marketplace as the next
+# Every push to main that changes the extension is published to the VS Code Marketplace (and Open VSX) as the next
 # patch version (scripts/release-version.mjs picks it) and attached to a GitHub release. Its notes are the
 # "Unreleased" sections of CHANGELOG.md / CHANGELOG.ko.md (scripts/release-notes.mjs), which are then
 # committed back under the version's number.
 # Sign-in uses Marketplace Trusted Publishing (GitHub OIDC), so no token is stored in the repository.
+# Open VSX (Cursor, VSCodium, Windsurf, Theia …) is on once the repository variable OPEN_VSX is "true"; it signs in
+# with the OVSX_PAT secret if there is one, otherwise with Open VSX trusted publishing (GitHub OIDC).
 # Docs-only pushes don't publish; their README changes ship with the next release (or run this by hand).
 on:
   push:
@@ -87,3 +89,13 @@ jobs:
           git commit -m "Changelog: v$VERSION [skip ci]"
           git pull --rebase origin main
           git push origin HEAD:main
+
+      # last, so a failure here leaves the Marketplace release, the GitHub release and the changelog in place
+      - name: Publish to Open VSX
+        if: vars.OPEN_VSX == 'true'
+        env:
+          VSIX: ${{ steps.release.outputs.vsix }}
+          OVSX_PAT: ${{ secrets.OVSX_PAT }}
+        run: |
+          if [ -z "$OVSX_PAT" ]; then unset OVSX_PAT; fi
+          npx --yes ovsx@latest publish "$VSIX"

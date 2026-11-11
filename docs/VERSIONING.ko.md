@@ -32,6 +32,8 @@ MAJOR가 **0**인 동안은 CodeGraph가 아직 자라는 중이라, MINOR 버�
    아니면 가장 최근 릴리스의 다음 PATCH예요.
 3. 확장을 패키징해서 VS Code 마켓플레이스에 올리고, `vX.Y.Z` GitHub 릴리스에 붙여요. 릴리스에는 이전 릴리스 이후의
    변경 전체로 가는 링크가 들어가요.
+4. 같은 패키지를 [Open VSX](https://open-vsx.org/extension/21HoKim/code-graph-vscode)에도 올려요. Cursor, VSCodium,
+   Windsurf, Theia는 여기서 확장을 받아요(저장소 변수 `OPEN_VSX`가 `true`일 때).
 
 새 MINOR나 MAJOR 버전은 `package.json`에 그 버전을 적고(`npm version minor --no-git-tag-version`) 올리면 나가요. 그다음
 변경까지는 릴리스할 때마다 PATCH만 올라가요. 0.5.0 다음은 0.5.1, 0.5.2, … 그래서 마켓플레이스에는 0.5.3이 있어도

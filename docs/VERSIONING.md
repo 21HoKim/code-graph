@@ -32,6 +32,8 @@ Every push to `main` that changes the extension (`src/`, `runtime/`, `media/`, `
    release so far, otherwise the next PATCH after the newest release.
 3. The extension is packaged, published to the VS Code Marketplace, and attached to a GitHub release `vX.Y.Z`
    that links to every change since the previous release.
+4. The same package is published to [Open VSX](https://open-vsx.org/extension/21HoKim/code-graph-vscode), where
+   Cursor, VSCodium, Windsurf and Theia get their extensions (once the repository variable `OPEN_VSX` is `true`).
 
 A new MINOR or MAJOR version is released by setting it in `package.json` (`npm version minor --no-git-tag-version`)
 and pushing. Until the next such change, every release is the next PATCH: after 0.5.0 come 0.5.1, 0.5.2, … The
