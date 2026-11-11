@@ -63,6 +63,10 @@ the containers; one run covers all of them, for as long as you let it run.
 
 ![Both containers followed live, then Stop and the replay of what they did](docs/images/live.gif)
 
+On the right, a card per container shows whether it runs, its calls per second and its activity; click one to see
+only that container's code and threads, live or in the replay. Below the circuit, swimlanes of every thread's stack
+scroll along with the run (drag back to look at an earlier moment), and a click on a thread follows only that thread.
+
 **⧉ A view per container** lets you pick containers and opens a circuit for each, side by side. They play together,
 and each shows only what ran in its own container.
 
