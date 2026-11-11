@@ -17,6 +17,8 @@
 - **Marketplace**: search for **CodeGraph** in the *Extensions* view, or run
   `code --install-extension 21HoKim.code-graph-vscode`
   ([Marketplace page](https://marketplace.visualstudio.com/items?itemName=21HoKim.code-graph-vscode)).
+- **Cursor, VSCodium, Windsurf, Theia**: search for **CodeGraph** in their *Extensions* view; they install it from
+  [Open VSX](https://open-vsx.org/extension/21HoKim/code-graph-vscode).
 - **VSIX**: every [release](https://github.com/21HoKim/code-graph/releases) has its `.vsix` attached. In VS Code
   open the *Extensions* view, then `…` → *Install from VSIX…*
 - **From source**:

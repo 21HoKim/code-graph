@@ -17,6 +17,8 @@
 - **마켓플레이스**: *확장* 뷰에서 **CodeGraph**를 검색하거나
   `code --install-extension 21HoKim.code-graph-vscode`를 실행하세요
   ([마켓플레이스 페이지](https://marketplace.visualstudio.com/items?itemName=21HoKim.code-graph-vscode)).
+- **Cursor, VSCodium, Windsurf, Theia**: *확장* 뷰에서 **CodeGraph**를 검색하세요.
+  [Open VSX](https://open-vsx.org/extension/21HoKim/code-graph-vscode)에서 설치돼요.
 - **VSIX**: [릴리스](https://github.com/21HoKim/code-graph/releases)마다 `.vsix`가 붙어 있어요. VS Code의 *확장*
   뷰에서 `…` → *VSIX에서 설치…*
 - **소스에서**:
