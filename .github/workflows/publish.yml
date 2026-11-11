@@ -6,7 +6,7 @@ name: Publish
 # committed back under the version's number.
 # Sign-in uses Marketplace Trusted Publishing (GitHub OIDC), so no token is stored in the repository.
 # Open VSX (Cursor, VSCodium, Windsurf, Theia …) is on once the repository variable OPEN_VSX is "true"; it signs in
-# with the OVSX_PAT secret if there is one, otherwise with Open VSX trusted publishing (GitHub OIDC).
+# with Open VSX Trusted Publishing (GitHub OIDC) as well, registered for this repository and workflow file.
 # Docs-only pushes don't publish; their README changes ship with the next release (or run this by hand).
 on:
   push:
@@ -95,7 +95,4 @@ jobs:
         if: vars.OPEN_VSX == 'true'
         env:
           VSIX: ${{ steps.release.outputs.vsix }}
-          OVSX_PAT: ${{ secrets.OVSX_PAT }}
-        run: |
-          if [ -z "$OVSX_PAT" ]; then unset OVSX_PAT; fi
-          npx --yes ovsx@latest publish "$VSIX"
+        run: npx --yes ovsx@latest publish "$VSIX" --trusted-publishing
