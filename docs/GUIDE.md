@@ -14,13 +14,9 @@
 
 ## Install
 
-- **Marketplace**: search for **CodeGraph** in the *Extensions* view, or run
-  `code --install-extension 21HoKim.code-graph-vscode`
-  ([Marketplace page](https://marketplace.visualstudio.com/items?itemName=21HoKim.code-graph-vscode)).
-- **Cursor, VSCodium, Windsurf, Theia**: search for **CodeGraph** in their *Extensions* view; they install it from
-  [Open VSX](https://open-vsx.org/extension/21HoKim/code-graph-vscode).
-- **VSIX**: every [release](https://github.com/21HoKim/code-graph/releases) has its `.vsix` attached. In VS Code
-  open the *Extensions* view, then `…` → *Install from VSIX…*
+- **Marketplace**: **CodeGraph** in the *Extensions* view, or `code --install-extension 21HoKim.code-graph-vscode` ([Marketplace page](https://marketplace.visualstudio.com/items?itemName=21HoKim.code-graph-vscode))
+- **Cursor, VSCodium, Windsurf, Theia**: **CodeGraph** in their *Extensions* view, installed from [Open VSX](https://open-vsx.org/extension/21HoKim/code-graph-vscode)
+- **VSIX**: a `.vsix` on every [release](https://github.com/21HoKim/code-graph/releases); VS Code *Extensions* view → `…` → *Install from VSIX…*
 - **From source**:
 
   ```bash
@@ -31,42 +27,41 @@
   npx @vscode/vsce package --no-dependencies   # -> code-graph-vscode-<version>.vsix
   ```
 
-  To try a development build without installing it: `code --extensionDevelopmentPath="$PWD" examples/cpp/router`.
-
-**Something to try it on**: [examples/](../examples/README.md) has, for C, C++ and Python, one small folder per
-feature (calls, threads, classes, returns, trace, failures, live, problems), each with a checklist of what to look
-for, and a few realistic programs, including two containers to run with Docker Compose.
-
-The compile check and Run & Trace execute your compiler and your program, so they are off in untrusted workspaces.
-They need `gcc` or `clang` (Linux, macOS; MinGW on Windows is untested) and/or Python 3.8+, and Docker with
-Compose v2 for containers.
+  - Development build without installing: `code --extensionDevelopmentPath="$PWD" examples/cpp/router`
+- **Something to try it on**: [examples/](../examples/README.md)
+  - Per-feature folders for C, C++ and Python (calls, threads, classes, returns, trace, failures, live, problems), each with a checklist
+  - A few realistic programs, including two containers for Docker Compose
+- **Requirements**
+  - Untrusted workspaces: compile check and Run & Trace off (they run your compiler and your program)
+  - Tools: `gcc` or `clang` (Linux, macOS; MinGW on Windows untested), Python 3.8+, Docker with Compose v2 for containers
 
 ## The circuit view
 
-- **C, C++ and Python**, parsed with tree-sitter (WebAssembly, so no native dependencies).
-- **Levels that fit the language**: Folder → File → Namespace → Class → Function for C++, File → Function for C,
-  Package → Module → Class → Function for Python. Wires are lifted to the visible blocks and merged; double-click
-  a block to open it in place.
-- **Two groupings** for C++: *Files* (physical) and *Symbols* (namespaces → classes → methods across files).
-- **A header holds its source** (Files grouping, C/C++): `router.cpp` sits inside `router.h`, the header it
-  implements. What the header declares stays at the header level — that is what callers see and where their wires
-  arrive — and what only the source has (static helpers, an anonymous namespace) sits inside the source block. A
-  source with nothing of its own is not drawn. Turn off with `codeGraph.headerWrapsSource`.
-- **Block badges**: `↻N` counts calls that start and end inside the block, so they draw no wire out of it — click
-  it to list them with their code. `+N` is how many items a closed block holds — click it to open the block.
-- **Details panel**: a function shows every parameter and its return type in full, each `return` statement, and the
-  whole statement of each call in and out (in your colour theme; click to open). A class shows its members, base
-  and derived classes, where its objects are created, and where they live: members of other classes, parameters,
-  return values. Under *Where members are read and written*, each member says how many functions read and write it
-  (`cfg.link.peer.port`, `p->len = 0`, `self.port`, a bare `port_` in a method, through member types and base
-  classes); open one to see those lines and light the functions up on the circuit, blue for reads, orange for writes.
-- **Current**: charges travel from caller to callee (arguments) and back in amber (return values). Click a block
-  and its wires show what travels on them, e.g. `(pkt, 100) ⟲ bool`.
-- **Threads, statically**: `std::thread`, `std::async`, `std::jthread`, `pthread_create`,
-  `threading.Thread(target=…)`, `executor.submit`, `asyncio.create_task` and more are drawn as orange ⚡ wires.
-- **Every link has a confidence**: *exact*, *likely* (type inference) or *guess* (name only, dashed).
-- **Circuit** and **network** layouts, jump to source, follow the cursor, and re-analysis of only what changed
-  on save.
+- **C, C++ and Python**: parsed with tree-sitter (WebAssembly, no native dependencies)
+- **Levels per language**
+  - C++: Folder → File → Namespace → Class → Function
+  - C: File → Function
+  - Python: Package → Module → Class → Function
+  - Wires lifted to the visible blocks and merged; double-click to open a block in place
+- **Two groupings for C++**: *Files* (physical), *Symbols* (namespaces → classes → methods across files)
+- **A header holds its source** (Files grouping, C/C++): `router.cpp` inside `router.h`, the header it implements
+  - Header declarations at the header level (what callers see, where their wires arrive)
+  - Source-only items (static helpers, an anonymous namespace) inside the source block
+  - A source with nothing of its own: not drawn
+  - Off: `codeGraph.headerWrapsSource`
+- **Block badges**
+  - `↻N`: calls starting and ending inside the block (no wire out); click for the list with code
+  - `+N`: items in a closed block; click to open it
+- **Details panel**
+  - Function: every parameter and the return type in full, each `return` statement, the whole statement of each call in and out (colour theme; click to open)
+  - Class: members, base and derived classes, where objects are created, where they live (members of other classes, parameters, return values)
+  - *Where members are read and written*: number of functions reading and writing each member
+    - Through member types and base classes (`cfg.link.peer.port`, `p->len = 0`, `self.port`, a bare `port_` in a method)
+    - Opened: those lines listed, the functions lit up on the circuit (blue reads, orange writes)
+- **Current**: arguments from caller to callee, return values back in amber; click a block for what travels on its wires (`(pkt, 100) ⟲ bool`)
+- **Threads, statically**: `std::thread`, `std::async`, `std::jthread`, `pthread_create`, `threading.Thread(target=…)`, `executor.submit`, `asyncio.create_task` and more as orange ⚡ wires
+- **Link confidence**: *exact*, *likely* (type inference), *guess* (name only, dashed)
+- **Other**: circuit and network layouts, jump to source, follow the cursor, re-analysis of only what changed on save
 
 | Class level (C++) | Network layout (Python) |
 | --- | --- |
@@ -74,54 +69,52 @@ Compose v2 for containers.
 
 ## Compile check
 
-- **Your real toolchain**: every translation unit goes through `gcc`/`clang -fsyntax-only` with the flags from
-  `compile_commands.json` (or from the makefile when there is none), and every Python file through `compile()`
-  (plus pyflakes for undefined names when it is installed). It runs when the view opens; a save re-checks only
-  the units it affects.
-- **Without a compiler too**: parse errors, functions declared but never defined, `NotImplementedError` stubs
-  that are called, undefined Python names, missing relative imports and local `#include`s.
-- **Impact**: the broken block is **red**; callers that depend on it are **orange** with their distance (`⚠ +1`);
-  blocks only reachable through a break are **grey** (no current); the wire into a break is cut.
-- **Problems panel**: every error with its line, how many blocks it affects, and for an orange block the path
-  to the break.
+- **Your real toolchain**
+  - C/C++: `gcc`/`clang -fsyntax-only` per translation unit, flags from `compile_commands.json` (or the makefile)
+  - Python: `compile()` per file, plus pyflakes undefined names when installed
+  - When: on opening the view; on save, only the affected units
+- **Without a compiler**: parse errors, functions declared but never defined, called `NotImplementedError` stubs, undefined Python names, missing relative imports and local `#include`s
+- **Impact**
+  - Broken block: **red**
+  - Dependent callers: **orange** with their distance (`⚠ +1`)
+  - Blocks only reachable through a break: **grey** (no current)
+  - Wire into a break: cut
+- **Problems panel**: each error with its line, the number of affected blocks, the path to the break for an orange block
 
 ## Run & Trace
 
-- **One click**: compile check → build (C/C++) → run with a tracer → replay. Build, link and runtime failures
-  come back as red blocks.
-- **C / C++**: the sources are copied and get one probe per function body, on the line of the `{`, so compiler
-  line numbers stay the same. A small runtime records per-thread calls, argument values, `this` and pointer
-  identities; on a crash (`SIGSEGV`, an uncaught exception) it records which function every thread was in.
-- **Built the way your project builds it**: with a makefile or CMake, each program's sources, defines
-  (`-DNODE_A`), include and library flags, and the folder it runs from come from a `make -n` dry run or CMake's
-  link files, so relative paths like `../cfg` resolve. Without a build system, the units `main` needs are found
-  from the graph. A link that still misses symbols is retried with the libraries that usually provide them
-  (OpenSSL, Boost.JSON, libm, …). The link's library folders (`-L`, `-rpath`) are on the library path when the
-  program runs, so a library found there loads its own dependencies from there too (Boost.JSON → Boost.Container),
-  even where `-rpath` is written as a RUNPATH (Ubuntu, Debian). Any other build (a script, Meson, Bazel…) goes in
-  `.codegraph.json`: `run.build` and `run.program`. It runs in a traced copy of the workspace with every compiler
-  wrapped.
-- **Python**: a standard-library tracer (`sys.monitoring` on 3.12+, `sys.setprofile` before) records calls,
-  returns, exceptions, values and object identities per thread, for workspace code only.
-- **Live**: while the program runs, each thread's current call stack lights up in its colour, calls of the last
-  moment pulse along their wires, and busy functions show how many calls they just took (`+120`). The bar at the
-  bottom has the threads, the time and **■ Stop**, and swimlanes of every thread's stack scroll along with the run:
-  drag them back (or Shift + wheel) to look at an earlier moment, **⏭ Now** or a double-click follows again. Click a
-  thread (its chip or its name in the lanes) to follow only that thread in the circuit: the path it takes stays lit
-  as new calls come in; click it again for all threads. A run lasts until the program ends or you press Stop
-  (`run.timeoutSeconds` sets a limit; 0, the default, is none); Stop keeps everything recorded and the replay
-  follows. A long run is replayed with its first `run.maxEvents` calls in detail; the live view covers all of it.
-- **Replay**: thread swimlanes with play, scrub and step. Blocks on each thread's call stack glow in the thread's
-  colour, pulses run along the wires, values ride into the blocks. Blocks that never ran fade out; calls only the
-  run revealed (virtual dispatch, callbacks) get wires of their own. In the swimlanes, drag the playhead (or the
-  time axis) to scrub and drag anywhere else to move the view (or the scrollbar under the lanes once zoomed in);
-  Shift + wheel moves it too (down: later, up:
-  earlier), as does a sideways trackpad scroll. The wheel scrolls the lanes, Ctrl (⌘) + wheel or a pinch zooms
-  around the pointer, a click jumps there and a double-click shows the whole run. On the circuit, Shift + wheel
-  moves sideways the same way. The legend in the bottom left gives each thread's colour (eight of them; *+N more*
-  lists all, scrolled with the wheel); click its title to fold it out of the way.
-- **Data tracking**: objects used by several threads are listed (*the same `Router`, `PacketQueue`, `ringbuf_t*`
-  in every thread*). Click one to light up every function it passed through, in order.
+- **One click**: compile check → build (C/C++) → traced run → replay; build, link and runtime failures as red blocks
+- **C / C++**
+  - Copied sources with one probe per function body on the line of the `{` → unchanged compiler line numbers
+  - Small runtime recording per-thread calls, argument values, `this` and pointer identities
+  - On a crash (`SIGSEGV`, an uncaught exception): the function every thread was in
+- **Built the way your project builds it**
+  - Makefile or CMake: each program's sources, defines (`-DNODE_A`), include and library flags and run folder from a `make -n` dry run or CMake's link files → relative paths like `../cfg` resolved
+  - No build system: the units `main` needs, found from the graph
+  - Missing symbols at link time: retry with the libraries that usually provide them (OpenSSL, Boost.JSON, libm, …)
+  - At run time: the link's library folders (`-L`, `-rpath`) on the library path → dependencies loaded from there too (Boost.JSON → Boost.Container), also where `-rpath` is written as RUNPATH (Ubuntu, Debian)
+  - Other builds (a script, Meson, Bazel…): `run.build` and `run.program` in `.codegraph.json`, run in a traced copy with every compiler wrapped
+- **Python**: standard-library tracer (`sys.monitoring` on 3.12+, `sys.setprofile` before) recording calls, returns, exceptions, values and object identities per thread, workspace code only
+- **Live**
+  - Circuit: each thread's current call stack lit in its colour, the latest calls pulsing along their wires, recent call counts on busy functions (`+120`)
+  - Bottom bar: threads, time, **■ Stop**, swimlanes of every thread's stack scrolling with the run
+  - Drag back or Shift + wheel: an earlier moment / **⏭ Now** or double-click: follow again
+  - Thread click (chip or name in the lanes): only that thread followed in the circuit, its path kept lit; click again for all threads
+  - Duration: until the program ends or Stop (`run.timeoutSeconds` for a limit; 0, the default, none)
+  - After Stop: everything recorded kept, replay right away
+  - Long runs: first `run.maxEvents` calls in detail in the replay, the whole run in the live view
+- **Replay**
+  - Thread swimlanes with play, scrub and step
+  - Blocks on each thread's call stack in the thread's colour, pulses along the wires, values riding into blocks
+  - Blocks that never ran: faded / calls only the run revealed (virtual dispatch, callbacks): wires of their own
+  - Drag the playhead or time axis: scrub / drag elsewhere: move the view
+  - Scrollbar under the lanes when zoomed in
+  - Shift + wheel (down: later, up: earlier), sideways trackpad scroll: move sideways
+  - Wheel: scroll the lanes / Ctrl (⌘) + wheel, pinch: zoom around the pointer
+  - Click: jump there / double-click: whole run
+  - Circuit: Shift + wheel moves sideways the same way
+  - Legend (bottom left): each thread's colour (eight; *+N more* for all, scrolled with the wheel); click its title to fold it
+- **Data tracking**: objects used by several threads listed (the same `Router`, `PacketQueue`, `ringbuf_t*` in every thread); click one to light up every function it passed through, in order
 
 | Run & Trace of a C++ router | Data trail of a ring buffer shared by three threads |
 | --- | --- |
@@ -129,48 +122,43 @@ Compose v2 for containers.
 
 ## Docker Compose
 
-**Run & Trace with Docker Compose** runs the workspace's compose project with its own images, network, fixed
-addresses and healthchecks. Every traced process writes its own trace, and all of them are merged on one clock
-with each container's threads as lanes. Your workspace is never touched: everything is built from a traced copy,
-and the project is taken down at the end.
-
-**Container cards**: with several containers, the right side of the circuit has a card for each, live and in the
-replay: running or how it ended, threads, calls (and calls per second live), and a line of its activity. Click a card
-to show only that container — the circuit dims the others' code, the swimlanes keep its threads —, Ctrl (⌘) + click
-to add or remove one, click the only one shown to see all again. ⧉ on a card opens that container in a view of its
-own, also while the run is live. The choice made live carries over into the replay.
-
-**One circuit per container**: **⧉ A view per container** (toolbar, run summary, or *CodeGraph: Open a View per
-Container*) lists the containers with their threads, calls and how they ended; tick the ones you want and each opens
-in a view of its own beside the circuit, with only that container's threads, calls and data. They share one clock and
-play together; click a container in the run summary to open just that one. No need to
-attach VS Code to each container: one Compose run traces them all. Trace files written elsewhere (one per machine
-or container) can be loaded together with **Load Trace File…**; they are merged onto one timeline the same way.
+- **Run & Trace with Docker Compose**: the workspace's compose project with its own images, network, fixed addresses and healthchecks
+  - One trace per traced process, merged on one clock, each container's threads as lanes
+  - Workspace untouched: everything built from a traced copy, project taken down at the end
+- **Container cards**: one card per container on the right of the circuit, live and in the replay, when there are several
+  - Contents: running or how it ended, threads, calls (calls per second live), activity line
+  - Click: only that container (others' code dimmed, only its threads in the lanes)
+  - Ctrl (⌘) + click: add or remove / click the only one shown: all again
+  - ⧉: own view, also while live
+  - Choice carried over from the live view into the replay
+- **One circuit per container**: **⧉ A view per container** (toolbar, run summary) or *CodeGraph: Open a View per Container*
+  - Container list (threads, calls, how each ended); ticked ones opened beside the circuit, one view each
+  - Each view: only that container's threads, calls and data; one shared clock, playing together
+  - Container name in the run summary: just that one
+  - One Compose run traces them all, no VS Code attached to each container
+  - Trace files written elsewhere (one per machine or container): **Load Trace File…** with several selected → one timeline
 
 ![node-b and node-a side by side, playing together](images/per-container.png)
 
-**Which compose files**: `compose.yaml` / `docker-compose.yml` (and the `.yml` / `.yaml` variants) at the
-workspace root plus its override file, as `docker compose` reads them, or `compose.files` (and `profiles`) in
-`.codegraph.json`.
-
-**Which services are traced**: those whose container has some of the workspace's C, C++ or Python sources.
+- **Which compose files**: `compose.yaml` / `docker-compose.yml` (`.yml` / `.yaml` variants) at the workspace root plus its override file, as `docker compose` reads them
+  - Others: `compose.files` (and `profiles`) in `.codegraph.json`
+- **Which services are traced**: those whose container has some of the workspace's C, C++ or Python sources
 
 | the service… | what CodeGraph does |
 | --- | --- |
-| mounts the workspace or a folder of it (`- ./:/app`) | mounts the traced copy there instead; a build at start (`make`, CMake, a script) goes through the compiler wrappers |
-| builds its image from the workspace and its Dockerfile copies sources in (`COPY . .`, `COPY src/ /app/src/`, `RUN --mount=type=bind`) | rebuilds the image from the traced copy with the wrappers added before the first copy of each build stage, multi-stage builds included |
+| mounts the workspace or a folder of it (`- ./:/app`) | traced copy mounted there instead; a build at start (`make`, CMake, a script) through the compiler wrappers |
+| builds its image from the workspace, Dockerfile copying sources in (`COPY . .`, `COPY src/ /app/src/`, `RUN --mount=type=bind`) | image rebuilt from the traced copy, wrappers added before the first copy of each build stage (multi-stage included) |
 | has the code somewhere CodeGraph cannot tell | `compose.sourcePath` in `.codegraph.json` |
 | only runs a program built elsewhere | `compose.build`: a command run in the container before its own |
-| has none of the sources (a database, a proxy) | runs as it is |
+| has none of the sources (a database, a proxy) | run as it is |
 
-Inside a traced container, every C/C++ compiler on `PATH` is wrapped (`gcc`, `g++-12`, `clang++-17`, cross
-compilers, `CC`/`CXX` given by full path, `ccache` in front works too). So is every Python interpreter, and a
-`sitecustomize` traces the Python processes started some other way (by full path, gunicorn, multiprocessing
-children). The run is followed live, and lasts until every traced container has ended or you press **■ Stop**;
-`timeoutSeconds` sets a limit, counted from the first traced program. Image builds and builds inside the
-containers have `startTimeoutSeconds` (600 s).
-
-When a service ran without a traced program, the run summary says why and which key of `.codegraph.json` fixes it:
+- **Wrappers in a traced container**
+  - Every C/C++ compiler on `PATH` (`gcc`, `g++-12`, `clang++-17`, cross compilers, `CC`/`CXX` by full path, `ccache` in front)
+  - Every Python interpreter; Python processes started some other way (full path, gunicorn, multiprocessing children) traced by a `sitecustomize`
+- **Duration**: followed live, until every traced container has ended or **■ Stop**
+  - `timeoutSeconds`: counted from the first traced program
+  - Image builds and in-container builds: `startTimeoutSeconds` (600 s)
+- **Service without a traced program**: the run summary with the reason and the `.codegraph.json` key that fixes it
 
 | note | write |
 | --- | --- |
@@ -183,10 +171,10 @@ When a service ran without a traced program, the run summary says why and which 
 
 ## .codegraph.json
 
-Optional, at the workspace root: only what CodeGraph cannot find out by itself. A key here wins over the matching
-VS Code setting, and the command line reads it too. **CodeGraph: Create / Open .codegraph.json** writes a starter
-with every key commented out and what was detected as the examples. It is JSON with comments; the editor
-completes and explains every key.
+- Optional, at the workspace root: only what CodeGraph cannot find out by itself
+- Precedence: over the matching VS Code setting; read by the command line too
+- **CodeGraph: Create / Open .codegraph.json**: a starter with every key commented out and the detected values as examples
+- Format: JSON with comments, every key completed and explained in the editor
 
 | key | meaning |
 | --- | --- |
@@ -195,9 +183,9 @@ completes and explains every key.
 | `run.args`, `run.cwd`, `run.env` | arguments, the folder to run in (default: where the build puts it), extra environment |
 | `run.build`, `run.program` | a build CodeGraph does not read by itself and the program it makes (workspace-relative) |
 | `run.buildFlags`, `run.linkFlags` | extra compile flags (`-DDEBUG`), extra libraries (`-lssl`) |
-| `run.timeoutSeconds` | stop the program after this long (the trace so far is kept); 0 = when it ends, or Stop |
+| `run.timeoutSeconds` | program stopped after this long (the trace so far kept); 0 = when it ends, or Stop |
 | `compose.files`, `compose.profiles` | compose files in order, profiles to enable |
-| `compose.services` | which services to trace (default: every service that has workspace sources) |
+| `compose.services` | services to trace (default: every service with workspace sources) |
 | `compose.build` | per service: a command run in its container before its own command |
 | `compose.sourcePath` | per service: where the workspace is in its container |
 | `compose.env` | per service: extra environment for the traced run (e.g. `CXX`) |
@@ -220,30 +208,26 @@ completes and explains every key.
 
 | | |
 | --- | --- |
-| `CodeGraph: Open Circuit View` | analyze the workspace and open the view (the compile check runs too) |
-| `CodeGraph: Show in Circuit View` | focus the current file (explorer / editor context menu, status bar) |
+| `CodeGraph: Open Circuit View` | workspace analyzed, view opened (compile check included) |
+| `CodeGraph: Show in Circuit View` | focus on the current file (explorer / editor context menu, status bar) |
 | `CodeGraph: Verify (compile check)` | check again now (toolbar **✓ Verify**) |
 | `CodeGraph: Run & Trace` | build, run and replay (toolbar **▶ Run**) |
 | `CodeGraph: Run & Trace with Docker Compose` | the compose project with its services traced in their containers |
-| `CodeGraph: Open a View per Container` | pick containers of the current trace; one circuit each, side by side, playing together |
-| `CodeGraph: Stop Run and Show the Trace` | end the run in progress (the live bar's **■ Stop**) and replay what it recorded |
+| `CodeGraph: Open a View per Container` | containers of the current trace picked; one circuit each, side by side, playing together |
+| `CodeGraph: Stop Run and Show the Trace` | end of the run in progress (the live bar's **■ Stop**), replay of what it recorded |
 | `CodeGraph: Create / Open .codegraph.json` | project settings for unusual setups |
-| `CodeGraph: Load Trace File…` | open a trace written by the CLI or the tracers; several at once share one timeline |
-| click / double-click a block | show its wires · open it, or jump to the source |
-| hover a block / wire | its source in your colour theme: the definition's first lines · the line of the call |
+| `CodeGraph: Load Trace File…` | a trace written by the CLI or the tracers; several at once on one timeline |
+| click / double-click a block | its wires · open it, or jump to the source |
+| hover a block / wire | source in your colour theme: the definition's first lines · the line of the call |
 | `Ctrl`+click (`⌘`+click) · `F12` / `Enter` | jump to the code: a block's definition · a wire's call |
 | `1`…`5` · `/` · `F` · `Esc` | levels · search · fit · clear |
 | `Space` · `←` `→` | (with a trace) play / pause · previous / next call |
 
-Settings (`codeGraph.*`):
-
-- view: `defaultLevel`, `layout`, `flow.mode`, `flow.maxParticles`, `showGuessedLinks`, `followCursor`,
-  `exclude`, `maxFiles`, `cpp.includePaths`, `analysis.workers`
-- compile check: `verify.mode` (`onOpenAndSave` · `onOpen` · `manual`), `verify.cc`, `verify.cxx`,
-  `verify.python`, `verify.extraFlags`, `verify.useCompileCommands`, `verify.editorDiagnostics`, `verify.timeoutSeconds`
-- Run & Trace: `run.entry`, `run.args`, `run.cwd`, `run.env`, `run.buildFlags`, `run.linkFlags`, `run.useBuildSystem`,
-  `run.target`, `run.timeoutSeconds`, `run.maxEvents`, `run.captureValues`
-- Docker Compose: `run.compose.file`, `run.compose.services`, `run.compose.startTimeoutSeconds`, `run.compose.docker`
+- Settings (`codeGraph.*`)
+  - View: `defaultLevel`, `layout`, `flow.mode`, `flow.maxParticles`, `showGuessedLinks`, `followCursor`, `exclude`, `maxFiles`, `cpp.includePaths`, `analysis.workers`
+  - Compile check: `verify.mode` (`onOpenAndSave` · `onOpen` · `manual`), `verify.cc`, `verify.cxx`, `verify.python`, `verify.extraFlags`, `verify.useCompileCommands`, `verify.editorDiagnostics`, `verify.timeoutSeconds`
+  - Run & Trace: `run.entry`, `run.args`, `run.cwd`, `run.env`, `run.buildFlags`, `run.linkFlags`, `run.useBuildSystem`, `run.target`, `run.timeoutSeconds`, `run.maxEvents`, `run.captureValues`
+  - Docker Compose: `run.compose.file`, `run.compose.services`, `run.compose.startTimeoutSeconds`, `run.compose.docker`
 
 ## Command line
 
@@ -256,20 +240,20 @@ node dist/cli.js trace path/to/project --compose [FILE…] [--profile P] [--serv
 # src/main.cpp · main(): exit 0 · 6 threads · 1657 calls · 15 shared objects · 1008 ms traced
 ```
 
-`trace` reads `<project>/.codegraph.json` like the extension does; options given on the command line win.
+- `trace`: `<project>/.codegraph.json` read as in the extension; command-line options take precedence
 
 ## Limitations
 
-- **Static view**: macros are not expanded, templates are not instantiated, virtual dispatch and callbacks
-  resolve to the declared target (a trace shows the real ones).
-- **Run & Trace** reads makefiles (the default goal's `make -n`) and CMake; other builds need `run.build`.
-  Programs run without stdin. C/C++ record argument values, not return values.
-- **Docker Compose**: a makefile that calls the compiler by full path (`/usr/bin/g++`) bypasses the wrappers (use
-  `compose.build` with `make CXX=g++`); an image built from a context outside the workspace is not rebuilt.
-- Identities are addresses: Python and the C allocator may reuse an address after an object is freed, so a long
-  trail can mix two lifetimes.
-- Tracing costs time: about 1 µs per Python call in workspace code, less in C/C++. After `run.maxEvents` detailed
-  events only call counts are kept.
+- **Static view**: no macro expansion, no template instantiation; virtual dispatch and callbacks resolved to the declared target (real ones in a trace)
+- **Run & Trace**
+  - Builds read: makefiles (the default goal's `make -n`), CMake; others through `run.build`
+  - Programs run without stdin
+  - C/C++: argument values only, no return values
+- **Docker Compose**
+  - Compiler called by full path in a makefile (`/usr/bin/g++`): wrappers bypassed (`compose.build` with `make CXX=g++`)
+  - Image built from a context outside the workspace: not rebuilt
+- **Identities = addresses**: an address reused by Python or the C allocator after a free may mix two lifetimes in a long trail
+- **Tracing cost**: about 1 µs per Python call in workspace code, less in C/C++; beyond `run.maxEvents`, call counts only
 
-Contributions are welcome, see [CONTRIBUTING.md](../CONTRIBUTING.md). MIT © 김호 (21HoKim); third-party
-components in [THIRD_PARTY_NOTICES.md](../THIRD_PARTY_NOTICES.md).
+- Contributions: welcome, see [CONTRIBUTING.md](../CONTRIBUTING.md)
+- License: MIT © 김호 (21HoKim); third-party components in [THIRD_PARTY_NOTICES.md](../THIRD_PARTY_NOTICES.md)
