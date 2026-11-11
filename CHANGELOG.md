@@ -19,6 +19,7 @@ into the version's section and its [release notes](https://github.com/21HoKim/co
   `Router r(cfg);` counts as creating a `Router`.
 - Python: thread and task APIs imported under another name are found (`from threading import Thread as T`,
   `from asyncio import create_task as spawn`).
+- Run & Trace (C/C++): busy threads no longer lose trace lines when their buffer filled up in the middle of a call.
 
 ## 0.5.11
 

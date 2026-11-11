@@ -269,8 +269,8 @@ C uses `__attribute__((cleanup))` for the exit event; headers included by C file
 functions, coroutines and function-try-blocks are skipped. `cg_trace.h` is force-included (`-include`), so no
 `#include` is added. `cgt::arg` classifies a value with templates: numbers and strings by value, containers by
 size, references, pointers and `this` by address. The runtime (`cg_trace.c`) keeps a buffer and a shadow stack
-per thread, appends to the trace under one mutex, and on `SIGSEGV`/`SIGABRT`/… writes every thread's stack before
-re-raising; `cg_trace_cxx.cpp` records the type and `what()` of an uncaught exception.
+per thread, appends whole lines to the trace under one mutex (a full buffer keeps the line being written), and on
+`SIGSEGV`/`SIGABRT`/… writes every thread's stack before re-raising; `cg_trace_cxx.cpp` records the type and `what()` of an uncaught exception.
 
 **Building it like the project does** (`buildinfo.ts`): a makefile is dry-run with `make -nBwk` (every command of
 the default goal, with "Entering directory" lines); CMake gives `compile_commands.json` plus

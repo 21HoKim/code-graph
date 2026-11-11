@@ -16,6 +16,7 @@
   `using namespace`로 쓴 호출과 타입을 이름 추측 대신 정확히 찾고, `Router r(cfg);`를 `Router` 생성으로 셈해요.
 - Python: 다른 이름으로 가져온 스레드·태스크 API도 찾아요(`from threading import Thread as T`,
   `from asyncio import create_task as spawn`).
+- 실행 추적(C/C++): 바쁜 스레드의 버퍼가 호출 중간에 가득 차도 추적 줄을 잃지 않아요.
 
 ## 0.5.11
 

@@ -92,7 +92,24 @@ static void cgt_flush(cgt_ts *ts) {
   ts->len = 0;
 }
 
+/* a full buffer: write its complete lines and keep the line being written, so that lines of two threads never
+   interleave in the file (a call line stays open until its arguments are in) */
+static void cgt_flush_lines(cgt_ts *ts) {
+  size_t keep = ts->len;
+  while (keep > 0 && ts->buf[keep - 1] != '\n') keep--;
+  if (keep == 0) {
+    cgt_flush(ts); /* one line as long as the buffer: cannot happen with the current records */
+    return;
+  }
+  pthread_mutex_lock(&g_mu);
+  cgt_write_locked(ts->buf, keep);
+  pthread_mutex_unlock(&g_mu);
+  memmove(ts->buf, ts->buf + keep, ts->len - keep);
+  ts->len -= keep;
+}
+
 static void cgt_put(cgt_ts *ts, const char *s, size_t n) {
+  if (ts->len + n >= CGT_BUF) cgt_flush_lines(ts);
   if (ts->len + n >= CGT_BUF) cgt_flush(ts);
   if (n >= CGT_BUF) return;
   memcpy(ts->buf + ts->len, s, n);

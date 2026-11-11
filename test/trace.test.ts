@@ -263,8 +263,13 @@ describe('Run & Trace (C++ threads)', { skip: !native }, () => {
 
 describe('Run & Trace (C producer/consumer)', { skip: !native }, () => {
   it('sees the ring buffer shared by both threads', async () => {
-    const { r } = await trace(path.join(ROOT, 'samples', 'c-ringbuf'));
+    const workDir = tmp('run');
+    const { r } = await trace(path.join(ROOT, 'samples', 'c-ringbuf'), undefined, [], { workDir });
     const tr = r.trace!;
+    // thousands of calls fill the per-thread buffers: they go to the file in whole lines, never interleaved
+    const lines = fs.readFileSync(path.join(workDir, 'trace.jsonl'), 'utf8').split('\n').filter(Boolean);
+    assert.ok(lines.length > 2000, `${lines.length} lines`);
+    assert.deepEqual(lines.filter((l) => { try { JSON.parse(l); return false; } catch { return true; } }), []);
     assert.equal(tr.exit.code, 0);
     assert.deepEqual(tr.threads.map((t) => t.name).sort(), ['consumer', 'main', 'producer']);
     const rb = tr.objects.find((o) => o.label.includes('ringbuf'));
